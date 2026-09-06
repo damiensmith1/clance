@@ -18,6 +18,15 @@ export function createAppMenu(): Menu {
         { role: "selectAll" },
       ],
     },
+    {
+      label: "Window",
+      submenu: [
+        { role: "minimize" },
+        { role: "zoom" },
+        { type: "separator" },
+        { role: "close" },
+      ],
+    },
   ];
 
   return Menu.buildFromTemplate(template);

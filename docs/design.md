@@ -50,7 +50,7 @@ status: draft
   `vibrancy: "hud"` window material (real macOS frosted-glass blur of
   whatever's behind the popup) layered with a hairline border, large corner
   radius, and a subtle top-edge CSS highlight to suggest refraction. See
-  `src/renderer/popup.html`.
+  `src/popup/popup.html`.
 - **Message model:** each turn renders as two stacked typographic blocks —
   the prompt (dim, small) and the reply (full-opacity, primary) — appended
   to a scrolling column, so it *reads* like a transcript without looking
@@ -77,6 +77,36 @@ status: draft
   callback, not batched via `requestAnimationFrame`, because rAF is
   throttled while the window is hidden/unfocused (confirmed via
   `document.hidden`) and a response can legitimately arrive while hidden.
+
+## Main application window
+
+- There are now two windows/renderer surfaces: the popup (unchanged) and a
+  new persistent main application window (Dock-icon-launched, also
+  reachable via an "Open Dashboard" tray item). Each has its own preload
+  script (`src/preload/popup.ts`, `src/preload/mainWindow.ts`) and full
+  context isolation between them — the main window's preload currently
+  exposes no privileged API (`contextBridge.exposeInMainWorld("clanceApp",
+  {})`); future specs will add real methods (chat history, settings,
+  plugin management).
+- The main window uses Preact + htm for its UI, vendored as a single
+  self-contained file (`src/shared/vendor/preact-htm-standalone.module.js`,
+  sourced from the `htm@3.1.1` npm package's `preact/standalone` build)
+  rather than loaded from a CDN, to preserve the project's local-first
+  principle (no network access required to launch the app) and to avoid
+  needing a bundler. This is distinct from the popup, which stays vanilla
+  JS with no framework.
+- Navigation between the main window's sections (Chats, Skills & Plugins,
+  Settings — see `src/mainWindow/app.js`) uses plain Preact `useState`, not
+  a router library — reasonable at 3-5 sections, revisit only if that
+  count grows substantially or deep-linking into sub-state (e.g. a
+  specific chat) is needed later.
+- Styling uses a CSS custom-property theme token system
+  (`src/shared/theme.css`) so a future light theme is just a second token
+  set behind a `[data-theme="light"]` selector, without restructuring the
+  CSS that consumes the tokens.
+- Full details are in
+  `docs/superpowers/specs/2026-09-06-app-shell-design.md` and
+  `docs/superpowers/plans/2026-09-06-app-shell.md`.
 
 ## Open questions (resolve before building)
 

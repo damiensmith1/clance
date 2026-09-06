@@ -207,7 +207,16 @@ no PR to the core app required.
 
 ### System presence
 
-- Runs as a menu-bar (tray) app, no persistent dock window
+- Dual presence: a menu-bar (tray) icon for the quick-access popup, plus a
+  permanent Dock icon for the full main application window (Chats, Skills
+  & Plugins, Settings) — reachable via the Dock icon or the tray's "Open
+  Dashboard" item. This replaces the originally-planned tray-only, no-Dock
+  behavior.
+- Cmd+Q now quits the entire app (tray, popup, and main window together),
+  via the app menu's Quit role — previously there was no real "app" to
+  quit since it ran tray-only. Closing just the main window does not quit
+  anything; the tray and popup keep running until Cmd+Q (or Quit from the
+  tray menu) is used.
 - Launch on login (optional toggle)
 - Minimal resource footprint while idle
 - No notarization for v1 — user manually grants Accessibility + Screen
