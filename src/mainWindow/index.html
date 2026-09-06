@@ -18,6 +18,15 @@
     </style>
   </head>
   <body>
-    <div id="root">Clance — coming soon</div>
+    <div id="root"></div>
+    <script type="module">
+      import { h, html, render } from "../shared/vendor/preact-htm-standalone.module.js";
+
+      function App() {
+        return html`<div>Hello from Preact</div>`;
+      }
+
+      render(html`<${App} />`, document.getElementById("root"));
+    </script>
   </body>
 </html>
