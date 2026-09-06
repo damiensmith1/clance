@@ -3,10 +3,15 @@ import { contextBridge, ipcRenderer } from "electron";
 contextBridge.exposeInMainWorld("clance", {
   submitGoal: (goal: string) => ipcRenderer.send("submit-goal", goal),
   newConversation: () => ipcRenderer.send("new-conversation"),
+  reportHeight: (height: number) => ipcRenderer.send("resize-request", height),
   onChunk: (callback: (text: string) => void) =>
     ipcRenderer.on("response-chunk", (_event, text: string) => callback(text)),
   onDone: (callback: () => void) =>
     ipcRenderer.on("response-done", () => callback()),
+  onError: (callback: (message: string) => void) =>
+    ipcRenderer.on("response-error", (_event, message: string) => callback(message)),
+  onNote: (callback: (message: string) => void) =>
+    ipcRenderer.on("response-note", (_event, message: string) => callback(message)),
   onShown: (callback: () => void) =>
     ipcRenderer.on("popup-shown", () => callback()),
 });

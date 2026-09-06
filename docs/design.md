@@ -43,6 +43,26 @@ status: draft
   see [[Configuration and Secret Management]] for general tradeoffs on
   where that config should live (env var vs. keychain vs. flat file).
 
+## Popup UI
+
+- **Visual style:** a translucent "liquid glass" surface, not a
+  messaging-app skin — no chat bubbles, no avatars. Uses Electron's native
+  `vibrancy: "hud"` window material (real macOS frosted-glass blur of
+  whatever's behind the popup) layered with a hairline border, large corner
+  radius, and a subtle top-edge CSS highlight to suggest refraction. See
+  `src/renderer/popup.html`.
+- **Message model:** each turn renders as two stacked typographic blocks —
+  the prompt (dim, small) and the reply (full-opacity, primary) — appended
+  to a scrolling column, so it *reads* like a transcript without looking
+  like a chat widget. Full session history is shown, not just the last
+  exchange.
+- **Transcript lifetime:** history lives in the popup's renderer DOM, which
+  persists across hide/show (hotkey toggle, blur-hide) since it's the same
+  window instance — but resets if the app itself restarts, even though the
+  underlying SDK session is still resumable. Rehydrating the UI transcript
+  from the resumed session's transcript on app restart is a known v1 gap,
+  not yet built.
+
 ## Open questions (resolve before building)
 
 - [ ] Exact Claude Code CLI JSONL schema — need to inspect a real session
@@ -54,10 +74,16 @@ status: draft
       (see `src/main/paths.ts`), so all Clance sessions land under one
       stable `~/.claude/projects/<encoded ~/.clance>/` bucket regardless of
       which app was frontmost at invocation.
-- [ ] Screenshot vs. accessibility-tree read vs. both, by default —
+- [x] Screenshot vs. accessibility-tree read vs. both, by default —
       screenshots are simpler and more universal; accessibility tree is
       more precise for structured apps (forms, code editors) but harder to
-      build
+      build. **Resolved (v1):** screenshot only, of the full display nearest
+      the cursor, captured fresh on every submit (`src/main/screenCapture.ts`)
+      and sent to Claude as an image content block alongside the prompt
+      (`src/main/agent.ts`), resized to Claude's recommended max edge
+      (1568px) to control token cost. Accessibility-tree read is deferred —
+      revisit if screenshot-only proves insufficient for structured-app
+      goals (forms, code editors).
 - [ ] How does the app decide "talk back" vs. "type it out" — model-decided
       via prompt, or does the user pick a mode when typing their goal?
 - [ ] Where does the Anthropic API key/auth live — env var, onboarding

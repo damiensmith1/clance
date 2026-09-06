@@ -3,11 +3,13 @@ import { createTray } from "./tray";
 import { registerHotkey, unregisterAllHotkeys } from "./hotkey";
 import { toggleClancePopup } from "./popupWindow";
 import { askClance } from "./agent";
+import { captureActiveDisplay } from "./screenCapture";
 import { ensureSessionCwd, readLastSessionId, writeLastSessionId } from "./paths";
 
 app.dock?.hide();
 
 let currentSessionId: string | undefined;
+let warnedAboutScreenCapture = false;
 
 app.whenReady().then(() => {
   ensureSessionCwd();
@@ -23,16 +25,31 @@ app.on("will-quit", unregisterAllHotkeys);
 app.on("window-all-closed", () => {});
 
 ipcMain.on("submit-goal", async (event, goal: string) => {
-  for await (const agentEvent of askClance(goal, currentSessionId)) {
-    if (agentEvent.kind === "text") {
-      event.sender.send("response-chunk", agentEvent.text);
-    } else {
-      if (agentEvent.sessionId) {
-        currentSessionId = agentEvent.sessionId;
-        writeLastSessionId(agentEvent.sessionId);
-      }
-      event.sender.send("response-done");
+  try {
+    const screenshotBase64 = await captureActiveDisplay().catch(() => undefined);
+
+    if (!screenshotBase64 && !warnedAboutScreenCapture) {
+      warnedAboutScreenCapture = true;
+      event.sender.send(
+        "response-note",
+        "Screen Recording permission not granted — continuing without screen context."
+      );
     }
+
+    for await (const agentEvent of askClance(goal, currentSessionId, screenshotBase64)) {
+      if (agentEvent.kind === "text") {
+        event.sender.send("response-chunk", agentEvent.text);
+      } else {
+        if (agentEvent.sessionId) {
+          currentSessionId = agentEvent.sessionId;
+          writeLastSessionId(agentEvent.sessionId);
+        }
+        event.sender.send("response-done");
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    event.sender.send("response-error", message);
   }
 });
 

@@ -6,7 +6,8 @@
   "private": true,
   "scripts": {
     "build": "tsc -p tsconfig.json && mkdir -p dist/renderer && cp src/renderer/popup.html src/renderer/popup.js dist/renderer/",
-    "start": "npm run build && electron ."
+    "start": "npm run build && electron .",
+    "dev": "npm run build && npm start"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.263"
