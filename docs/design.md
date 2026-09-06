@@ -42,7 +42,7 @@ status: draft
   the same file-based-source-of-truth pattern as Claude Code itself —
   see [[Configuration and Secret Management]] for general tradeoffs on
   where that config should live (env var vs. keychain vs. flat file).
-
+ 
 ## Popup UI
 
 - **Visual style:** a translucent "liquid glass" surface, not a
@@ -56,12 +56,27 @@ status: draft
   to a scrolling column, so it *reads* like a transcript without looking
   like a chat widget. Full session history is shown, not just the last
   exchange.
-- **Transcript lifetime:** history lives in the popup's renderer DOM, which
-  persists across hide/show (hotkey toggle, blur-hide) since it's the same
-  window instance — but resets if the app itself restarts, even though the
-  underlying SDK session is still resumable. Rehydrating the UI transcript
-  from the resumed session's transcript on app restart is a known v1 gap,
-  not yet built.
+- **Conversation lifetime:** every popup open is a new conversation —
+  closing it (blur-hide or toggle) and reopening always clears the
+  transcript and starts a fresh SDK session (no `resume`), regardless of
+  how it was closed. Within one open, follow-up turns do resume the
+  in-progress session for shared context. See
+  `docs/requirements.md` §"Multi-turn conversations".
+- **Input position:** the input starts pinned above the (empty) transcript;
+  once the first turn is submitted, `#app` gets a `has-messages` class that
+  flips both elements' flexbox `order` so the input moves below the
+  transcript (chat-input-bar style) for the rest of that conversation. Reset
+  back to the top position on every reopen along with the transcript.
+- **Dynamic sizing:** the window isn't a fixed size — `#app` uses
+  `height: auto` with a `max-height` (480px) instead of filling a fixed
+  window, so it starts only as tall as the input row and grows with content.
+  A `ResizeObserver` on `#app` reports its real rendered height to the main
+  process (`resize-request` IPC), which calls `win.setContentSize(w, h,
+  true)` (animated) clamped to a small floor and the max — see
+  `src/main/popupWindow.ts`. The report happens directly in the observer
+  callback, not batched via `requestAnimationFrame`, because rAF is
+  throttled while the window is hidden/unfocused (confirmed via
+  `document.hidden`) and a response can legitimately arrive while hidden.
 
 ## Open questions (resolve before building)
 
@@ -88,10 +103,12 @@ status: draft
       via prompt, or does the user pick a mode when typing their goal?
 - [ ] Where does the Anthropic API key/auth live — env var, onboarding
       flow, macOS Keychain?
-- [ ] Does the popup stay open for multi-turn follow-up in the same
+- [x] Does the popup stay open for multi-turn follow-up in the same
       invocation, or is each hotkey-press a fresh single-turn request?
-      (Current default: hotkey continues last session by default — confirm
-      this is the right default vs. always-fresh)
+      **Resolved:** multi-turn within one open (follow-ups resume the
+      in-progress session), but every hotkey-open is a new conversation —
+      reverses the earlier "continues last session by default" plan (see
+      `docs/requirements.md` §"Multi-turn conversations").
 - [ ] Which local speech-to-text engine — Whisper.cpp is the obvious
       default (fast, local, well-supported on Apple Silicon) — confirm no
       better native macOS option (e.g. on-device Speech framework) worth

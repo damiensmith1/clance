@@ -3,6 +3,7 @@ const goalInput = document.getElementById("goal");
 const transcriptEl = document.getElementById("transcript");
 
 let currentReplyEl = null;
+let currentRawText = "";
 
 // Window height tracks #app's natural content height (CSS caps it at the
 // same max the window used to be fixed at) so the popup starts as small as
@@ -29,6 +30,8 @@ function scrollToBottom() {
 }
 
 function appendTurn(goal) {
+  appEl.classList.add("has-messages");
+
   const turn = document.createElement("div");
   turn.className = "turn";
 
@@ -57,20 +60,27 @@ function appendNote(message) {
   scrollToBottom();
 }
 
-// Reopening (including after auto-hiding on blur mid-request) should never
-// wipe the transcript — only clear the input for the next turn.
+// Every open is a fresh conversation: clear the transcript, reset layout
+// back to input-only, and start a new SDK session.
 window.clance.onShown(() => {
+  transcriptEl.replaceChildren();
+  appEl.classList.remove("has-messages");
+  currentReplyEl = null;
+  currentRawText = "";
   goalInput.value = "";
+  goalInput.disabled = false;
+  window.clance.newConversation();
   goalInput.focus();
 });
 
 window.clance.onChunk((text) => {
   if (!currentReplyEl) return;
   if (currentReplyEl.dataset.pending) {
-    currentReplyEl.textContent = "";
     delete currentReplyEl.dataset.pending;
+    currentRawText = "";
   }
-  currentReplyEl.textContent += text;
+  currentRawText += text;
+  currentReplyEl.innerHTML = renderMarkdown(currentRawText);
   scrollToBottom();
 });
 
@@ -100,6 +110,7 @@ goalInput.addEventListener("keydown", (event) => {
     goalInput.value = "";
     goalInput.disabled = true;
     currentReplyEl = appendTurn(goal);
+    currentRawText = "";
     window.clance.submitGoal(goal);
   }
 });

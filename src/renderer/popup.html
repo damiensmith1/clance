@@ -41,6 +41,7 @@
 
       #goal {
         position: relative;
+        order: 1;
         width: 100%;
         box-sizing: border-box;
         background: transparent;
@@ -59,8 +60,17 @@
         opacity: 0.5;
       }
 
+      /* Once a conversation starts, the input moves below the transcript. */
+      #app.has-messages #goal {
+        border-bottom: none;
+        border-top: 1px solid rgba(255, 255, 255, 0.14);
+        padding: 12px 2px 4px;
+        order: 2;
+      }
+
       #transcript {
         position: relative;
+        order: 2;
         flex: 1 1 auto;
         min-height: 0;
         margin-top: 14px;
@@ -72,6 +82,11 @@
       }
       #transcript:empty {
         margin-top: 0;
+      }
+      #app.has-messages #transcript {
+        order: 1;
+        margin-top: 0;
+        margin-bottom: 14px;
       }
       #transcript::-webkit-scrollbar {
         width: 5px;
@@ -99,7 +114,57 @@
         font-size: 13.5px;
         line-height: 1.5;
         color: rgba(255, 255, 255, 0.92);
-        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .turn-reply p {
+        margin: 0 0 8px;
+      }
+      .turn-reply p:last-child {
+        margin-bottom: 0;
+      }
+      .turn-reply h1,
+      .turn-reply h2,
+      .turn-reply h3 {
+        margin: 12px 0 6px;
+        font-weight: 600;
+        color: rgba(255, 255, 255, 0.97);
+      }
+      .turn-reply h1 { font-size: 15px; }
+      .turn-reply h2 { font-size: 14px; }
+      .turn-reply h3 { font-size: 13.5px; }
+      .turn-reply ul,
+      .turn-reply ol {
+        margin: 0 0 8px;
+        padding-left: 20px;
+      }
+      .turn-reply li {
+        margin-bottom: 2px;
+      }
+      .turn-reply strong {
+        font-weight: 600;
+        color: #fff;
+      }
+      .turn-reply code {
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 12px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+      .turn-reply pre {
+        background: rgba(0, 0, 0, 0.25);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin: 8px 0;
+        overflow-x: auto;
+      }
+      .turn-reply pre code {
+        background: none;
+        padding: 0;
+        font-size: 12px;
+        line-height: 1.5;
+        white-space: pre;
       }
 
       .note {
@@ -133,6 +198,7 @@
       <input id="goal" type="text" placeholder="What do you want to do?" autofocus />
       <div id="transcript"></div>
     </div>
+    <script src="markdown.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

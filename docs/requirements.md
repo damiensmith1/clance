@@ -20,8 +20,10 @@ status: draft
 - Claude Agent SDK handles reasoning/looping
 - Two response modes: **type it out** (inject text into the focused app) and
   **talk back** (respond conversationally in the popup, no injection)
-- Multi-turn conversations — reopening the popup on an existing session
-  continues it, not just a fresh one-shot each time
+- Multi-turn conversations *within one open* — the popup keeps context
+  turn-to-turn while it's open, but every hotkey-open starts a brand new
+  conversation (see §"Multi-turn conversations" — this reverses the
+  originally-planned "reopen continues last session" behavior)
 - In-app chat history view (all past conversations, browsable, resumable)
 - Session storage compatible with Claude Code CLI's format, so a session
   started in this app can be resumed via `claude` in the terminal, and
@@ -66,8 +68,10 @@ status: draft
    accessibility API. If conversational: response shown in the popup
 8. Turn is appended to the session transcript (JSONL, Claude Code-compatible
    format)
-9. User can close the popup and reopen it later to continue the same
-   conversation, or start a fresh one
+9. User can continue submitting follow-up goals in the same popup open —
+   each one resumes the session from step 8. Closing the popup and
+   reopening it always starts a new conversation (see "Multi-turn
+   conversations" below)
 10. User can reopen the app's chat view to browse any past session,
     including ones resumable from the CLI
 
@@ -118,14 +122,19 @@ status: draft
 
 ### Multi-turn conversations
 
-- Sessions are not one-shot by default — reopening the popup against a
-  session ID continues that conversation, with full prior context available
-  to the SDK
-- The popup should make it clear which session (if any) it's continuing vs.
-  starting fresh (e.g. last-used session by default, with an explicit
-  "new conversation" action)
-- Screen context is re-captured fresh on every turn, even within a
-  continued session (the screen may have changed since the last turn)
+- A single open of the popup is one conversation: turns within it share
+  full context via the SDK's session resume, and the transcript stays
+  visible turn-to-turn.
+- **Every open is a new conversation.** Closing the popup (blur-hide or
+  toggling it closed) and reopening it — by any means — always starts
+  fresh: transcript cleared, layout reset to input-only, and a new SDK
+  session (no `resume`). This reverses the originally-planned "reopen
+  continues last session" behavior; there is currently no way to
+  deliberately resume a specific past conversation from the popup itself
+  (still possible from the Claude Code CLI directly, since sessions are
+  still stored in CLI-compatible JSONL — see "Session Storage" below).
+- Screen context is re-captured fresh on every turn, even within the same
+  open conversation (the screen may have changed since the last turn).
 
 ### Session storage (Claude Code-compatible)
 
@@ -225,8 +234,8 @@ no PR to the core app required.
 - Dictation works as a reliable alternative to typing the goal
 - A session created in the app can be resumed in the Claude Code CLI (or at
   minimum, is stored in a format that could support this without redesign)
-- Reopening the app continues a prior conversation with working multi-turn
-  context
+- Submitting follow-up goals within one popup open keeps working multi-turn
+  context; reopening the popup reliably starts a clean, new conversation
 - Chat history view accurately shows all past sessions
 - At least one third-party capability (a skill or MCP server not built by
   the core team) can be dropped in and used, without modifying app code —
