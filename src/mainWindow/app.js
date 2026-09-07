@@ -1,37 +1,21 @@
-import { h, html, render, useState } from "../shared/vendor/preact-htm-standalone.module.js";
-import { ChatsSection } from "./sections/ChatsSection.js";
-import { SkillsSection } from "./sections/SkillsSection.js";
-import { SettingsSection } from "./sections/SettingsSection.js";
-
-const SECTIONS = {
-  chats: { label: "Chats", Component: ChatsSection },
-  skills: { label: "Skills & Plugins", Component: SkillsSection },
-  settings: { label: "Settings", Component: SettingsSection },
-};
+import { h, html, render, useState, useEffect } from "../shared/vendor/preact-htm-standalone.module.js";
+import { Shell } from "./Shell.js";
+import { SetupWizard } from "./setup/SetupWizard.js";
 
 function App() {
-  const [sectionId, setSectionId] = useState("chats");
-  const ActiveSection = SECTIONS[sectionId].Component;
+  const [status, setStatus] = useState(null);
 
-  return html`
-    <div class="shell">
-      <nav class="sidebar">
-        ${Object.entries(SECTIONS).map(
-          ([id, { label }]) => html`
-            <button
-              class=${id === sectionId ? "active" : ""}
-              onClick=${() => setSectionId(id)}
-            >
-              ${label}
-            </button>
-          `
-        )}
-      </nav>
-      <main class="content">
-        <${ActiveSection} />
-      </main>
-    </div>
-  `;
+  useEffect(() => {
+    window.clanceApp.getSetupStatus().then(setStatus);
+  }, []);
+
+  if (status === null) {
+    return html`<div class="loading">Loading…</div>`;
+  }
+  if (!status.isComplete) {
+    return html`<${SetupWizard} initialStatus=${status} />`;
+  }
+  return html`<${Shell} />`;
 }
 
 render(html`<${App} />`, document.getElementById("root"));
