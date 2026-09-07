@@ -14,8 +14,6 @@ function createPopup(): BrowserWindow {
     show: false,
     frame: false,
     transparent: true,
-    vibrancy: "hud",
-    visualEffectState: "active",
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,

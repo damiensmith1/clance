@@ -45,12 +45,17 @@ status: draft
  
 ## Popup UI
 
-- **Visual style:** a translucent "liquid glass" surface, not a
-  messaging-app skin — no chat bubbles, no avatars. Uses Electron's native
-  `vibrancy: "hud"` window material (real macOS frosted-glass blur of
-  whatever's behind the popup) layered with a hairline border, large corner
-  radius, and a subtle top-edge CSS highlight to suggest refraction. See
-  `src/popup/popup.html`.
+- **Visual style (superseded):** originally a translucent "liquid glass"
+  surface using Electron's `vibrancy: "hud"` window material. Replaced
+  with a flat, warm, editorial design language — no blur, no vibrancy —
+  modeled on the user's own Obsidian and VS Code setups (warm cream
+  surfaces, flat hairline borders, restrained terracotta accent, plain
+  sans-serif throughout). Still no chat bubbles, no avatars — that part
+  of the design held. See `src/shared/theme.css` (the shared token file:
+  `--app-bg`/`--surface-bg`/`--surface-elevated`, `--text-primary`/
+  `--text-secondary`, `--accent`, `--font-sans`/`--font-mono`) and
+  `src/popup/popup.html`. Both windows now use `backgroundColor` instead
+  of `vibrancy` (`src/main/mainWindow.ts`, `src/main/popupWindow.ts`).
 - **Message model:** each turn renders as two stacked typographic blocks —
   the prompt (dim, small) and the reply (full-opacity, primary) — appended
   to a scrolling column, so it *reads* like a transcript without looking

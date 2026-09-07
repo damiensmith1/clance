@@ -1,15 +1,28 @@
-/* Light mode only for now — no theme switching, no dark palette. Every
-   consumer references these custom properties rather than literal colors,
-   so a future theme (a `[data-theme="..."]` override block, or a
-   `prefers-color-scheme` media query) is additive here later: define the
-   same property names under that selector, touch nothing else. */
+/* Warm, flat, editorial — no glass, no blur, no vibrancy. Light mode only
+   for now (see the note below); every consumer references these custom
+   properties rather than literal colors, so a future theme or theme pack
+   stays additive: define the same property names under a
+   `[data-theme="..."]` selector or a `prefers-color-scheme` query, touch
+   nothing else. */
 :root {
-  --surface-bg: rgba(0, 0, 0, 0.03);
-  --surface-hover: rgba(0, 0, 0, 0.06);
-  --surface-active: rgba(0, 0, 0, 0.1);
-  --surface-border: rgba(0, 0, 0, 0.12);
-  --text-primary: rgba(0, 0, 0, 0.88);
-  --text-secondary: rgba(0, 0, 0, 0.5);
-  --radius-lg: 20px;
-  --radius-md: 8px;
+  --app-bg: #f4efe4;
+  --surface-bg: #eae2d2;
+  --surface-elevated: #fbf9f3;
+  --surface-hover: rgba(51, 44, 34, 0.06);
+  --surface-active: rgba(51, 44, 34, 0.1);
+  --surface-border: #ddd4c0;
+
+  --text-primary: #332c22;
+  --text-secondary: #8c8270;
+
+  --accent: #c96442;
+  --accent-hover: #b5573a;
+  --accent-contrast: #fbf9f3;
+  --danger: #b23b3b;
+
+  --radius-lg: 12px;
+  --radius-md: 6px;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
 }
