@@ -2,9 +2,12 @@ import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { SESSION_CWD } from "./paths";
 
+export type ThemePreference = "light" | "dark" | "system";
+
 export type ClanceConfig = {
   shortcuts: Record<string, string>;
   shortcutsConfigured: boolean;
+  theme: ThemePreference;
 };
 
 const CONFIG_PATH = join(SESSION_CWD, "config.json");
@@ -12,6 +15,7 @@ const CONFIG_PATH = join(SESSION_CWD, "config.json");
 const DEFAULT_CONFIG: ClanceConfig = {
   shortcuts: { togglePopup: "Alt+Space" },
   shortcutsConfigured: false,
+  theme: "system",
 };
 
 export function readConfig(): ClanceConfig {

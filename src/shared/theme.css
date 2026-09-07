@@ -8,3 +8,17 @@
   --radius-lg: 20px;
   --radius-md: 8px;
 }
+
+/* nativeTheme.themeSource drives this media query directly (set from
+   the user's Settings choice, default "system") — no per-renderer IPC
+   needed to keep windows in sync. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --surface-bg: rgba(0, 0, 0, 0.03);
+    --surface-hover: rgba(0, 0, 0, 0.06);
+    --surface-active: rgba(0, 0, 0, 0.1);
+    --surface-border: rgba(0, 0, 0, 0.12);
+    --text-primary: rgba(0, 0, 0, 0.88);
+    --text-secondary: rgba(0, 0, 0, 0.5);
+  }
+}

@@ -108,6 +108,7 @@
         font-size: 12px;
         margin: 8px 0 0;
       }
+      .preference-row,
       .permission-row,
       .shortcut-row {
         display: flex;
@@ -117,6 +118,24 @@
         padding: 8px 0;
         border-bottom: 1px solid var(--surface-border);
         text-align: left;
+      }
+      .theme-options {
+        display: flex;
+        gap: 4px;
+      }
+      .theme-options button {
+        background: var(--surface-bg);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-md);
+        color: var(--text-secondary);
+        padding: 4px 12px;
+        font-size: 12.5px;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .theme-options button.active {
+        background: var(--surface-active);
+        color: var(--text-primary);
       }
       .shortcut-row input {
         background: var(--surface-bg);

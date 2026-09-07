@@ -223,7 +223,10 @@ no PR to the core app required.
   quit since it ran tray-only. Closing just the main window does not quit
   anything; the tray and popup keep running until Cmd+Q (or Quit from the
   tray menu) is used.
-- Launch on login (optional toggle)
+- Launch on login (optional toggle) — implemented as a live-read/live-set
+  toggle in Settings using Electron's `app.getLoginItemSettings()` /
+  `setLoginItemSettings()`; not duplicated into Clance's own config since
+  the OS already persists it
 - Minimal resource footprint while idle
 - No notarization for v1 — user manually grants Accessibility + Screen
   Recording permissions via System Settings on first run

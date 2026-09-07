@@ -119,9 +119,15 @@ status: draft
   count grows substantially or deep-linking into sub-state (e.g. a
   specific chat) is needed later.
 - Styling uses a CSS custom-property theme token system
-  (`src/shared/theme.css`) so a future light theme is just a second token
-  set behind a `[data-theme="light"]` selector, without restructuring the
-  CSS that consumes the tokens.
+  (`src/shared/theme.css`). The light theme (Settings sub-project #4)
+  ended up implemented as a `@media (prefers-color-scheme: light)`
+  override on the same tokens, not a `[data-theme]` attribute selector as
+  originally anticipated here — Electron's `nativeTheme.themeSource` is
+  set directly from the user's Settings choice (`~/.clance/config.json`'s
+  new `theme` field, default `"system"`) and that property drives
+  `prefers-color-scheme` in every renderer automatically, so no custom
+  IPC broadcast is needed to keep windows in sync when the user switches
+  themes.
 - Full details are in
   `docs/superpowers/specs/2026-09-06-app-shell-design.md` and
   `docs/superpowers/plans/2026-09-06-app-shell.md`.
