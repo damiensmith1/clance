@@ -59,6 +59,63 @@
       .section-placeholder p {
         color: var(--text-secondary);
       }
+      .setup-wizard {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        padding: 32px;
+        box-sizing: border-box;
+      }
+      .setup-step {
+        max-width: 420px;
+        text-align: center;
+      }
+      .setup-step h2 {
+        margin: 0 0 12px;
+        color: var(--text-primary);
+      }
+      .setup-step p {
+        color: var(--text-secondary);
+        margin: 0 0 16px;
+      }
+      .setup-step button {
+        background: var(--surface-active);
+        color: var(--text-primary);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-md);
+        padding: 8px 16px;
+        font-size: 13px;
+        cursor: pointer;
+        margin: 4px;
+        font-family: inherit;
+      }
+      .permission-row,
+      .shortcut-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--surface-border);
+        text-align: left;
+      }
+      .shortcut-row input {
+        background: var(--surface-bg);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-md);
+        color: var(--text-primary);
+        padding: 4px 8px;
+        font-size: 13px;
+        font-family: inherit;
+      }
+      .loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        color: var(--text-secondary);
+      }
     </style>
   </head>
   <body>
