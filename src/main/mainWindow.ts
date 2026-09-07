@@ -5,18 +5,23 @@ let mainWindow: BrowserWindow | null = null;
 
 function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
-    width: 960,
-    height: 640,
+    width: 1280,
+    height: 800,
     minWidth: 720,
     minHeight: 480,
     titleBarStyle: "hiddenInset",
-    backgroundColor: "#f4efe4",
+    backgroundColor: "#f7f3eb",
     webPreferences: {
       preload: join(__dirname, "../preload/mainWindow.js"),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
+
+  // Starts filling the whole screen (like clicking the green zoom button),
+  // not macOS's true fullscreen mode — stays a normal, resizable window,
+  // no separate Space, traffic lights behave normally.
+  win.maximize();
 
   win.loadFile(join(__dirname, "../mainWindow/index.html"));
   win.on("closed", () => {
