@@ -1,5 +1,7 @@
 import type { ContentBlockParam } from "@anthropic-ai/sdk/resources";
 import { SESSION_CWD } from "./paths";
+import { readConfig } from "./config";
+import { getActiveMcpServers } from "./mcpConfig";
 
 export type AgentEvent =
   | { kind: "text"; text: string }
@@ -44,6 +46,8 @@ export async function* askClance(
     };
   }
 
+  const config = readConfig();
+
   for await (const message of query({
     prompt: singleTurn(),
     options: {
@@ -52,6 +56,8 @@ export async function* askClance(
       includePartialMessages: true,
       // Cheapest current model, for dev/testing while the app is scaffolded.
       model: "claude-haiku-4-5",
+      skills: config.enabledSkills,
+      mcpServers: getActiveMcpServers(),
     },
   })) {
     if (message.type === "stream_event") {

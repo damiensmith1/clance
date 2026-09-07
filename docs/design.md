@@ -145,6 +145,22 @@ status: draft
   also meant converting the popup's own scripts from classic `<script>`
   tags to `type="module"` + `import`. Full details in
   `docs/superpowers/specs/2026-09-07-chat-history-design.md`.
+- **Extensibility management UI (sub-project #5):** the Skills & Plugins
+  section now manages the two purely config-driven extension points —
+  Skills and MCP servers — for real, not just as a UI mockup.
+  `src/main/skills.ts` scans `~/.claude/skills/*/SKILL.md` directly (hand-
+  rolled frontmatter parsing, no YAML dependency, same approach as
+  `chatHistory.ts`) and cross-references Clance's own `enabledSkills`
+  config field (`"all"` by default, converts to an explicit list the first
+  time a skill is toggled off, so newly-added skills stay off afterward —
+  never implicitly collapses back to `"all"`). `src/main/mcpConfig.ts`
+  owns `~/.clance/mcp.json`, wrapping each Claude-Code-`.mcp.json`-shaped
+  server config with a Clance-only `enabled` flag; `agent.ts`'s `query()`
+  call now passes `skills` and `mcpServers` built from these two modules.
+  Custom tools, hooks, and subagents are explicitly deferred — the first
+  needs real code rather than config, the second is a security-sensitive
+  design decision on its own, and building a generic management UI for
+  either doesn't make sense yet.
 
 ## Open questions (resolve before building)
 

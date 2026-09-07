@@ -250,6 +250,56 @@
         background: none;
         padding: 0;
       }
+      .section-placeholder-note {
+        color: var(--text-secondary);
+        font-size: 13px;
+      }
+      .section-placeholder-note code {
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 12px;
+        background: var(--surface-hover);
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+      .extensibility-group {
+        margin-bottom: 28px;
+      }
+      .extensibility-group h3 {
+        margin: 0 0 8px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .extensibility-list {
+        display: flex;
+        flex-direction: column;
+      }
+      .extensibility-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--surface-border);
+      }
+      .extensibility-row-info {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+      .extensibility-row-name {
+        font-size: 13.5px;
+        color: var(--text-primary);
+      }
+      .extensibility-row-description {
+        font-size: 12px;
+        color: var(--text-secondary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
       .loading {
         display: flex;
         align-items: center;

@@ -176,34 +176,29 @@ Goal: the app itself stays minimal — a shell, screen capture, injection,
 and storage — while all *capability* is added through the Claude Agent
 SDK's own extension points.
 
-- **Skills** — support a user-level skills directory (e.g.
-  `~/.ambient/skills/` or reuse `~/.claude/skills/` for compatibility)
-  containing `SKILL.md` files, loaded the same way Claude Code loads
-  skills. Community members drop in a skill folder and it's picked up
-  automatically, no code changes.
-- **Custom tools** — support registering custom tools via the SDK's `@tool`
-  pattern / in-process MCP servers. Needs a defined place for users to add
-  their own tool definitions (e.g. a `tools/` folder loaded at startup) and
-  a config file listing which are enabled.
-- **MCP servers (external)** — support a config file (e.g. `mcp.json`,
-  mirroring Claude Code/Desktop's own config format where reasonable)
-  listing MCP servers to connect on startup, so existing MCP servers
-  (Obsidian, Gmail, filesystem, etc.) can be wired in without any app code
-  changes.
-- **Hooks** — expose the SDK's lifecycle hooks (PreToolUse, PostToolUse,
-  Stop, etc.) as a user-configurable layer, so people can add their own
-  gating/logging/side-effects around tool calls.
-- **Subagents** — support user-defined subagent definitions (markdown-based,
-  matching Claude Code's format) for specialized sub-tasks.
-- **Config surface** — all of the above should be discoverable and
-  toggleable from a simple settings view in the app (enable/disable
-  individual skills, tools, MCP servers), not just raw config-file editing
-  — though config files remain the source of truth for anyone who wants to
-  script/share setups.
-- **Compatibility goal** — wherever the Claude Code CLI already has a
-  convention (skills format, subagent format, MCP config shape), reuse it
-  rather than inventing a new one, so the two ecosystems can share
-  plugins/skills directly.
+- **Skills** — ✅ implemented. Reuses `~/.claude/skills/` directly (Claude
+  Code's own convention, `SKILL.md` files), passed to the Agent SDK's
+  `skills` query option. Community members drop in a skill folder and it's
+  picked up automatically, no code changes.
+- **MCP servers (external)** — ✅ implemented. `~/.clance/mcp.json` mirrors
+  Claude Code's own `.mcp.json` server config shape (stdio/sse/http), with
+  a Clance-only `enabled` flag wrapping each entry — only enabled servers
+  are passed to the Agent SDK's `mcpServers` query option.
+- **Custom tools** — not yet implemented. Deferred: needs real code (the
+  SDK's `@tool` pattern), not just config, so no generic management UI can
+  offer this the way Skills/MCP toggles do.
+- **Hooks** — not yet implemented. Deferred as a security-sensitive gating
+  layer that deserves its own design pass.
+- **Subagents** — not yet implemented. Deferred alongside Custom tools and
+  Hooks.
+- **Config surface** — ✅ implemented for Skills and MCP servers: the
+  Skills & Plugins section lists both with enable/disable toggles
+  (`src/main/skills.ts`, `src/main/mcpConfig.ts`). Config files remain the
+  source of truth — the UI is a convenience layer over them, not a
+  replacement.
+- **Compatibility goal** — met for Skills (same directory, same `SKILL.md`
+  format) and MCP servers (same config shape). Not yet applicable to
+  Custom tools/Hooks/Subagents since those aren't built yet.
 
 *Example scenario this should support:* a community member wants Clance to
 be able to create Obsidian canvases. They write an MCP server (or a skill,

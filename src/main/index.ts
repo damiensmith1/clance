@@ -18,6 +18,8 @@ import {
 import { SHORTCUT_ACTIONS } from "./shortcuts";
 import { getSession, listSessions } from "./chatHistory";
 import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
+import { listSkills, setSkillEnabled } from "./skills";
+import { listMcpServers, setMcpServerEnabled } from "./mcpConfig";
 
 app.dock?.show();
 
@@ -164,3 +166,17 @@ ipcMain.handle("settings:set-launch-on-login", (_event, enabled: boolean) => {
   setLaunchOnLogin(enabled);
   return getLaunchOnLogin();
 });
+
+ipcMain.handle("extensibility:list-skills", () => listSkills());
+
+ipcMain.handle(
+  "extensibility:set-skill-enabled",
+  (_event, name: string, enabled: boolean) => setSkillEnabled(name, enabled)
+);
+
+ipcMain.handle("extensibility:list-mcp-servers", () => listMcpServers());
+
+ipcMain.handle(
+  "extensibility:set-mcp-server-enabled",
+  (_event, name: string, enabled: boolean) => setMcpServerEnabled(name, enabled)
+);
