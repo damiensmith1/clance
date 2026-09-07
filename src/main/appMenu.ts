@@ -19,6 +19,10 @@ export function createAppMenu(): Menu {
       ],
     },
     {
+      label: "View",
+      submenu: [{ role: "reload" }],
+    },
+    {
       label: "Window",
       submenu: [
         { role: "minimize" },

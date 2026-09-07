@@ -5,12 +5,12 @@ import { SkillsSection } from "./sections/SkillsSection.js";
 import { SettingsSection } from "./sections/SettingsSection.js";
 
 const LAUNCHER_ITEMS = [
-  { id: "chats", label: "Chats List", icon: "chat" },
+  { id: "chats", label: "Chats", icon: "chat" },
   { id: "skills", label: "Skills & Plugins", icon: "puzzle" },
   { id: "settings", label: "Settings", icon: "gear" },
 ];
 
-const HOME_TAB = { id: "chats", type: "chats", label: "Chats List", icon: "chat" };
+const HOME_TAB = { id: "chats", type: "chats", label: "Chats", icon: "chat" };
 
 function tabIcon(tab) {
   return Icon[tab.icon] ? Icon[tab.icon](15) : null;
@@ -36,6 +36,7 @@ export function Shell() {
   const [activeId, setActiveId] = useState(HOME_TAB.id);
   const [reuseTabs, setReuseTabs] = useState(true);
   const [claudeConnected, setClaudeConnected] = useState(null);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     window.clanceApp.getPreferences().then((prefs) => setReuseTabs(prefs.reuseTabs));
@@ -90,13 +91,25 @@ export function Shell() {
 
   return html`
     <div class="shell">
-      <nav class="sidebar">
-        <div class="brand">Clance</div>
+      <nav class="sidebar ${collapsed ? "sidebar-collapsed" : ""}">
+        <div class="sidebar-header">
+          ${!collapsed && html`<div class="brand">Clance</div>`}
+          <button
+            class="sidebar-collapse-btn"
+            title=${collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            onClick=${() => setCollapsed(!collapsed)}
+          >
+            <span style=${{ display: "flex", transform: collapsed ? "none" : "rotate(180deg)" }}>
+              ${Icon.chevronRight(14)}
+            </span>
+          </button>
+        </div>
         <div class="launcher-label">Launcher</div>
         ${LAUNCHER_ITEMS.map(
           (item) => html`
             <button
               class="sidebar-item ${activeTab?.type === item.id ? "sidebar-item-active" : ""}"
+              title=${item.label}
               onClick=${() => openSection(item.id)}
             >
               ${Icon[item.icon](16)}

@@ -30,10 +30,6 @@ function isCliSession(session) {
   return session.projectLabel !== "Clance";
 }
 
-function SessionIcon({ session }) {
-  return isCliSession(session) ? Icon.terminal(18) : Icon.chat(18);
-}
-
 function SessionList({ sessions, loading, onOpen }) {
   if (loading) {
     return html`<p class="empty-note">Loading…</p>`;
@@ -60,17 +56,9 @@ function SessionList({ sessions, loading, onOpen }) {
           <div class="list-group-label">${group.label}</div>
           ${group.items.map(
             (session) => html`
-              <button class="item-card" onClick=${() => onOpen(session)}>
-                <span class="item-card-icon">
-                  <${SessionIcon} session=${session} />
-                </span>
-                <span class="item-card-body">
-                  <span class="item-card-title">${session.title}</span>
-                  <span class="item-card-meta">
-                    <span class="pill">${session.projectLabel}</span>
-                    <span>· ${relativeTime(session.lastModified)}</span>
-                  </span>
-                </span>
+              <button class="session-row" onClick=${() => onOpen(session)}>
+                <span class="session-headline">${session.title}</span>
+                <span class="session-byline">${session.projectLabel} · ${relativeTime(session.lastModified)}</span>
               </button>
             `
           )}
@@ -115,7 +103,6 @@ export function ChatsListSection({ onOpenChat }) {
             onInput=${(e) => setQuery(e.target.value)}
           />
         </div>
-        <button class="btn-secondary">${Icon.filter(14)} Filter</button>
       </div>
 
       <${SessionList} sessions=${filtered} loading=${loading} onOpen=${onOpenChat} />
