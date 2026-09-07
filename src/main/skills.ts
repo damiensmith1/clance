@@ -72,6 +72,13 @@ export async function setSkillEnabled(name: string, enabled: boolean): Promise<S
   const current = await listSkills();
   const allNames = current.map((skill) => skill.name);
 
+  // name/enabled cross an IPC boundary from the renderer — only ever a
+  // known, currently-discovered skill name is accepted, so a compromised
+  // or buggy renderer can't write arbitrary strings into config.json.
+  if (typeof name !== "string" || typeof enabled !== "boolean" || !allNames.includes(name)) {
+    return current;
+  }
+
   const config = readConfig();
   const currentlyEnabled =
     config.enabledSkills === "all" ? allNames : config.enabledSkills;

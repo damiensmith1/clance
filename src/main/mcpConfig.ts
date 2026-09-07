@@ -27,10 +27,50 @@ const MCP_CONFIG_PATH = join(SESSION_CWD, "mcp.json");
 
 const DEFAULT_CONFIG: McpConfig = { mcpServers: {} };
 
+// mcp.json entries end up spawning real child processes (stdio servers) or
+// making real network requests (http/sse) via the Agent SDK, so a
+// malformed or corrupted file must not silently pass through to that sink
+// — each entry's shape is checked before it's treated as configured at all.
+function isStoredMcpServerConfig(value: unknown): value is StoredMcpServerConfig {
+  if (!value || typeof value !== "object") return false;
+  const config = value as Record<string, unknown>;
+
+  if (config.type === "http" || config.type === "sse") {
+    return typeof config.url === "string" && config.url.length > 0;
+  }
+  if (config.type === undefined || config.type === "stdio") {
+    return (
+      typeof config.command === "string" &&
+      config.command.length > 0 &&
+      (config.args === undefined ||
+        (Array.isArray(config.args) && config.args.every((arg) => typeof arg === "string")))
+    );
+  }
+  return false;
+}
+
+function isMcpServerEntry(value: unknown): value is McpServerEntry {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Record<string, unknown>;
+  return typeof entry.enabled === "boolean" && isStoredMcpServerConfig(entry.config);
+}
+
+function sanitizeMcpConfig(parsed: unknown): McpConfig {
+  if (!parsed || typeof parsed !== "object") return DEFAULT_CONFIG;
+  const rawServers = (parsed as Record<string, unknown>).mcpServers;
+  if (!rawServers || typeof rawServers !== "object") return DEFAULT_CONFIG;
+
+  const mcpServers: Record<string, McpServerEntry> = {};
+  for (const [name, entry] of Object.entries(rawServers)) {
+    if (isMcpServerEntry(entry)) mcpServers[name] = entry;
+  }
+  return { mcpServers };
+}
+
 export function readMcpConfig(): McpConfig {
   try {
     const raw = readFileSync(MCP_CONFIG_PATH, "utf8");
-    return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+    return sanitizeMcpConfig(JSON.parse(raw));
   } catch {
     return DEFAULT_CONFIG;
   }
@@ -53,7 +93,10 @@ export function listMcpServers(): McpServerListItem[] {
 export function setMcpServerEnabled(name: string, enabled: boolean): McpServerListItem[] {
   const config = readMcpConfig();
   const entry = config.mcpServers[name];
-  if (entry) {
+
+  // name/enabled cross an IPC boundary from the renderer — only a known,
+  // already-configured server name and a real boolean are accepted.
+  if (typeof name === "string" && typeof enabled === "boolean" && entry) {
     config.mcpServers[name] = { ...entry, enabled };
     writeMcpConfig(config);
   }

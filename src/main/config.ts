@@ -5,8 +5,12 @@ import { SESSION_CWD } from "./paths";
 export type ClanceConfig = {
   shortcuts: Record<string, string>;
   shortcutsConfigured: boolean;
-  // Which skills from ~/.claude/skills/ the agent may use. "all" matches
-  // the SDK's own convenience default; a list restricts to just those names.
+  // Which skills from ~/.claude/skills/ the agent may use. Defaults to
+  // none (opt-in) — skills can carry arbitrary instructions and were
+  // likely installed for unrelated Claude Code CLI work, not vetted for
+  // use inside Clance, so granting all of them by default would be a
+  // broader grant than the app's setup flow gives anywhere else.
+  // "all" remains a valid explicit value for anyone who wants it.
   enabledSkills: string[] | "all";
 };
 
@@ -15,7 +19,7 @@ const CONFIG_PATH = join(SESSION_CWD, "config.json");
 const DEFAULT_CONFIG: ClanceConfig = {
   shortcuts: { togglePopup: "Alt+Space" },
   shortcutsConfigured: false,
-  enabledSkills: "all",
+  enabledSkills: [],
 };
 
 export function readConfig(): ClanceConfig {
