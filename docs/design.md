@@ -45,22 +45,20 @@ status: draft
  
 ## Popup UI
 
-- **Visual style (superseded):** originally a translucent "liquid glass"
-  surface using Electron's `vibrancy: "hud"` window material. Replaced
-  with a flat, warm, editorial design language — no blur, no vibrancy —
-  modeled on the user's own Obsidian and VS Code setups (warm cream
-  surfaces, flat hairline borders, restrained terracotta accent, plain
-  sans-serif throughout). Still no chat bubbles, no avatars — that part
-  of the design held. See `src/shared/theme.css` (the shared token file:
-  `--app-bg`/`--surface-bg`/`--surface-elevated`, `--text-primary`/
-  `--text-secondary`, `--accent`, `--font-sans`/`--font-mono`) and
-  `src/popup/popup.html`. Both windows now use `backgroundColor` instead
-  of `vibrancy` (`src/main/mainWindow.ts`, `src/main/popupWindow.ts`).
-- **Message model:** each turn renders as two stacked typographic blocks —
-  the prompt (dim, small) and the reply (full-opacity, primary) — appended
-  to a scrolling column, so it *reads* like a transcript without looking
-  like a chat widget. Full session history is shown, not just the last
-  exchange.
+- **Visual style (superseded twice):** originally a translucent "liquid
+  glass" surface using `vibrancy: "hud"`. A first pass replaced that with
+  a flat, warm, editorial look with no avatars/bubbles. A second pass —
+  built to match user-supplied UI mockups pixel-for-pixel (see "Design
+  system" below) — restored avatars and a subtle bubble for the user's
+  own messages specifically (Clance's replies stay plain text, unbubbled)
+  and nests the transcript in its own bordered "ACTIVE SESSION" card
+  above the input. Both windows use `backgroundColor` instead of
+  `vibrancy` (`src/main/mainWindow.ts`, `src/main/popupWindow.ts`).
+- **Message model:** each turn shows a small circular avatar (person icon
+  for the user, robot icon for Clance) beside its content — the user's
+  text sits in a light rounded bubble, Clance's reply renders as plain
+  markdown text beneath its avatar. Full session history is shown, not
+  just the last exchange.
 - **Conversation lifetime:** every popup open is a new conversation —
   closing it (blur-hide or toggle) and reopening always clears the
   transcript and starts a fresh SDK session (no `resume`), regardless of
@@ -118,20 +116,42 @@ status: draft
   principle (no network access required to launch the app) and to avoid
   needing a bundler. This is distinct from the popup, which stays vanilla
   JS with no framework.
-- Navigation between the main window's sections (Chats, Skills & Plugins,
-  Settings — see `src/mainWindow/Shell.js`) uses plain Preact `useState`,
-  not a router library — reasonable at 3-5 sections, revisit only if that
-  count grows substantially or deep-linking into sub-state (e.g. a
-  specific chat) is needed later.
-- Styling uses a CSS custom-property theme token system
-  (`src/shared/theme.css`). Light mode only for now, deliberately — no
-  theme switcher, no dark palette, no persisted theme preference (an
-  earlier pass briefly added a light/dark/system switcher wired through
-  `nativeTheme.themeSource`; removed as unwanted bloat before it shipped
-  to keep the app minimal). The token architecture is still there so a
-  theme or theme pack is additive later: define the same custom property
-  names under a `[data-theme="..."]` selector or a `prefers-color-scheme`
-  media query, and no consuming component needs to change.
+- **Tab-based navigation (supersedes the original sidebar-swap model):**
+  the sidebar (`src/mainWindow/Shell.js`) is a launcher, not a content
+  switcher — clicking a launcher item or a chat-history row opens it as a
+  closable tab, and the tab bar (not the sidebar) is what actually
+  switches visible content. Tab state (`tabs`, `activeId`) lives in
+  `Shell.js` as plain Preact `useState`, keyed by a stable `id` per tab
+  (`"chats"`/`"skills"`/`"settings"` for the three launcher sections,
+  `chat:<filePath>` for an opened conversation). Opening an id that's
+  already open either activates the existing tab or opens a duplicate,
+  governed by the `reuseTabs` preference (`~/.clance/config.json`,
+  default `true`, editable from Settings' "Tab Behavior" toggle) — see
+  `openTab()` in `Shell.js`. Still no router library; revisit only if
+  cross-session tab persistence or deep-linking is needed later.
+- **Design system — "Editorial Warmth" (supersedes the flat/no-serif pass
+  above):** built to match user-supplied UI mockups exactly, not just
+  "inspired by." Palette: `--app-bg #F7F3EB`, `--surface-bg #EFEDE5`,
+  `--surface-card`/`--surface-elevated #FFFFFF`, `--text-primary
+  #2D2924`, `--text-secondary #7A7267`, `--accent #D97757` (notably close
+  to Claude's own real brand accent). Typography is three real vendored
+  font families, not system fonts: Newsreader (serif, headings/page
+  titles/the sidebar wordmark), Inter (sans, body/UI), JetBrains Mono
+  (code/paths) — each a single variable-weight `.woff2` file under
+  `src/shared/fonts/`, referenced via local `@font-face` in
+  `theme.css` (no Google Fonts CDN link — matches the no-CDN rule the
+  same way the vendored Preact/htm build does; the files were fetched
+  once during development and committed, not loaded at runtime).
+- **New shared components:** `src/shared/icons.js` (a small hand-rolled
+  inline-SVG icon set, ~20 icons, no icon font/library), `Toggle.js` and
+  `StatusCard.js` under `src/mainWindow/components/`. `chatHistory.ts`'s
+  collapsed tool/thinking blocks now group into one collapsible "Thought &
+  Tool Execution" disclosure per contiguous run (`ToolGroup` in
+  `ChatsSection.js`) instead of one line per block. `markdown.js` gained a
+  regex-based (not a real tokenizer) syntax highlighter and a copy-button
+  header for fenced code blocks, rendered dark-on-light regardless of the
+  surrounding page's palette — shared verbatim between the popup and the
+  main window's chat detail view.
 - Full details are in
   `docs/superpowers/specs/2026-09-06-app-shell-design.md` and
   `docs/superpowers/plans/2026-09-06-app-shell.md`.

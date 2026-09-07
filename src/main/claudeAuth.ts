@@ -80,6 +80,15 @@ export function connectClaude(): Promise<ClaudeAuthStatus> {
   });
 }
 
+export function disconnectClaude(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile("claude", ["auth", "logout"], { timeout: 5000 }, (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
 export function openInstallDocs(): Promise<void> {
   return shell.openExternal("https://code.claude.com/docs/en/setup");
 }

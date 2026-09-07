@@ -1,5 +1,6 @@
-import { html, useEffect, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
-import { renderMarkdown } from "../../shared/markdown.js";
+import { html, useEffect, useMemo, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { renderMarkdown, attachCopyHandler } from "../../shared/markdown.js";
+import { Icon } from "../../shared/icons.js";
 
 function relativeTime(iso) {
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -13,110 +14,211 @@ function relativeTime(iso) {
   return new Date(iso).toLocaleDateString();
 }
 
-function SessionList({ sessions, loading, onSelect }) {
+function dayGroupLabel(iso) {
+  const date = new Date(iso);
+  const now = new Date();
+  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startOfDay(now) - startOfDay(date)) / 86400000);
+  if (diffDays <= 0) return "Recent";
+  if (diffDays === 1) return "Yesterday";
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+// Clance's own sessions live under one fixed bucket labeled "Clance" by
+// chatHistory.ts; anything else came from a real Claude Code CLI project.
+function isCliSession(session) {
+  return session.projectLabel !== "Clance";
+}
+
+function SessionIcon({ session }) {
+  return isCliSession(session) ? Icon.terminal(18) : Icon.chat(18);
+}
+
+function SessionList({ sessions, loading, onOpen }) {
   if (loading) {
-    return html`<p class="chat-history-empty">Loading…</p>`;
+    return html`<p class="empty-note">Loading…</p>`;
   }
   if (sessions.length === 0) {
-    return html`<p class="chat-history-empty">No past sessions found.</p>`;
+    return html`<p class="empty-note">No past sessions found.</p>`;
   }
+
+  const groups = [];
+  let currentLabel = null;
+  for (const session of sessions) {
+    const label = dayGroupLabel(session.lastModified);
+    if (label !== currentLabel) {
+      groups.push({ label, items: [] });
+      currentLabel = label;
+    }
+    groups[groups.length - 1].items.push(session);
+  }
+
   return html`
-    <div class="chat-history-list">
-      ${sessions.map(
-        (session) => html`
-          <button class="chat-history-item" onClick=${() => onSelect(session)}>
-            <span class="chat-history-item-title">${session.title}</span>
-            <span class="chat-history-item-meta">
-              ${session.projectLabel} · ${relativeTime(session.lastModified)}
-            </span>
-          </button>
-        `
-      )}
-    </div>
+    ${groups.map(
+      (group) => html`
+        <div class="list-group">
+          <div class="list-group-label">${group.label}</div>
+          ${group.items.map(
+            (session) => html`
+              <button class="item-card" onClick=${() => onOpen(session)}>
+                <span class="item-card-icon">
+                  <${SessionIcon} session=${session} />
+                </span>
+                <span class="item-card-body">
+                  <span class="item-card-title">${session.title}</span>
+                  <span class="item-card-meta">
+                    <span class="pill">${session.projectLabel}</span>
+                    <span>· ${relativeTime(session.lastModified)}</span>
+                  </span>
+                </span>
+              </button>
+            `
+          )}
+        </div>
+      `
+    )}
   `;
 }
 
-function TurnBlock({ block }) {
-  if (block.type === "text") {
-    return html`<div
-      class="chat-turn-text"
-      dangerouslySetInnerHTML=${{ __html: renderMarkdown(block.text) }}
-    ></div>`;
-  }
-  if (block.type === "thinking") {
-    return html`<div class="chat-turn-thinking">💭 Thinking…</div>`;
-  }
-  return html`<div class="chat-turn-tool">${block.label}</div>`;
-}
-
-function SessionDetailView({ detail, loading, onBack }) {
-  return html`
-    <div class="chat-history-detail">
-      <button class="chat-history-back" onClick=${onBack}>&larr; Back</button>
-      ${loading
-        ? html`<p class="chat-history-empty">Loading…</p>`
-        : !detail
-        ? html`<p class="chat-history-empty">Couldn't load this session.</p>`
-        : html`
-            <h3 class="chat-history-detail-title">${detail.title}</h3>
-            <p class="chat-history-detail-meta">${detail.projectLabel}</p>
-            <div class="chat-history-transcript">
-              ${detail.turns.map(
-                (turn) => html`
-                  <div class="chat-turn chat-turn-${turn.role}">
-                    ${turn.blocks.map((block) => html`<${TurnBlock} block=${block} />`)}
-                  </div>
-                `
-              )}
-            </div>
-          `}
-    </div>
-  `;
-}
-
-export function ChatsSection() {
+export function ChatsListSection({ onOpenChat }) {
   const [sessions, setSessions] = useState([]);
-  const [loadingList, setLoadingList] = useState(true);
-  const [selected, setSelected] = useState(null);
-  const [detail, setDetail] = useState(null);
-  const [loadingDetail, setLoadingDetail] = useState(false);
-
-  function loadSessions() {
-    setLoadingList(true);
-    window.clanceApp.listChatSessions().then((result) => {
-      setSessions(result);
-      setLoadingList(false);
-    });
-  }
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
-    loadSessions();
+    window.clanceApp.listChatSessions().then((result) => {
+      setSessions(result);
+      setLoading(false);
+    });
   }, []);
 
-  function handleSelect(session) {
-    setSelected(session);
-    setDetail(null);
-    setLoadingDetail(true);
-    window.clanceApp.getChatSession(session.filePath).then((result) => {
-      setDetail(result);
-      setLoadingDetail(false);
-    });
-  }
-
-  function handleBack() {
-    setSelected(null);
-    setDetail(null);
-    loadSessions();
-  }
-
-  if (selected) {
-    return html`<${SessionDetailView} detail=${detail} loading=${loadingDetail} onBack=${handleBack} />`;
-  }
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sessions;
+    return sessions.filter(
+      (s) => s.title.toLowerCase().includes(q) || s.projectLabel.toLowerCase().includes(q)
+    );
+  }, [sessions, query]);
 
   return html`
-    <div class="section-chats">
-      <h2>Chats</h2>
-      <${SessionList} sessions=${sessions} loading=${loadingList} onSelect=${handleSelect} />
+    <div class="section-page">
+      <h1 class="page-title">Conversation History</h1>
+      <p class="page-subtitle">Browse your past work and active CLI sessions.</p>
+
+      <div class="search-row">
+        <div class="search-input">
+          ${Icon.search(16)}
+          <input
+            type="text"
+            placeholder="Search conversations…"
+            value=${query}
+            onInput=${(e) => setQuery(e.target.value)}
+          />
+        </div>
+        <button class="btn-secondary">${Icon.filter(14)} Filter</button>
+      </div>
+
+      <${SessionList} sessions=${filtered} loading=${loading} onOpen=${onOpenChat} />
+    </div>
+  `;
+}
+
+function ToolGroup({ items }) {
+  const [open, setOpen] = useState(false);
+  return html`
+    <div class="tool-group">
+      <button class="tool-group-header" onClick=${() => setOpen(!open)}>
+        <span class="tool-group-chevron ${open ? "tool-group-chevron-open" : ""}">
+          ${Icon.chevronRight(14)}
+        </span>
+        ${Icon.search(14)}
+        <span>THOUGHT & TOOL EXECUTION</span>
+      </button>
+      ${open &&
+      html`<div class="tool-group-body">
+        ${items.map(
+          (item) => html`<div class="tool-group-item">
+            ${item.type === "thinking" ? "💭 Thinking…" : item.label}
+          </div>`
+        )}
+      </div>`}
+    </div>
+  `;
+}
+
+// Consecutive tool/thinking blocks within a turn collapse into one
+// disclosure group; text blocks render as markdown in between.
+function groupBlocks(blocks) {
+  const groups = [];
+  for (const block of blocks) {
+    if (block.type === "text") {
+      groups.push({ kind: "text", block });
+    } else {
+      const last = groups[groups.length - 1];
+      if (last && last.kind === "tools") last.items.push(block);
+      else groups.push({ kind: "tools", items: [block] });
+    }
+  }
+  return groups;
+}
+
+function TurnView({ turn }) {
+  const groups = groupBlocks(turn.blocks);
+  const isUser = turn.role === "user";
+  return html`
+    <div class="turn-row">
+      <span class="avatar ${isUser ? "avatar-user" : "avatar-assistant"}">
+        ${isUser ? Icon.person(15) : Icon.robot(15)}
+      </span>
+      <div class="turn-body">
+        <div class="turn-label">${isUser ? "YOU" : "CLANCE"}</div>
+        ${groups.map((group) =>
+          group.kind === "text"
+            ? html`<div
+                class="turn-text"
+                dangerouslySetInnerHTML=${{ __html: renderMarkdown(group.block.text) }}
+              ></div>`
+            : html`<${ToolGroup} items=${group.items} />`
+        )}
+      </div>
+    </div>
+  `;
+}
+
+export function ChatDetailSection({ session }) {
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    window.clanceApp.getChatSession(session.filePath).then((result) => {
+      setDetail(result);
+      setLoading(false);
+    });
+  }, [session.filePath]);
+
+  useEffect(() => {
+    if (containerRef.current) attachCopyHandler(containerRef.current);
+  }, []);
+
+  const cli = isCliSession(session);
+
+  return html`
+    <div class="section-page" ref=${containerRef}>
+      ${loading
+        ? html`<p class="empty-note">Loading…</p>`
+        : !detail
+        ? html`<p class="empty-note">Couldn't load this session.</p>`
+        : html`
+            <div class="detail-meta-row">
+              <span class="pill pill-strong">${cli ? "CLI SESSION" : "CLANCE SESSION"}</span>
+              ${cli && html`<span class="detail-meta-text">project: ${detail.projectLabel}</span>`}
+            </div>
+            <h1 class="page-title">${detail.title}</h1>
+            <div class="turn-list">
+              ${detail.turns.map((turn) => html`<${TurnView} turn=${turn} />`)}
+            </div>
+          `}
     </div>
   `;
 }

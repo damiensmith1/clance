@@ -1,35 +1,133 @@
-import { h, html, useState } from "../shared/vendor/preact-htm-standalone.module.js";
-import { ChatsSection } from "./sections/ChatsSection.js";
+import { html, useEffect, useState } from "../shared/vendor/preact-htm-standalone.module.js";
+import { Icon } from "../shared/icons.js";
+import { ChatsListSection, ChatDetailSection } from "./sections/ChatsSection.js";
 import { SkillsSection } from "./sections/SkillsSection.js";
 import { SettingsSection } from "./sections/SettingsSection.js";
 
-const SECTIONS = {
-  chats: { label: "Chats", Component: ChatsSection },
-  skills: { label: "Skills & Plugins", Component: SkillsSection },
-  settings: { label: "Settings", Component: SettingsSection },
-};
+const LAUNCHER_ITEMS = [
+  { id: "chats", label: "Chats List", icon: "chat" },
+  { id: "skills", label: "Skills & Plugins", icon: "puzzle" },
+  { id: "settings", label: "Settings", icon: "gear" },
+];
+
+const HOME_TAB = { id: "chats", type: "chats", label: "Chats List", icon: "chat" };
+
+function tabIcon(tab) {
+  return Icon[tab.icon] ? Icon[tab.icon](15) : null;
+}
+
+function renderTabContent(tab, openChatTab) {
+  switch (tab.type) {
+    case "chats":
+      return html`<${ChatsListSection} onOpenChat=${openChatTab} />`;
+    case "skills":
+      return html`<${SkillsSection} />`;
+    case "settings":
+      return html`<${SettingsSection} />`;
+    case "chatDetail":
+      return html`<${ChatDetailSection} session=${tab.session} />`;
+    default:
+      return null;
+  }
+}
 
 export function Shell() {
-  const [sectionId, setSectionId] = useState("chats");
-  const ActiveSection = SECTIONS[sectionId].Component;
+  const [tabs, setTabs] = useState([HOME_TAB]);
+  const [activeId, setActiveId] = useState(HOME_TAB.id);
+  const [reuseTabs, setReuseTabs] = useState(true);
+  const [claudeConnected, setClaudeConnected] = useState(null);
+
+  useEffect(() => {
+    window.clanceApp.getPreferences().then((prefs) => setReuseTabs(prefs.reuseTabs));
+    window.clanceApp.getSetupStatus().then((status) => setClaudeConnected(status.claude.loggedIn));
+  }, []);
+
+  function openTab(newTab) {
+    const existing = tabs.find((t) => t.id === newTab.id);
+    if (existing) {
+      if (reuseTabs) {
+        setActiveId(existing.id);
+        return;
+      }
+      const uniqueTab = { ...newTab, id: `${newTab.id}#${Date.now()}` };
+      setTabs([...tabs, uniqueTab]);
+      setActiveId(uniqueTab.id);
+      return;
+    }
+    setTabs([...tabs, newTab]);
+    setActiveId(newTab.id);
+  }
+
+  function openSection(id) {
+    const item = LAUNCHER_ITEMS.find((i) => i.id === id);
+    openTab({ id, type: id, label: item.label, icon: item.icon });
+  }
+
+  function openChatTab(session) {
+    openTab({
+      id: `chat:${session.filePath}`,
+      type: "chatDetail",
+      label: session.title,
+      icon: session.projectLabel === "Clance" ? "chat" : "terminal",
+      session,
+    });
+  }
+
+  function closeTab(id, event) {
+    event.stopPropagation();
+    if (tabs.length <= 1) return;
+    const index = tabs.findIndex((t) => t.id === id);
+    if (index === -1) return;
+    const nextTabs = tabs.filter((t) => t.id !== id);
+    setTabs(nextTabs);
+    if (activeId === id) {
+      const neighbor = nextTabs[Math.max(0, index - 1)] ?? nextTabs[0];
+      setActiveId(neighbor.id);
+    }
+  }
+
+  const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
 
   return html`
     <div class="shell">
       <nav class="sidebar">
-        ${Object.entries(SECTIONS).map(
-          ([id, { label }]) => html`
+        <div class="brand">Clance</div>
+        <div class="launcher-label">Launcher</div>
+        ${LAUNCHER_ITEMS.map(
+          (item) => html`
             <button
-              class=${id === sectionId ? "active" : ""}
-              onClick=${() => setSectionId(id)}
+              class="sidebar-item ${activeTab?.type === item.id ? "sidebar-item-active" : ""}"
+              onClick=${() => openSection(item.id)}
             >
-              ${label}
+              ${Icon[item.icon](16)}
+              <span>${item.label}</span>
             </button>
           `
         )}
+        <div class="sidebar-footer">
+          <span class="status-dot ${claudeConnected ? "status-dot-ok" : "status-dot-off"}"></span>
+          <span>${claudeConnected ? "Claude Connected" : "Claude Disconnected"}</span>
+        </div>
       </nav>
-      <main class="content">
-        <${ActiveSection} />
-      </main>
+      <div class="shell-main">
+        <div class="tab-bar">
+          ${tabs.map(
+            (tab) => html`
+              <button
+                class="tab ${tab.id === activeId ? "tab-active" : ""}"
+                onClick=${() => setActiveId(tab.id)}
+              >
+                <span class="tab-icon">${tabIcon(tab)}</span>
+                <span class="tab-label">${tab.label}</span>
+                <span class="tab-close" onClick=${(e) => closeTab(tab.id, e)}>
+                  ${Icon.close(12)}
+                </span>
+              </button>
+            `
+          )}
+        </div>
+        <main class="content">${activeTab && renderTabContent(activeTab, openChatTab)}</main>
+      </div>
     </div>
   `;
 }

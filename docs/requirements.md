@@ -156,12 +156,12 @@ status: draft
 
 ### In-app chat history
 
-- Chat-style UI listing past sessions (most recent first) — implemented
-  as a list↔detail toggle in the Chats sidebar section, covering both
-  Clance's own sessions and real Claude Code CLI sessions from any
-  project on the machine
-- Click a session to view the full back-and-forth; read-only for v1 (no
-  resuming a session from history)
+- Chat-style UI listing past sessions (most recent first, grouped by day),
+  covering both Clance's own sessions and real Claude Code CLI sessions
+  from any project on the machine
+- Click a session to open its full back-and-forth as its own closable tab
+  (see the main window's tab system in `docs/design.md`); read-only for
+  v1 (no resuming a session from history)
 - Since storage is JSONL-based, history view is just a JSONL
   reader/renderer, not a separate SQLite-driven UI
 - Optional: SQLite as a lightweight index/cache on top of the JSONL files
@@ -213,6 +213,12 @@ no PR to the core app required.
   & Plugins, Settings) — reachable via the Dock icon or the tray's "Open
   Dashboard" item. This replaces the originally-planned tray-only, no-Dock
   behavior.
+- The main window uses a tab-based navigation model: the sidebar lists
+  what can be opened (a section, or a past conversation from Chats) but
+  doesn't itself switch content — opening something adds a closable tab,
+  and the tab bar is the primary way to switch between what's open. A
+  "Tab Behavior" preference controls whether reopening an already-open
+  item reuses its tab or opens a duplicate. See `docs/design.md`.
 - Cmd+Q now quits the entire app (tray, popup, and main window together),
   via the app menu's Quit role — previously there was no real "app" to
   quit since it ran tray-only. Closing just the main window does not quit

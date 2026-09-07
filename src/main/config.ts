@@ -12,6 +12,9 @@ export type ClanceConfig = {
   // broader grant than the app's setup flow gives anywhere else.
   // "all" remains a valid explicit value for anyone who wants it.
   enabledSkills: string[] | "all";
+  // Whether opening an already-open tab (same section, or the same chat)
+  // activates the existing tab instead of opening a duplicate.
+  reuseTabs: boolean;
 };
 
 const CONFIG_PATH = join(SESSION_CWD, "config.json");
@@ -20,6 +23,7 @@ const DEFAULT_CONFIG: ClanceConfig = {
   shortcuts: { togglePopup: "Alt+Space" },
   shortcutsConfigured: false,
   enabledSkills: [],
+  reuseTabs: true,
 };
 
 export function readConfig(): ClanceConfig {

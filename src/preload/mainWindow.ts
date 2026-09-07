@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from "electron";
 contextBridge.exposeInMainWorld("clanceApp", {
   getSetupStatus: () => ipcRenderer.invoke("setup:get-status"),
   connectClaude: () => ipcRenderer.invoke("setup:connect-claude"),
+  disconnectClaude: () => ipcRenderer.invoke("setup:disconnect-claude"),
   openInstallDocs: () => ipcRenderer.invoke("setup:open-install-docs"),
   recheckPermissions: () => ipcRenderer.invoke("setup:recheck-permissions"),
   openScreenRecordingSettings: () =>
@@ -19,6 +20,8 @@ contextBridge.exposeInMainWorld("clanceApp", {
   getPreferences: () => ipcRenderer.invoke("settings:get-preferences"),
   setLaunchOnLogin: (enabled: boolean) =>
     ipcRenderer.invoke("settings:set-launch-on-login", enabled),
+  setReuseTabs: (enabled: boolean) =>
+    ipcRenderer.invoke("settings:set-reuse-tabs", enabled),
   listSkills: () => ipcRenderer.invoke("extensibility:list-skills"),
   setSkillEnabled: (name: string, enabled: boolean) =>
     ipcRenderer.invoke("extensibility:set-skill-enabled", name, enabled),

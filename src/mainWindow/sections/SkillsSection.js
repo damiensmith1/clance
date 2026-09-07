@@ -1,71 +1,33 @@
 import { html, useEffect, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { Icon } from "../../shared/icons.js";
+import { Toggle } from "../components/Toggle.js";
 
-function Toggle({ checked, onChange }) {
-  return html`<input type="checkbox" checked=${checked} onChange=${(e) => onChange(e.target.checked)} />`;
-}
+const TABS = [
+  { id: "all", label: "All Extensions" },
+  { id: "skills", label: "Skills" },
+  { id: "mcp", label: "MCP Servers" },
+  { id: "tools", label: "Custom Tools", planned: true },
+];
 
-function SkillsList({ skills, loading, onToggle }) {
-  if (loading) return html`<p class="section-placeholder-note">Loading…</p>`;
-  if (skills.length === 0) {
-    return html`<p class="section-placeholder-note">
-      No skills found in <code>~/.claude/skills/</code>.
-    </p>`;
-  }
+function ExtensionCard({ icon, title, subtitle, description, enabled, onToggle }) {
   return html`
-    <div class="extensibility-list">
-      ${skills.map(
-        (skill) => html`
-          <div class="extensibility-row">
-            <div class="extensibility-row-info">
-              <span class="extensibility-row-name">${skill.name}</span>
-              ${skill.description &&
-              html`<span class="extensibility-row-description">${skill.description}</span>`}
-            </div>
-            <${Toggle}
-              checked=${skill.enabled}
-              onChange=${(enabled) => onToggle(skill.name, enabled)}
-            />
-          </div>
-        `
-      )}
-    </div>
-  `;
-}
-
-function McpServersList({ servers, loading, onToggle }) {
-  if (loading) return html`<p class="section-placeholder-note">Loading…</p>`;
-  if (servers.length === 0) {
-    return html`<p class="section-placeholder-note">
-      No MCP servers configured yet. Add entries to
-      <code>~/.clance/mcp.json</code> (mirrors Claude Code's own
-      <code>.mcp.json</code> shape) to see them here.
-    </p>`;
-  }
-  return html`
-    <div class="extensibility-list">
-      ${servers.map(
-        (server) => html`
-          <div class="extensibility-row">
-            <div class="extensibility-row-info">
-              <span class="extensibility-row-name">${server.name}</span>
-              <span class="extensibility-row-description">
-                ${server.config.type === "stdio" || !server.config.type
-                  ? [server.config.command, ...(server.config.args ?? [])].join(" ")
-                  : server.config.url}
-              </span>
-            </div>
-            <${Toggle}
-              checked=${server.enabled}
-              onChange=${(enabled) => onToggle(server.name, enabled)}
-            />
-          </div>
-        `
-      )}
+    <div class="item-card item-card-static">
+      <span class="item-card-icon item-card-icon-accent">${icon}</span>
+      <span class="item-card-body">
+        <span class="item-card-title">${title}</span>
+        ${subtitle && html`<span class="pill pill-mono">${subtitle}</span>`}
+        ${description && html`<span class="item-card-description">${description}</span>`}
+      </span>
+      <span class="item-card-actions">
+        <${Toggle} checked=${enabled} onChange=${onToggle} />
+        <span class="icon-button">${Icon.moreVertical(16)}</span>
+      </span>
     </div>
   `;
 }
 
 export function SkillsSection() {
+  const [tab, setTab] = useState("all");
   const [skills, setSkills] = useState([]);
   const [loadingSkills, setLoadingSkills] = useState(true);
   const [servers, setServers] = useState([]);
@@ -96,21 +58,83 @@ export function SkillsSection() {
     window.clanceApp.setMcpServerEnabled(name, enabled).then(setServers);
   }
 
+  const showSkills = tab === "all" || tab === "skills";
+  const showServers = tab === "all" || tab === "mcp";
+  const showTools = tab === "tools";
+
   return html`
-    <div class="section-skills">
-      <h2>Skills & Plugins</h2>
-      <section class="extensibility-group">
-        <h3>Skills</h3>
-        <${SkillsList} skills=${skills} loading=${loadingSkills} onToggle=${handleSkillToggle} />
-      </section>
-      <section class="extensibility-group">
-        <h3>MCP Servers</h3>
-        <${McpServersList}
-          servers=${servers}
-          loading=${loadingServers}
-          onToggle=${handleServerToggle}
-        />
-      </section>
+    <div class="section-page">
+      <h1 class="page-title">Skills & Plugins</h1>
+      <p class="page-subtitle">Extend Clance with specialized capabilities and external integrations.</p>
+
+      <div class="segmented">
+        ${TABS.map(
+          (t) => html`
+            <button
+              class="segmented-item ${tab === t.id ? "segmented-item-active" : ""}"
+              onClick=${() => setTab(t.id)}
+            >
+              ${t.label} ${t.planned && html`<span class="pill pill-muted">PLANNED</span>`}
+            </button>
+          `
+        )}
+      </div>
+
+      ${showSkills &&
+      html`
+        <section class="extension-group">
+          <h2 class="group-title">Skills</h2>
+          ${loadingSkills
+            ? html`<p class="empty-note">Loading…</p>`
+            : skills.length === 0
+            ? html`<p class="empty-note">
+                No skills found in <code>~/.claude/skills/</code>.
+              </p>`
+            : skills.map(
+                (skill) => html`
+                  <${ExtensionCard}
+                    icon=${Icon.markdown(18)}
+                    title=${skill.name}
+                    description=${skill.description}
+                    enabled=${skill.enabled}
+                    onToggle=${(enabled) => handleSkillToggle(skill.name, enabled)}
+                  />
+                `
+              )}
+        </section>
+      `}
+      ${showServers &&
+      html`
+        <section class="extension-group">
+          <div class="group-title-row">
+            <h2 class="group-title">MCP Servers</h2>
+            <button class="btn-ghost">${Icon.addServer(12)} Add Server</button>
+          </div>
+          ${loadingServers
+            ? html`<p class="empty-note">Loading…</p>`
+            : servers.length === 0
+            ? html`<p class="empty-note">
+                No MCP servers configured yet. Add entries to
+                <code>~/.clance/mcp.json</code> (mirrors Claude Code's own
+                <code>.mcp.json</code> shape) to see them here.
+              </p>`
+            : servers.map(
+                (server) => html`
+                  <${ExtensionCard}
+                    icon=${Icon.plug(18)}
+                    title=${server.name}
+                    subtitle=${server.config.type === "stdio" || !server.config.type
+                      ? [server.config.command, ...(server.config.args ?? [])].join(" ")
+                      : server.config.url}
+                    enabled=${server.enabled}
+                    onToggle=${(enabled) => handleServerToggle(server.name, enabled)}
+                  />
+                `
+              )}
+        </section>
+      `}
+      ${showTools &&
+      html`<p class="empty-note">Custom tools are planned but not built yet.</p>`}
     </div>
   `;
 }

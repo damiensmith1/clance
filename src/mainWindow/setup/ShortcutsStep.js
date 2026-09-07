@@ -1,8 +1,25 @@
 import { h, html, useState, useEffect } from "../../shared/vendor/preact-htm-standalone.module.js";
 
+const MODIFIER_LABELS = {
+  Alt: "⌥ Option",
+  Option: "⌥ Option",
+  CommandOrControl: "⌘ Command",
+  Cmd: "⌘ Command",
+  Command: "⌘ Command",
+  Control: "⌃ Control",
+  Ctrl: "⌃ Control",
+  Shift: "⇧ Shift",
+  Super: "⌘ Command",
+};
+
+function acceleratorParts(accelerator) {
+  return accelerator.split("+").map((part) => MODIFIER_LABELS[part] ?? part);
+}
+
 export function ShortcutsStep({ onComplete } = {}) {
   const [actions, setActions] = useState(null);
   const [values, setValues] = useState({});
+  const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState(null);
   const [saved, setSaved] = useState(false);
 
@@ -24,6 +41,7 @@ export function ShortcutsStep({ onComplete } = {}) {
       .saveShortcuts(values)
       .then(() => {
         setSaved(true);
+        setEditingId(null);
         if (onComplete) onComplete();
       })
       .catch((err) => {
@@ -32,7 +50,44 @@ export function ShortcutsStep({ onComplete } = {}) {
   }
 
   if (actions === null) {
-    return html`<div class="setup-step"><p>Loading…</p></div>`;
+    return html`<p class="empty-note">Loading…</p>`;
+  }
+
+  if (!onComplete) {
+    return html`
+      ${actions.map(
+        (action) => html`
+          <div class="preference-row">
+            <div>
+              <div class="preference-title">${action.label}</div>
+              <div class="preference-description">${action.description}</div>
+            </div>
+            ${editingId === action.id
+              ? html`
+                  <div class="shortcut-edit">
+                    <input
+                      type="text"
+                      value=${values[action.id] ?? ""}
+                      onInput=${(e) => setValues({ ...values, [action.id]: e.target.value })}
+                    />
+                    <button class="btn-link" onClick=${handleSave}>Save</button>
+                  </div>
+                `
+              : html`
+                  <div class="shortcut-display">
+                    ${acceleratorParts(values[action.id] ?? "").map(
+                      (part) => html`<span class="kbd">${part}</span>`
+                    )}
+                    <button class="btn-link" onClick=${() => setEditingId(action.id)}>
+                      Change
+                    </button>
+                  </div>
+                `}
+          </div>
+        `
+      )}
+      ${error && html`<p class="setup-error">${error}</p>`}
+    `;
   }
 
   return html`

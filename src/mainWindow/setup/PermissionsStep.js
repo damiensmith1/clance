@@ -1,4 +1,5 @@
 import { h, html, useState, useEffect } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { StatusCard } from "../components/StatusCard.js";
 
 export function PermissionsStep({ onComplete } = {}) {
   const [status, setStatus] = useState(null);
@@ -15,10 +16,29 @@ export function PermissionsStep({ onComplete } = {}) {
   }, []);
 
   if (status === null) {
-    return html`<div class="setup-step"><p>Checking…</p></div>`;
+    return html`<p class="empty-note">Checking…</p>`;
   }
 
   const bothGranted = status.screenRecording && status.accessibility;
+
+  if (!onComplete) {
+    return html`
+      <${StatusCard}
+        ok=${status.screenRecording}
+        title="Screen Recording"
+        description="Required so Clance can read on-screen context when invoked."
+        actionLabel=${status.screenRecording ? null : "Grant Access"}
+        onAction=${() => window.clanceApp.openScreenRecordingSettings()}
+      />
+      <${StatusCard}
+        ok=${status.accessibility}
+        title="Accessibility"
+        description="Required for Clance to type or act on your behalf."
+        actionLabel=${status.accessibility ? null : "Grant Access"}
+        onAction=${() => window.clanceApp.openAccessibilitySettings()}
+      />
+    `;
+  }
 
   return html`
     <div class="setup-step">

@@ -1,8 +1,15 @@
-import { renderMarkdown } from "../shared/markdown.js";
+import { renderMarkdown, attachCopyHandler } from "../shared/markdown.js";
 
 const appEl = document.getElementById("app");
 const goalInput = document.getElementById("goal");
 const transcriptEl = document.getElementById("transcript");
+
+attachCopyHandler(transcriptEl);
+
+const PERSON_ICON =
+  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.5" r="3.2"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg>';
+const ROBOT_ICON =
+  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="8" width="14" height="10" rx="2.5"/><path d="M12 8V5"/><circle cx="12" cy="4" r="1"/><circle cx="9" cy="13" r="1.3"/><circle cx="15" cy="13" r="1.3"/><path d="M9 16.5h6"/></svg>';
 
 let currentReplyEl = null;
 let currentRawText = "";
@@ -31,24 +38,41 @@ function scrollToBottom() {
   transcriptEl.scrollTop = transcriptEl.scrollHeight;
 }
 
+function createAvatar(kind) {
+  const avatar = document.createElement("span");
+  avatar.className = `avatar avatar-${kind}`;
+  avatar.innerHTML = kind === "user" ? PERSON_ICON : ROBOT_ICON;
+  return avatar;
+}
+
 function appendTurn(goal) {
   appEl.classList.add("has-messages");
 
-  const turn = document.createElement("div");
-  turn.className = "turn";
-
+  const userTurn = document.createElement("div");
+  userTurn.className = "turn";
+  const promptBody = document.createElement("div");
+  promptBody.className = "turn-body";
   const promptEl = document.createElement("div");
   promptEl.className = "turn-prompt";
   promptEl.textContent = goal;
+  promptBody.appendChild(promptEl);
+  userTurn.appendChild(createAvatar("user"));
+  userTurn.appendChild(promptBody);
 
+  const replyTurn = document.createElement("div");
+  replyTurn.className = "turn";
+  const replyBody = document.createElement("div");
+  replyBody.className = "turn-body";
   const replyEl = document.createElement("div");
   replyEl.className = "turn-reply";
   replyEl.dataset.pending = "true";
   replyEl.appendChild(createTypingIndicator());
+  replyBody.appendChild(replyEl);
+  replyTurn.appendChild(createAvatar("assistant"));
+  replyTurn.appendChild(replyBody);
 
-  turn.appendChild(promptEl);
-  turn.appendChild(replyEl);
-  transcriptEl.appendChild(turn);
+  transcriptEl.appendChild(userTurn);
+  transcriptEl.appendChild(replyTurn);
   scrollToBottom();
 
   return replyEl;

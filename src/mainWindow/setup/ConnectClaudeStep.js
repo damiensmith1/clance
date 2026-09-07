@@ -1,4 +1,5 @@
 import { h, html, useState, useEffect } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { StatusCard } from "../components/StatusCard.js";
 
 export function ConnectClaudeStep({ onComplete } = {}) {
   const [status, setStatus] = useState(null);
@@ -37,8 +38,44 @@ export function ConnectClaudeStep({ onComplete } = {}) {
       });
   }
 
+  function handleDisconnect() {
+    window.clanceApp.disconnectClaude().then(refresh);
+  }
+
   if (status === null) {
-    return html`<div class="setup-step"><p>Checking…</p></div>`;
+    return html`<p class="empty-note">Checking…</p>`;
+  }
+
+  // Settings mode: a single compact status card, not the step-by-step flow.
+  if (!onComplete) {
+    if (!status.installed) {
+      return html`<${StatusCard}
+        ok=${false}
+        title="Claude Account"
+        description="Claude Code CLI isn't installed."
+        actionLabel="Install"
+        onAction=${() => window.clanceApp.openInstallDocs()}
+      />`;
+    }
+    if (!status.loggedIn) {
+      return html`<${StatusCard}
+        ok=${false}
+        title="Claude Account"
+        description="Not connected."
+        actionLabel=${connecting ? "Connecting…" : "Connect"}
+        onAction=${handleConnect}
+      />`;
+    }
+    return html`<${StatusCard}
+      ok=${true}
+      title="Claude Account"
+      description="Connected to ${status.email ?? "your account"}${status.subscriptionType
+        ? ` · ${status.subscriptionType} plan`
+        : ""}."
+      actionLabel="Disconnect"
+      actionVariant="link"
+      onAction=${handleDisconnect}
+    />`;
   }
 
   if (!status.installed) {

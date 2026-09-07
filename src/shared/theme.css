@@ -1,28 +1,64 @@
-/* Warm, flat, editorial — no glass, no blur, no vibrancy. Light mode only
-   for now (see the note below); every consumer references these custom
-   properties rather than literal colors, so a future theme or theme pack
-   stays additive: define the same property names under a
-   `[data-theme="..."]` selector or a `prefers-color-scheme` query, touch
-   nothing else. */
+/* Fonts are vendored locally (src/shared/fonts/, variable woff2 files) per
+   the project's no-CDN rule — same principle as the vendored Preact/htm
+   build. Each is a single variable-weight file; the weight ranges below
+   let the browser pick the right instance rather than needing one file
+   per static weight. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("fonts/Inter-Variable.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Newsreader";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("fonts/Newsreader-Variable.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("fonts/JetBrainsMono-Variable.woff2") format("woff2");
+}
+
+/* Warm, flat, editorial — no glass, no blur, no vibrancy. "Editorial
+   Warmth (Refined)" palette. Light mode only for now; every consumer
+   references these custom properties rather than literal colors, so a
+   future theme or theme pack stays additive: define the same property
+   names under a `[data-theme="..."]` selector or a `prefers-color-scheme`
+   query, touch nothing else. */
 :root {
-  --app-bg: #f4efe4;
-  --surface-bg: #eae2d2;
-  --surface-elevated: #fbf9f3;
-  --surface-hover: rgba(51, 44, 34, 0.06);
-  --surface-active: rgba(51, 44, 34, 0.1);
-  --surface-border: #ddd4c0;
+  --app-bg: #f7f3eb;
+  --surface-bg: #efede5;
+  --surface-elevated: #ffffff;
+  --surface-card: #ffffff;
+  --surface-hover: rgba(45, 41, 36, 0.06);
+  --surface-active: rgba(45, 41, 36, 0.1);
+  --surface-border: #e2ddd0;
 
-  --text-primary: #332c22;
-  --text-secondary: #8c8270;
+  --text-primary: #2d2924;
+  --text-secondary: #7a7267;
 
-  --accent: #c96442;
-  --accent-hover: #b5573a;
-  --accent-contrast: #fbf9f3;
+  --accent: #d97757;
+  --accent-hover: #c2643f;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgba(217, 119, 87, 0.14);
+
   --danger: #b23b3b;
+  --success: #4a7a4e;
+  --success-bg: #eef3ea;
+  --warning: #c9773f;
+  --warning-bg: #faf1e2;
 
   --radius-lg: 12px;
   --radius-md: 6px;
+  --radius-sm: 4px;
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --font-serif: "Newsreader", ui-serif, Georgia, "Iowan Old Style", Palatino, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
 }

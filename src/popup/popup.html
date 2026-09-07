@@ -18,63 +18,57 @@
         flex-direction: column;
         max-height: 480px;
         box-sizing: border-box;
-        padding: 16px 20px;
+        padding: 14px;
         border-radius: var(--radius-lg);
         overflow: hidden;
-        background: var(--surface-elevated);
+        background: var(--surface-card);
         border: 1px solid var(--surface-border);
         box-shadow: 0 8px 30px rgba(51, 44, 34, 0.16);
+        gap: 10px;
       }
 
-      #goal {
-        position: relative;
+      #session {
         order: 1;
-        width: 100%;
-        box-sizing: border-box;
-        background: transparent;
-        border: none;
+        display: none;
+        flex: 1 1 auto;
+        min-height: 0;
+        flex-direction: column;
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+      }
+      #app.has-messages #session {
+        display: flex;
+      }
+
+      #session-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 12px;
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        color: var(--text-secondary);
         border-bottom: 1px solid var(--surface-border);
-        color: var(--text-primary);
-        font-family: inherit;
-        font-size: 14px;
-        padding: 4px 2px 12px;
-        outline: none;
         flex-shrink: 0;
       }
-      #goal::placeholder {
-        color: var(--text-secondary);
-      }
-      #goal:disabled {
-        opacity: 0.5;
-      }
-
-      /* Once a conversation starts, the input moves below the transcript. */
-      #app.has-messages #goal {
-        border-bottom: none;
-        border-top: 1px solid var(--surface-border);
-        padding: 12px 2px 4px;
-        order: 2;
+      .status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--success);
+        flex-shrink: 0;
       }
 
       #transcript {
-        position: relative;
-        order: 2;
         flex: 1 1 auto;
         min-height: 0;
-        margin-top: 14px;
         overflow-y: auto;
         display: flex;
         flex-direction: column;
-        gap: 16px;
-        padding-right: 4px;
-      }
-      #transcript:empty {
-        margin-top: 0;
-      }
-      #app.has-messages #transcript {
-        order: 1;
-        margin-top: 0;
-        margin-bottom: 14px;
+        gap: 14px;
+        padding: 12px;
       }
       #transcript::-webkit-scrollbar {
         width: 5px;
@@ -84,7 +78,60 @@
         border-radius: 3px;
       }
 
+      #input-box {
+        order: 2;
+        flex-shrink: 0;
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-md);
+        padding: 10px 12px 8px;
+      }
+
+      #goal {
+        width: 100%;
+        box-sizing: border-box;
+        background: transparent;
+        border: none;
+        color: var(--text-primary);
+        font-family: inherit;
+        font-size: 14px;
+        outline: none;
+      }
+      #goal::placeholder {
+        color: var(--text-secondary);
+      }
+      #goal:disabled {
+        opacity: 0.5;
+      }
+
+      #input-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 6px;
+        color: var(--text-secondary);
+      }
+      #input-actions span {
+        display: flex;
+      }
+
+      #footer-hint {
+        order: 3;
+        flex-shrink: 0;
+        text-align: center;
+        font-size: 11px;
+        color: var(--text-secondary);
+      }
+      #footer-hint .kbd {
+        display: inline-block;
+        border: 1px solid var(--surface-border);
+        border-radius: 4px;
+        padding: 0 4px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+      }
+
       .turn {
+        display: flex;
+        gap: 8px;
         animation: turn-in 0.15s ease;
       }
       @keyframes turn-in {
@@ -92,10 +139,36 @@
         to { opacity: 1; transform: translateY(0); }
       }
 
-      .turn-prompt {
-        font-size: 12.5px;
+      .avatar {
+        flex-shrink: 0;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .avatar-user {
+        background: var(--surface-bg);
         color: var(--text-secondary);
-        margin-bottom: 4px;
+      }
+      .avatar-assistant {
+        background: var(--accent);
+        color: var(--accent-contrast);
+      }
+
+      .turn-body {
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+
+      .turn-prompt {
+        display: inline-block;
+        background: var(--surface-bg);
+        border-radius: var(--radius-md);
+        padding: 6px 10px;
+        font-size: 13px;
+        color: var(--text-primary);
       }
 
       .turn-reply {
@@ -139,26 +212,57 @@
         border-radius: 4px;
         padding: 1px 5px;
       }
-      .turn-reply pre {
-        background: var(--surface-bg);
-        border: 1px solid var(--surface-border);
-        border-radius: var(--radius-md);
-        padding: 10px 12px;
+
+      .code-block {
         margin: 8px 0;
+        border-radius: var(--radius-md);
+        overflow: hidden;
+        background: #2b2620;
+      }
+      .code-block-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 5px 10px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: rgba(251, 249, 243, 0.55);
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .code-copy-btn {
+        background: none;
+        border: none;
+        color: inherit;
+        font-family: inherit;
+        font-size: 11px;
+        cursor: pointer;
+        padding: 0;
+      }
+      .code-copy-btn:hover {
+        color: rgba(251, 249, 243, 0.9);
+      }
+      .code-block pre {
+        margin: 0;
+        padding: 10px 12px;
         overflow-x: auto;
       }
-      .turn-reply pre code {
-        background: none;
-        padding: 0;
+      .code-block code {
+        font-family: var(--font-mono);
         font-size: 12px;
         line-height: 1.5;
         white-space: pre;
+        color: #f2ede2;
       }
+      .tok-keyword { color: #c99bdb; }
+      .tok-string { color: #9fca8f; }
+      .tok-comment { color: #8c8270; font-style: italic; }
+      .tok-number { color: #7fb3d5; }
 
       .note {
         font-size: 12px;
         font-style: italic;
         color: var(--text-secondary);
+        padding: 0 12px;
       }
 
       .typing {
@@ -183,8 +287,22 @@
   </head>
   <body>
     <div id="app">
-      <input id="goal" type="text" placeholder="What do you want to do?" autofocus />
-      <div id="transcript"></div>
+      <div id="session">
+        <div id="session-header"><span class="status-dot"></span>ACTIVE SESSION</div>
+        <div id="transcript"></div>
+      </div>
+      <div id="input-box">
+        <input id="goal" type="text" placeholder="Message Clance…" autofocus />
+        <div id="input-actions">
+          <span title="Attach (coming soon)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 6.5l-7 7a3 3 0 0 0 4.2 4.2l7-7a5 5 0 0 0-7.1-7.1l-7 7a7 7 0 0 0 9.9 9.9"/></svg>
+          </span>
+          <span title="Quick actions (coming soon)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.4 4.6L18 9l-4.6 1.4L12 15l-1.4-4.6L6 9l4.6-1.4L12 3z"/></svg>
+          </span>
+        </div>
+      </div>
+      <div id="footer-hint">Hit <span class="kbd">Esc</span> to dismiss</div>
     </div>
     <script type="module" src="popup.js"></script>
   </body>

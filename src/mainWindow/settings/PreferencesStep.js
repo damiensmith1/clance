@@ -1,32 +1,44 @@
 import { html, useEffect, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { Toggle } from "../components/Toggle.js";
 
-export function PreferencesStep() {
+export function usePreferences() {
   const [prefs, setPrefs] = useState(null);
-
   useEffect(() => {
     window.clanceApp.getPreferences().then(setPrefs);
   }, []);
+  return [prefs, setPrefs];
+}
 
-  function handleLaunchOnLoginChange(enabled) {
+export function LaunchAtLoginRow({ prefs, setPrefs }) {
+  if (!prefs) return html`<p class="empty-note">Loading…</p>`;
+  function handleChange(enabled) {
     setPrefs({ ...prefs, launchOnLogin: enabled });
     window.clanceApp.setLaunchOnLogin(enabled);
   }
-
-  if (!prefs) {
-    return html`<div class="setup-step"><p>Loading…</p></div>`;
-  }
-
   return html`
-    <div class="setup-step">
-      <h2>Preferences</h2>
-      <div class="preference-row">
-        <label>Launch Clance at login</label>
-        <input
-          type="checkbox"
-          checked=${prefs.launchOnLogin}
-          onChange=${(e) => handleLaunchOnLoginChange(e.target.checked)}
-        />
+    <div class="preference-row">
+      <div>
+        <div class="preference-title">Launch at Login</div>
+        <div class="preference-description">Automatically open Clance when you start your computer.</div>
       </div>
+      <${Toggle} checked=${prefs.launchOnLogin} onChange=${handleChange} />
+    </div>
+  `;
+}
+
+export function TabBehaviorRow({ prefs, setPrefs }) {
+  if (!prefs) return html`<p class="empty-note">Loading…</p>`;
+  function handleChange(enabled) {
+    setPrefs({ ...prefs, reuseTabs: enabled });
+    window.clanceApp.setReuseTabs(enabled);
+  }
+  return html`
+    <div class="preference-row">
+      <div>
+        <div class="preference-title">Tab Behavior</div>
+        <div class="preference-description">Reuse existing tabs when opening the same resource.</div>
+      </div>
+      <${Toggle} checked=${prefs.reuseTabs} onChange=${handleChange} />
     </div>
   `;
 }
