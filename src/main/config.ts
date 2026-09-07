@@ -29,7 +29,15 @@ const DEFAULT_CONFIG: ClanceConfig = {
 export function readConfig(): ClanceConfig {
   try {
     const raw = readFileSync(CONFIG_PATH, "utf8");
-    return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+    const stored = JSON.parse(raw);
+    return {
+      ...DEFAULT_CONFIG,
+      ...stored,
+      // Shallow-merging the top level alone lets an on-disk config saved
+      // before a new shortcut was added (e.g. sessionPicker) wipe out that
+      // key entirely, since it replaces the whole shortcuts object.
+      shortcuts: { ...DEFAULT_CONFIG.shortcuts, ...stored.shortcuts },
+    };
   } catch {
     return DEFAULT_CONFIG;
   }
