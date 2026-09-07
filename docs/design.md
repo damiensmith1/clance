@@ -81,6 +81,82 @@ status: draft
   throttled while the window is hidden/unfocused (confirmed via
   `document.hidden`) and a response can legitimately arrive while hidden.
 
+## Text injection and conversation continuity
+
+Two features built together, since continuity (resuming a past session, and
+resuming after a rejected proposal) shares the same plumbing.
+
+- **"Type it out" via a propose/accept/reject-with-instructions loop, not
+  direct typing.** `src/main/agent.ts` registers a custom SDK tool,
+  `proposeText` (via `tool()` + `createSdkMcpServer()`), that the model calls
+  instead of replying in prose when the user's goal implies doing something
+  in the app they invoked Clance from. The tool's handler never types
+  anything — it only acknowledges the call; the actual proposal is caught by
+  watching complete `SDKAssistantMessage` (`type: "assistant"`) events for a
+  `tool_use` block on this tool and yielding a `{ kind: "proposal" }`
+  `AgentEvent`. The popup renders it as its own card (`.proposal-card` in
+  `src/popup/popup.js`) with **Accept & Insert** (real keystroke injection,
+  see below) or **Reject** (reveals a "what should change?" input whose
+  answer submits as a normal follow-up turn in the same resumed session —
+  no new plumbing needed, since conversation resume already exists for the
+  continuity feature below).
+- **Two non-obvious SDK behaviors, found only by testing, not by reading the
+  types:** (1) a custom SDK-server tool is deferred behind a "tool search"
+  step by default and doesn't reliably surface to the model at all unless
+  `createSdkMcpServer({..., alwaysLoad: true})` is set — without it, the
+  model insisted outright that it "can't type into applications," having
+  never seen the tool as an option. (2) Even once visible, calling it hit
+  the SDK's normal interactive tool-permission flow, which auto-denies
+  silently when no `canUseTool` callback is wired up (confirmed in the
+  SDK's own doc comments: "ask" decisions are terminal without one) — fixed
+  narrowly by adding the tool's exact qualified name
+  (`mcp__clanceTools__proposeText`) to `allowedTools`, which auto-allows
+  only this one inert tool without opening up a blanket bypass for
+  anything else (skills, user-configured MCP servers keep their normal
+  permission behavior). The qualified name format
+  (`mcp__<server>__<tool>`) was confirmed empirically from a real tool_use
+  block, not assumed — the server is deliberately named `clanceTools`
+  (no hyphen) so there's no sanitization transform to guess at.
+- **Real keystroke injection** (`src/main/frontApp.ts`) uses
+  `@nut-tree-fork/nut-js` (the maintained fork of the now-abandoned
+  `robotjs`) — specifically `getActiveWindow()`, captured the moment the
+  popup is about to show (before `.show()`/`.focus()` steal focus away from
+  whatever the user was actually working in), and `Window.focus()` +
+  `keyboard.type()` when a proposal is accepted. Verified before use that
+  its native binary loads under Electron's bundled Node without a
+  `NODE_MODULE_VERSION` mismatch (it does — no `electron-rebuild` step
+  needed) and that it's ABI-stable rather than assumed safe.
+- **Conversation continuity — confirmed empirically, not assumed:** the
+  Agent SDK's `resume` option finds a session purely by ID, regardless of
+  the `cwd` passed to the *new* `query()` call, and appends the new turn
+  back into that session's original file in its original location — tested
+  by resuming a real foreign-project CLI session while deliberately passing
+  Clance's own `cwd`, which correctly recalled real prior context and wrote
+  back to the original file, not a new one under Clance's bucket. This
+  means "continue any conversation" needed no per-session cwd tracking; the
+  existing `askClance(prompt, resumeSessionId, screenshotBase64)` signature
+  already covers it.
+- **Two hotkeys, not one** (`src/main/shortcuts.ts`): "New Conversation"
+  (`togglePopup`, unchanged) and "Continue a Conversation" (`sessionPicker`,
+  default `Alt+Shift+Command+Space`) — `registerHotkey()` already supported
+  multiple independent registrations, so no changes were needed there.
+- **The popup now has three modes**, chosen by the `popup-shown` IPC
+  payload's `mode` field (`src/preload/popup.ts`, `src/main/popupWindow.ts`):
+  `"new"` (unchanged), `"picker"` (a searchable session list, reusing
+  `chatHistory.ts`'s `listSessions()`), and `"resume"` (preloads the real
+  prior transcript via `getChatSession()` before showing the input, so
+  "which conversation am I in" is never ambiguous). Picking a session from
+  the picker transitions into resume mode in place. A "Continue in Popup"
+  action on the Chat History detail view (`ChatsSection.js`) opens resume
+  mode directly, skipping the picker.
+- **A real latent race condition, found while testing the picker:**
+  `popup.webContents.send("popup-shown", ...)` silently drops the event if
+  popup.js hasn't finished loading and attached its listener yet — there's
+  no queuing for a missed IPC event. This existed for "new" mode too, but
+  was undetectable there (a missed event's fallback state looks identical
+  to the intended one). Fixed by tracking a `did-finish-load` promise per
+  popup window and awaiting it before every send.
+
 ## Main application window
 
 - There are now two windows/renderer surfaces: the popup (unchanged) and a
@@ -207,8 +283,11 @@ status: draft
       (1568px) to control token cost. Accessibility-tree read is deferred —
       revisit if screenshot-only proves insufficient for structured-app
       goals (forms, code editors).
-- [ ] How does the app decide "talk back" vs. "type it out" — model-decided
+- [x] How does the app decide "talk back" vs. "type it out" — model-decided
       via prompt, or does the user pick a mode when typing their goal?
+      **Resolved:** model-decided from phrasing, via a `proposeText` tool
+      call instead of a user-facing mode switch — see "Text injection and
+      conversation continuity" above.
 - [x] Where does the Anthropic API key/auth live — env var, onboarding
       flow, macOS Keychain? **Resolved:** delegated entirely to the
       `claude` CLI's own credential store via `claude auth login`/`claude

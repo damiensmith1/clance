@@ -214,7 +214,20 @@ export function ChatDetailSection({ session }) {
               <span class="pill pill-strong">${cli ? "CLI SESSION" : "CLANCE SESSION"}</span>
               ${cli && html`<span class="detail-meta-text">project: ${detail.projectLabel}</span>`}
             </div>
-            <h1 class="page-title">${detail.title}</h1>
+            <div class="detail-title-row">
+              <h1 class="page-title">${detail.title}</h1>
+              <button
+                class="btn-secondary"
+                onClick=${() =>
+                  window.clanceApp.continueSessionInPopup({
+                    id: session.id,
+                    filePath: session.filePath,
+                    title: detail.title,
+                  })}
+              >
+                Continue in Popup
+              </button>
+            </div>
             <div class="turn-list">
               ${detail.turns.map((turn) => html`<${TurnView} turn=${turn} />`)}
             </div>

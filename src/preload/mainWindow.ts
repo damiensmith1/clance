@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld("clanceApp", {
   listChatSessions: () => ipcRenderer.invoke("chatHistory:list-sessions"),
   getChatSession: (filePath: string) =>
     ipcRenderer.invoke("chatHistory:get-session", filePath),
+  continueSessionInPopup: (session: { id: string; filePath: string; title: string }) =>
+    ipcRenderer.invoke("popup:continue-session", session),
   getPreferences: () => ipcRenderer.invoke("settings:get-preferences"),
   setLaunchOnLogin: (enabled: boolean) =>
     ipcRenderer.invoke("settings:set-launch-on-login", enabled),

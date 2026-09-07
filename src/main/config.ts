@@ -20,7 +20,7 @@ export type ClanceConfig = {
 const CONFIG_PATH = join(SESSION_CWD, "config.json");
 
 const DEFAULT_CONFIG: ClanceConfig = {
-  shortcuts: { togglePopup: "Alt+Space" },
+  shortcuts: { togglePopup: "Alt+Space", sessionPicker: "Alt+Shift+Command+Space" },
   shortcutsConfigured: false,
   enabledSkills: [],
   reuseTabs: true,

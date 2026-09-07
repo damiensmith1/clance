@@ -114,25 +114,37 @@ status: draft
 ### Response modes
 
 - **Talk back:** render Claude's response as chat text in the popup
-- **Type it out:** inject generated text into the currently focused field
-  via macOS Accessibility API (simulate keystrokes or direct AXUIElement
-  text insertion)
-- Fallback for injection failure: copy to clipboard + notify user to paste
-  manually
+- **Type it out:** ✅ implemented, as a propose/accept/reject loop rather
+  than direct injection. The model calls a custom `proposeText` tool
+  (chosen from phrasing, not a user-facing mode switch) instead of
+  replying in prose; the popup shows the proposed text with **Accept &
+  Insert** or **Reject**. Accepting refocuses the app that was frontmost
+  when the popup opened and simulates real keystrokes via
+  `@nut-tree-fork/nut-js`'s `keyboard.type()` (not the originally-planned
+  AXUIElement direct text insertion — keystroke simulation is universal
+  across apps with no per-app Accessibility-tree work). Rejecting reveals
+  a "what should change?" input; the answer is a normal follow-up turn in
+  the same resumed session, so the model can revise and the loop repeats.
+  See `docs/design.md` §"Text injection and conversation continuity".
+- No clipboard-fallback path yet for injection failure — not hit in
+  testing, revisit if it proves necessary.
 
 ### Multi-turn conversations
 
 - A single open of the popup is one conversation: turns within it share
   full context via the SDK's session resume, and the transcript stays
   visible turn-to-turn.
-- **Every open is a new conversation.** Closing the popup (blur-hide or
-  toggling it closed) and reopening it — by any means — always starts
-  fresh: transcript cleared, layout reset to input-only, and a new SDK
-  session (no `resume`). This reverses the originally-planned "reopen
-  continues last session" behavior; there is currently no way to
-  deliberately resume a specific past conversation from the popup itself
-  (still possible from the Claude Code CLI directly, since sessions are
-  still stored in CLI-compatible JSONL — see "Session Storage" below).
+- **The default hotkey opens a new conversation; a second hotkey resumes
+  one.** `Option+Space` (unchanged) always starts fresh: transcript
+  cleared, layout reset to input-only, new SDK session, no `resume`. A
+  second hotkey, `Option+Shift+Command+Space` ("Continue a Conversation"
+  in Settings), opens the popup in a searchable session-picker mode
+  instead — picking a session loads its real prior transcript and resumes
+  it, so screen context captured on the next turn effectively gets added
+  to that existing conversation. A "Continue in Popup" action on a
+  session's page in the Chats section does the same thing directly,
+  skipping the picker. Both reuse the same `resume` mechanism as any other
+  follow-up turn — see `docs/design.md`.
 - Screen context is re-captured fresh on every turn, even within the same
   open conversation (the screen may have changed since the last turn).
 
@@ -160,8 +172,10 @@ status: draft
   covering both Clance's own sessions and real Claude Code CLI sessions
   from any project on the machine
 - Click a session to open its full back-and-forth as its own closable tab
-  (see the main window's tab system in `docs/design.md`); read-only for
-  v1 (no resuming a session from history)
+  (see the main window's tab system in `docs/design.md`). The tab view
+  itself stays read-only (no editing history in place), but a "Continue in
+  Popup" action opens that same session, fully resumed, in the popup —
+  see "Multi-turn conversations" above.
 - Since storage is JSONL-based, history view is just a JSONL
   reader/renderer, not a separate SQLite-driven UI
 - Optional: SQLite as a lightweight index/cache on top of the JSONL files

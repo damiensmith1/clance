@@ -1,7 +1,7 @@
 import { app, ipcMain, Menu } from "electron";
 import { createTray } from "./tray";
 import { registerHotkey, unregisterAllHotkeys, isValidAccelerator } from "./hotkey";
-import { toggleClancePopup } from "./popupWindow";
+import { toggleClancePopup, togglePopupPicker, openPopupWithSession } from "./popupWindow";
 import { openMainWindow } from "./mainWindow";
 import { createAppMenu } from "./appMenu";
 import { askClance } from "./agent";
@@ -20,6 +20,7 @@ import { getSession, listSessions } from "./chatHistory";
 import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
 import { listSkills, setSkillEnabled } from "./skills";
 import { listMcpServers, setMcpServerEnabled } from "./mcpConfig";
+import { typeIntoCapturedWindow } from "./frontApp";
 
 app.dock?.show();
 
@@ -35,6 +36,12 @@ async function handleTrayPopupClick(): Promise<void> {
   }
 }
 
+function registerAllHotkeys(shortcuts: Record<string, string>): void {
+  unregisterAllHotkeys();
+  registerHotkey(toggleClancePopup, shortcuts.togglePopup);
+  registerHotkey(togglePopupPicker, shortcuts.sessionPicker);
+}
+
 app.whenReady().then(async () => {
   ensureSessionCwd();
   currentSessionId = readLastSessionId();
@@ -44,8 +51,7 @@ app.whenReady().then(async () => {
 
   const status = await getSetupStatus();
   if (status.isComplete) {
-    const config = readConfig();
-    registerHotkey(toggleClancePopup, config.shortcuts.togglePopup);
+    registerAllHotkeys(readConfig().shortcuts);
   } else {
     openMainWindow();
   }
@@ -94,8 +100,7 @@ ipcMain.handle(
 
     const status = await getSetupStatus();
     if (status.isComplete) {
-      unregisterAllHotkeys();
-      registerHotkey(toggleClancePopup, config.shortcuts.togglePopup);
+      registerAllHotkeys(config.shortcuts);
     }
 
     return config;
@@ -105,8 +110,7 @@ ipcMain.handle(
 ipcMain.handle("setup:complete", async () => {
   const status = await getSetupStatus();
   if (status.isComplete) {
-    const config = readConfig();
-    registerHotkey(toggleClancePopup, config.shortcuts.togglePopup);
+    registerAllHotkeys(readConfig().shortcuts);
   }
   return status;
 });
@@ -126,6 +130,8 @@ ipcMain.on("submit-goal", async (event, goal: string) => {
     for await (const agentEvent of askClance(goal, currentSessionId, screenshotBase64)) {
       if (agentEvent.kind === "text") {
         event.sender.send("response-chunk", agentEvent.text);
+      } else if (agentEvent.kind === "proposal") {
+        event.sender.send("response-proposal", { id: agentEvent.id, text: agentEvent.text });
       } else {
         if (agentEvent.sessionId) {
           currentSessionId = agentEvent.sessionId;
@@ -144,10 +150,29 @@ ipcMain.on("new-conversation", () => {
   currentSessionId = undefined;
 });
 
+ipcMain.on("resume-conversation", (_event, sessionId: string) => {
+  currentSessionId = sessionId;
+});
+
+ipcMain.on("accept-proposal", async (_event, text: string) => {
+  try {
+    await typeIntoCapturedWindow(text);
+  } catch (error) {
+    console.error("Failed to type proposed text:", error);
+  }
+});
+
 ipcMain.handle("chatHistory:list-sessions", () => listSessions());
 
 ipcMain.handle("chatHistory:get-session", (_event, filePath: string) =>
   getSession(filePath)
+);
+
+ipcMain.handle(
+  "popup:continue-session",
+  (_event, session: { id: string; filePath: string; title: string }) => {
+    openPopupWithSession(session);
+  }
 );
 
 ipcMain.handle("settings:get-preferences", () => ({

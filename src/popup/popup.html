@@ -283,6 +283,143 @@
         0%, 80%, 100% { opacity: 0.25; }
         40% { opacity: 1; }
       }
+
+      /* ---- Session picker mode ---- */
+      #picker {
+        display: none;
+        order: 1;
+        flex: 1 1 auto;
+        min-height: 0;
+        flex-direction: column;
+        gap: 8px;
+      }
+      #app.picker-active #picker {
+        display: flex;
+      }
+      #app.picker-active #session,
+      #app.picker-active #input-box {
+        display: none;
+      }
+      #picker-search {
+        width: 100%;
+        box-sizing: border-box;
+        background: var(--surface-bg);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-md);
+        color: var(--text-primary);
+        font-family: inherit;
+        font-size: 13px;
+        padding: 8px 10px;
+        outline: none;
+        flex-shrink: 0;
+      }
+      #picker-list {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .picker-row {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+        width: 100%;
+        box-sizing: border-box;
+        text-align: left;
+        background: transparent;
+        border: none;
+        border-radius: var(--radius-md);
+        padding: 7px 8px;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .picker-row:hover {
+        background: var(--surface-hover);
+      }
+      .picker-row-title {
+        font-size: 13px;
+        color: var(--text-primary);
+      }
+      .picker-row-meta {
+        font-size: 11px;
+        color: var(--text-secondary);
+      }
+
+      /* ---- Text-injection proposal card ---- */
+      .proposal-card {
+        border: 1px solid var(--accent);
+        border-radius: var(--radius-md);
+        padding: 10px 12px;
+        background: var(--accent-soft);
+      }
+      .proposal-text {
+        font-size: 13.5px;
+        line-height: 1.5;
+        color: var(--text-primary);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        margin-bottom: 8px;
+      }
+      .proposal-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .proposal-accept,
+      .proposal-reject {
+        border: none;
+        border-radius: var(--radius-sm);
+        padding: 5px 10px;
+        font-size: 12px;
+        font-family: inherit;
+        cursor: pointer;
+      }
+      .proposal-accept {
+        background: var(--accent);
+        color: var(--accent-contrast);
+        font-weight: 600;
+      }
+      .proposal-accept:hover {
+        background: var(--accent-hover);
+      }
+      .proposal-reject {
+        background: transparent;
+        color: var(--text-secondary);
+        border: 1px solid var(--surface-border);
+      }
+      .proposal-accept:disabled,
+      .proposal-reject:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .proposal-feedback {
+        display: flex;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .proposal-feedback input {
+        flex: 1;
+        box-sizing: border-box;
+        background: var(--surface-card);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-sm);
+        padding: 5px 8px;
+        font-family: inherit;
+        font-size: 12.5px;
+        outline: none;
+      }
+      .proposal-feedback button {
+        background: var(--accent);
+        color: var(--accent-contrast);
+        border: none;
+        border-radius: var(--radius-sm);
+        padding: 5px 10px;
+        font-size: 12px;
+        font-family: inherit;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -290,6 +427,10 @@
       <div id="session">
         <div id="session-header"><span class="status-dot"></span>ACTIVE SESSION</div>
         <div id="transcript"></div>
+      </div>
+      <div id="picker">
+        <input id="picker-search" type="text" placeholder="Search conversations…" />
+        <div id="picker-list"></div>
       </div>
       <div id="input-box">
         <input id="goal" type="text" placeholder="Message Clance…" autofocus />
