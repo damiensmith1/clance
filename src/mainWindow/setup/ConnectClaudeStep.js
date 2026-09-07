@@ -3,6 +3,7 @@ import { h, html, useState, useEffect } from "../../shared/vendor/preact-htm-sta
 export function ConnectClaudeStep({ onComplete } = {}) {
   const [status, setStatus] = useState(null);
   const [connecting, setConnecting] = useState(false);
+  const [error, setError] = useState(null);
 
   function refresh() {
     return window.clanceApp.getSetupStatus().then((full) => {
@@ -17,14 +18,23 @@ export function ConnectClaudeStep({ onComplete } = {}) {
 
   function handleConnect() {
     setConnecting(true);
-    window.clanceApp.connectClaude().then(() => {
-      setConnecting(false);
-      refresh().then((full) => {
-        if (full.claude.installed && full.claude.loggedIn && onComplete) {
-          onComplete();
-        }
+    setError(null);
+    window.clanceApp
+      .connectClaude()
+      .then(() =>
+        refresh().then((full) => {
+          setConnecting(false);
+          if (full.claude.installed && full.claude.loggedIn && onComplete) {
+            onComplete();
+          } else if (!full.claude.loggedIn) {
+            setError("Sign-in didn't complete — try again.");
+          }
+        })
+      )
+      .catch(() => {
+        setConnecting(false);
+        setError("Sign-in didn't complete — try again.");
       });
-    });
   }
 
   if (status === null) {
@@ -55,6 +65,7 @@ export function ConnectClaudeStep({ onComplete } = {}) {
         <button onClick=${handleConnect} disabled=${connecting}>
           ${connecting ? "Connecting…" : "Connect"}
         </button>
+        ${error && html`<p class="setup-error">${error}</p>`}
       </div>
     `;
   }

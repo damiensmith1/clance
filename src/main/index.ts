@@ -1,6 +1,6 @@
 import { app, ipcMain, Menu } from "electron";
 import { createTray } from "./tray";
-import { registerHotkey, unregisterAllHotkeys } from "./hotkey";
+import { registerHotkey, unregisterAllHotkeys, isValidAccelerator } from "./hotkey";
 import { toggleClancePopup } from "./popupWindow";
 import { openMainWindow } from "./mainWindow";
 import { createAppMenu } from "./appMenu";
@@ -22,12 +22,21 @@ app.dock?.show();
 let currentSessionId: string | undefined;
 let warnedAboutScreenCapture = false;
 
+async function handleTrayPopupClick(): Promise<void> {
+  const status = await getSetupStatus();
+  if (status.isComplete) {
+    toggleClancePopup();
+  } else {
+    openMainWindow();
+  }
+}
+
 app.whenReady().then(async () => {
   ensureSessionCwd();
   currentSessionId = readLastSessionId();
 
   Menu.setApplicationMenu(createAppMenu());
-  createTray(toggleClancePopup, openMainWindow);
+  createTray(handleTrayPopupClick, openMainWindow);
 
   const status = await getSetupStatus();
   if (status.isComplete) {
@@ -65,11 +74,24 @@ ipcMain.handle("setup:get-shortcut-actions", () => SHORTCUT_ACTIONS);
 
 ipcMain.handle(
   "setup:save-shortcuts",
-  (_event, shortcuts: Record<string, string>) => {
+  async (_event, shortcuts: Record<string, string>) => {
+    for (const accelerator of Object.values(shortcuts)) {
+      if (!isValidAccelerator(accelerator)) {
+        throw new Error(`"${accelerator}" isn't a valid keyboard shortcut.`);
+      }
+    }
+
     const config = readConfig();
     config.shortcuts = { ...config.shortcuts, ...shortcuts };
     config.shortcutsConfigured = true;
     writeConfig(config);
+
+    const status = await getSetupStatus();
+    if (status.isComplete) {
+      unregisterAllHotkeys();
+      registerHotkey(toggleClancePopup, config.shortcuts.togglePopup);
+    }
+
     return config;
   }
 );

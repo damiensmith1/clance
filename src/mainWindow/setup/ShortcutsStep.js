@@ -3,6 +3,8 @@ import { h, html, useState, useEffect } from "../../shared/vendor/preact-htm-sta
 export function ShortcutsStep({ onComplete } = {}) {
   const [actions, setActions] = useState(null);
   const [values, setValues] = useState({});
+  const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     window.clanceApp.getShortcutActions().then((list) => {
@@ -16,9 +18,17 @@ export function ShortcutsStep({ onComplete } = {}) {
   }, []);
 
   function handleSave() {
-    window.clanceApp.saveShortcuts(values).then(() => {
-      if (onComplete) onComplete();
-    });
+    setError(null);
+    setSaved(false);
+    window.clanceApp
+      .saveShortcuts(values)
+      .then(() => {
+        setSaved(true);
+        if (onComplete) onComplete();
+      })
+      .catch((err) => {
+        setError(err && err.message ? err.message : "Couldn't save that shortcut.");
+      });
   }
 
   if (actions === null) {
@@ -41,7 +51,9 @@ export function ShortcutsStep({ onComplete } = {}) {
           </div>
         `
       )}
-      <button onClick=${handleSave}>Save and continue</button>
+      ${error && html`<p class="setup-error">${error}</p>`}
+      <button onClick=${handleSave}>${onComplete ? "Save and continue" : "Save"}</button>
+      ${!onComplete && saved && html`<p class="setup-success">Saved.</p>`}
     </div>
   `;
 }

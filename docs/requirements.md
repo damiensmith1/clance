@@ -222,6 +222,28 @@ no PR to the core app required.
 - No notarization for v1 — user manually grants Accessibility + Screen
   Recording permissions via System Settings on first run
 
+### First-run setup
+
+- The app is fully gated behind a first-run setup wizard — no global
+  hotkey, no popup functionality — until three sequential steps are
+  satisfied: connecting the user's Claude plan, granting macOS Screen
+  Recording + Accessibility permissions, and confirming a keyboard
+  shortcut. The main window opens itself automatically on launch whenever
+  setup is incomplete, rather than requiring the user find their way to
+  the Dock icon or tray item first.
+- Connecting a Claude plan requires the `claude` CLI to be installed
+  separately (the wizard links to install instructions if it's missing)
+  — Clance does not bundle or reimplement Claude's OAuth login itself,
+  delegating entirely to `claude auth login`/`claude auth status`.
+- The wizard's chosen shortcut binding (and a `shortcutsConfigured` flag)
+  persist to `~/.clance/config.json`, a second local config file alongside
+  the existing session-id file. Auth and permission status are never
+  persisted as a "done" flag — both are re-checked live on every launch
+  and every visit to Settings, since either can change outside the app
+  (logging out of Claude, revoking a permission in System Settings).
+- The same three checks resurface permanently in the Settings section as
+  an ongoing status/reconnect panel, not just during first-run setup.
+
 ## Non-functional requirements
 
 - Latency: response should start streaming within ~1-2s of request

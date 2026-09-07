@@ -32,27 +32,49 @@ function parseAuthStatusJson(parsed: {
 
 export function checkClaudeAuth(): Promise<ClaudeAuthStatus> {
   return new Promise((resolve) => {
-    execFile("claude", ["auth", "status", "--json"], (error, stdout) => {
-      if (error && error.code === "ENOENT") {
-        resolve({ installed: false });
-        return;
+    execFile(
+      "claude",
+      ["auth", "status", "--json"],
+      { timeout: 5000 },
+      (error, stdout) => {
+        if (error && error.code === "ENOENT") {
+          resolve({ installed: false });
+          return;
+        }
+        try {
+          resolve(parseAuthStatusJson(JSON.parse(stdout)));
+        } catch {
+          resolve({ installed: true, loggedIn: false });
+        }
       }
-      try {
-        resolve(parseAuthStatusJson(JSON.parse(stdout)));
-      } catch {
-        resolve({ installed: true, loggedIn: false });
-      }
-    });
+    );
   });
 }
+
+const CONNECT_TIMEOUT_MS = 120000; // interactive browser login; generous but bounded
 
 export function connectClaude(): Promise<ClaudeAuthStatus> {
   return new Promise((resolve) => {
     const child = spawn("claude", ["auth", "login"], { stdio: "ignore" });
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill();
+      resolve({ installed: true, loggedIn: false });
+    }, CONNECT_TIMEOUT_MS);
+
     child.on("exit", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       checkClaudeAuth().then(resolve);
     });
     child.on("error", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       resolve({ installed: false });
     });
   });
