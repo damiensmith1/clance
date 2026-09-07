@@ -156,13 +156,19 @@ status: draft
 
 ### In-app chat history
 
-- Chat-style UI listing past sessions (most recent first)
-- Click a session to view the full back-and-forth
+- Chat-style UI listing past sessions (most recent first) — implemented
+  as a list↔detail toggle in the Chats sidebar section, covering both
+  Clance's own sessions and real Claude Code CLI sessions from any
+  project on the machine
+- Click a session to view the full back-and-forth; read-only for v1 (no
+  resuming a session from history)
 - Since storage is JSONL-based, history view is just a JSONL
   reader/renderer, not a separate SQLite-driven UI
 - Optional: SQLite as a lightweight index/cache on top of the JSONL files
   for fast search/sort, if JSONL directory scanning becomes slow — not
   required for v1
+- Full details in
+  `docs/superpowers/specs/2026-09-07-chat-history-design.md`
 
 ### Extensibility layer (plugins, skills, MCP, hooks)
 

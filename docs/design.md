@@ -125,6 +125,20 @@ status: draft
 - Full details are in
   `docs/superpowers/specs/2026-09-06-app-shell-design.md` and
   `docs/superpowers/plans/2026-09-06-app-shell.md`.
+- **Chat history browser (sub-project #3):** `src/main/chatHistory.ts`
+  walks `~/.claude/projects/*/` directly (no bundled SQLite index) and
+  builds session summaries without a full-file parse — title comes from
+  the first `user`-turn line only, streamed line-by-line, since scanning
+  to EOF for the latest Claude-Code-generated `ai-title` isn't worth it
+  for real session files that run 7-11MB. Full transcript parsing (with
+  `tool_use`/`tool_result`/`thinking` blocks collapsed to compact
+  one-line summaries) only happens on demand, when a session is opened.
+  The popup's markdown renderer (`src/popup/markdown.js` originally) is
+  now `src/shared/markdown.js`, a real ES module — both the popup and
+  the chat history detail view import the same `renderMarkdown`, which
+  also meant converting the popup's own scripts from classic `<script>`
+  tags to `type="module"` + `import`. Full details in
+  `docs/superpowers/specs/2026-09-07-chat-history-design.md`.
 
 ## Open questions (resolve before building)
 

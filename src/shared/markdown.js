@@ -85,7 +85,7 @@ function renderBlocks(text) {
   return html;
 }
 
-function renderMarkdown(raw) {
+export function renderMarkdown(raw) {
   const codeBlocks = [];
   let text = raw.replace(/```[^\n]*\n?([\s\S]*?)```/g, (_, code) => {
     const idx =

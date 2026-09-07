@@ -13,4 +13,7 @@ contextBridge.exposeInMainWorld("clanceApp", {
   saveShortcuts: (shortcuts: Record<string, string>) =>
     ipcRenderer.invoke("setup:save-shortcuts", shortcuts),
   completeSetup: () => ipcRenderer.invoke("setup:complete"),
+  listChatSessions: () => ipcRenderer.invoke("chatHistory:list-sessions"),
+  getChatSession: (filePath: string) =>
+    ipcRenderer.invoke("chatHistory:get-session", filePath),
 });

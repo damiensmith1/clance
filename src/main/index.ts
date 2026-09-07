@@ -16,6 +16,7 @@ import {
   openAccessibilitySettings,
 } from "./permissions";
 import { SHORTCUT_ACTIONS } from "./shortcuts";
+import { getSession, listSessions } from "./chatHistory";
 
 app.dock?.show();
 
@@ -137,3 +138,9 @@ ipcMain.on("submit-goal", async (event, goal: string) => {
 ipcMain.on("new-conversation", () => {
   currentSessionId = undefined;
 });
+
+ipcMain.handle("chatHistory:list-sessions", () => listSessions());
+
+ipcMain.handle("chatHistory:get-session", (_event, filePath: string) =>
+  getSession(filePath)
+);

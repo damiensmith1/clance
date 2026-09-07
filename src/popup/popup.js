@@ -1,3 +1,5 @@
+import { renderMarkdown } from "../shared/markdown.js";
+
 const appEl = document.getElementById("app");
 const goalInput = document.getElementById("goal");
 const transcriptEl = document.getElementById("transcript");
