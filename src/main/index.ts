@@ -1,4 +1,4 @@
-import { app, ipcMain, Menu, nativeTheme } from "electron";
+import { app, ipcMain, Menu } from "electron";
 import { createTray } from "./tray";
 import { registerHotkey, unregisterAllHotkeys, isValidAccelerator } from "./hotkey";
 import { toggleClancePopup } from "./popupWindow";
@@ -8,7 +8,7 @@ import { askClance } from "./agent";
 import { captureActiveDisplay } from "./screenCapture";
 import { ensureSessionCwd, readLastSessionId, writeLastSessionId } from "./paths";
 import { getSetupStatus } from "./setupStatus";
-import { readConfig, writeConfig, ThemePreference } from "./config";
+import { readConfig, writeConfig } from "./config";
 import { connectClaude, openInstallDocs } from "./claudeAuth";
 import {
   checkPermissions,
@@ -38,7 +38,6 @@ async function handleTrayPopupClick(): Promise<void> {
 app.whenReady().then(async () => {
   ensureSessionCwd();
   currentSessionId = readLastSessionId();
-  nativeTheme.themeSource = readConfig().theme;
 
   Menu.setApplicationMenu(createAppMenu());
   createTray(handleTrayPopupClick, openMainWindow);
@@ -150,17 +149,8 @@ ipcMain.handle("chatHistory:get-session", (_event, filePath: string) =>
 );
 
 ipcMain.handle("settings:get-preferences", () => ({
-  theme: readConfig().theme,
   launchOnLogin: getLaunchOnLogin(),
 }));
-
-ipcMain.handle("settings:set-theme", (_event, theme: ThemePreference) => {
-  const config = readConfig();
-  config.theme = theme;
-  writeConfig(config);
-  nativeTheme.themeSource = theme;
-  return config;
-});
 
 ipcMain.handle("settings:set-launch-on-login", (_event, enabled: boolean) => {
   setLaunchOnLogin(enabled);

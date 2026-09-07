@@ -1,24 +1,15 @@
+/* Light mode only for now — no theme switching, no dark palette. Every
+   consumer references these custom properties rather than literal colors,
+   so a future theme (a `[data-theme="..."]` override block, or a
+   `prefers-color-scheme` media query) is additive here later: define the
+   same property names under that selector, touch nothing else. */
 :root {
-  --surface-bg: rgba(255, 255, 255, 0.04);
-  --surface-hover: rgba(255, 255, 255, 0.08);
-  --surface-active: rgba(255, 255, 255, 0.14);
-  --surface-border: rgba(255, 255, 255, 0.14);
-  --text-primary: rgba(255, 255, 255, 0.95);
-  --text-secondary: rgba(255, 255, 255, 0.55);
+  --surface-bg: rgba(0, 0, 0, 0.03);
+  --surface-hover: rgba(0, 0, 0, 0.06);
+  --surface-active: rgba(0, 0, 0, 0.1);
+  --surface-border: rgba(0, 0, 0, 0.12);
+  --text-primary: rgba(0, 0, 0, 0.88);
+  --text-secondary: rgba(0, 0, 0, 0.5);
   --radius-lg: 20px;
   --radius-md: 8px;
-}
-
-/* nativeTheme.themeSource drives this media query directly (set from
-   the user's Settings choice, default "system") — no per-renderer IPC
-   needed to keep windows in sync. */
-@media (prefers-color-scheme: light) {
-  :root {
-    --surface-bg: rgba(0, 0, 0, 0.03);
-    --surface-hover: rgba(0, 0, 0, 0.06);
-    --surface-active: rgba(0, 0, 0, 0.1);
-    --surface-border: rgba(0, 0, 0, 0.12);
-    --text-primary: rgba(0, 0, 0, 0.88);
-    --text-secondary: rgba(0, 0, 0, 0.5);
-  }
 }
