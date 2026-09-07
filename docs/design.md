@@ -96,8 +96,8 @@ status: draft
   needing a bundler. This is distinct from the popup, which stays vanilla
   JS with no framework.
 - Navigation between the main window's sections (Chats, Skills & Plugins,
-  Settings — see `src/mainWindow/app.js`) uses plain Preact `useState`, not
-  a router library — reasonable at 3-5 sections, revisit only if that
+  Settings — see `src/mainWindow/Shell.js`) uses plain Preact `useState`,
+  not a router library — reasonable at 3-5 sections, revisit only if that
   count grows substantially or deep-linking into sub-state (e.g. a
   specific chat) is needed later.
 - Styling uses a CSS custom-property theme token system
