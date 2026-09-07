@@ -1,0 +1,10 @@
+:root {
+  --surface-bg: rgba(255, 255, 255, 0.04);
+  --surface-hover: rgba(255, 255, 255, 0.08);
+  --surface-active: rgba(255, 255, 255, 0.14);
+  --surface-border: rgba(255, 255, 255, 0.14);
+  --text-primary: rgba(255, 255, 255, 0.95);
+  --text-secondary: rgba(255, 255, 255, 0.55);
+  --radius-lg: 20px;
+  --radius-md: 8px;
+}

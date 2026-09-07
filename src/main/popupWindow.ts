@@ -20,13 +20,13 @@ function createPopup(): BrowserWindow {
     skipTaskbar: true,
     resizable: false,
     webPreferences: {
-      preload: join(__dirname, "../preload/index.js"),
+      preload: join(__dirname, "../preload/popup.js"),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
 
-  win.loadFile(join(__dirname, "../renderer/popup.html"));
+  win.loadFile(join(__dirname, "../popup/popup.html"));
   win.on("blur", () => win.hide());
 
   return win;

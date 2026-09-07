@@ -1,12 +1,14 @@
-import { app, ipcMain } from "electron";
+import { app, ipcMain, Menu } from "electron";
 import { createTray } from "./tray";
 import { registerHotkey, unregisterAllHotkeys } from "./hotkey";
 import { toggleClancePopup } from "./popupWindow";
+import { openMainWindow } from "./mainWindow";
+import { createAppMenu } from "./appMenu";
 import { askClance } from "./agent";
 import { captureActiveDisplay } from "./screenCapture";
 import { ensureSessionCwd, readLastSessionId, writeLastSessionId } from "./paths";
 
-app.dock?.hide();
+app.dock?.show();
 
 let currentSessionId: string | undefined;
 let warnedAboutScreenCapture = false;
@@ -15,9 +17,12 @@ app.whenReady().then(() => {
   ensureSessionCwd();
   currentSessionId = readLastSessionId();
 
-  createTray(toggleClancePopup);
+  Menu.setApplicationMenu(createAppMenu());
+  createTray(toggleClancePopup, openMainWindow);
   registerHotkey(toggleClancePopup);
 });
+
+app.on("activate", openMainWindow);
 
 app.on("will-quit", unregisterAllHotkeys);
 

@@ -5,7 +5,7 @@
   "main": "dist/main/index.js",
   "private": true,
   "scripts": {
-    "build": "tsc -p tsconfig.json && mkdir -p dist/renderer && cp src/renderer/popup.html src/renderer/popup.js src/renderer/markdown.js dist/renderer/",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/popup dist/mainWindow dist/shared && cp -r src/popup/. dist/popup/ && cp -r src/mainWindow/. dist/mainWindow/ && cp -r src/shared/. dist/shared/",
     "start": "npm run build && electron .",
     "dev": "npm run build && npm start"
   },

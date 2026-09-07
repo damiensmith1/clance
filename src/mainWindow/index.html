@@ -1,0 +1,68 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Clance</title>
+    <link rel="stylesheet" href="../shared/theme.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        color: var(--text-primary);
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      }
+      .shell {
+        display: flex;
+        height: 100vh;
+        box-sizing: border-box;
+      }
+      .sidebar {
+        width: 200px;
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 52px 12px 12px;
+        background: var(--surface-bg);
+        border-right: 1px solid var(--surface-border);
+      }
+      .sidebar button {
+        text-align: left;
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        font-size: 13px;
+        padding: 8px 10px;
+        border-radius: var(--radius-md);
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .sidebar button:hover {
+        background: var(--surface-hover);
+        color: var(--text-primary);
+      }
+      .sidebar button.active {
+        background: var(--surface-active);
+        color: var(--text-primary);
+      }
+      .content {
+        flex: 1;
+        padding: 52px 32px 32px;
+        overflow-y: auto;
+      }
+      .section-placeholder h2 {
+        margin: 0 0 8px;
+        color: var(--text-primary);
+      }
+      .section-placeholder p {
+        color: var(--text-secondary);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
