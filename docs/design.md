@@ -84,10 +84,28 @@ status: draft
   new persistent main application window (Dock-icon-launched, also
   reachable via an "Open Dashboard" tray item). Each has its own preload
   script (`src/preload/popup.ts`, `src/preload/mainWindow.ts`) and full
-  context isolation between them — the main window's preload currently
-  exposes no privileged API (`contextBridge.exposeInMainWorld("clanceApp",
-  {})`); future specs will add real methods (chat history, settings,
-  plugin management).
+  context isolation between them. The main window's preload
+  (`contextBridge.exposeInMainWorld("clanceApp", {...})`) now exposes a
+  real API surface — `getSetupStatus`, `connectClaude`, `openInstallDocs`,
+  `recheckPermissions`, `openScreenRecordingSettings`,
+  `openAccessibilitySettings`, `getShortcutActions`, `saveShortcuts`,
+  `completeSetup` — added by the Setup Wizard sub-project (see below);
+  future specs (chat history, extensibility UI) will extend it further.
+- **Setup Wizard (sub-project #2):** the app is fully gated — no global
+  hotkey, no popup — until three sequential checks pass: the Claude plan
+  is connected, Screen Recording + Accessibility permissions are granted,
+  and a keyboard shortcut is confirmed. `src/main/setupStatus.ts`'s
+  `getSetupStatus()` is the single source of truth for this, live-checked
+  on every call (auth and permissions are never cached as a "done" flag);
+  only the chosen shortcut and a `shortcutsConfigured` flag persist, in a
+  new `~/.clance/config.json` alongside the existing session-id file.
+  Connecting the Claude plan is delegated entirely to the `claude` CLI's
+  own `auth login`/`auth status --json` commands rather than a custom
+  OAuth implementation — this makes the CLI a required, separately-
+  installed dependency (the wizard guides the user to install it if
+  missing) rather than something bundled with Clance. Full details in
+  `docs/superpowers/specs/2026-09-06-setup-wizard-design.md` and
+  `docs/superpowers/plans/2026-09-06-setup-wizard.md`.
 - The main window uses Preact + htm for its UI, vendored as a single
   self-contained file (`src/shared/vendor/preact-htm-standalone.module.js`,
   sourced from the `htm@3.1.1` npm package's `preact/standalone` build)
@@ -96,8 +114,8 @@ status: draft
   needing a bundler. This is distinct from the popup, which stays vanilla
   JS with no framework.
 - Navigation between the main window's sections (Chats, Skills & Plugins,
-  Settings — see `src/mainWindow/app.js`) uses plain Preact `useState`, not
-  a router library — reasonable at 3-5 sections, revisit only if that
+  Settings — see `src/mainWindow/Shell.js`) uses plain Preact `useState`,
+  not a router library — reasonable at 3-5 sections, revisit only if that
   count grows substantially or deep-linking into sub-state (e.g. a
   specific chat) is needed later.
 - Styling uses a CSS custom-property theme token system
@@ -131,8 +149,12 @@ status: draft
       goals (forms, code editors).
 - [ ] How does the app decide "talk back" vs. "type it out" — model-decided
       via prompt, or does the user pick a mode when typing their goal?
-- [ ] Where does the Anthropic API key/auth live — env var, onboarding
-      flow, macOS Keychain?
+- [x] Where does the Anthropic API key/auth live — env var, onboarding
+      flow, macOS Keychain? **Resolved:** delegated entirely to the
+      `claude` CLI's own credential store via `claude auth login`/`claude
+      auth status --json` (see `src/main/claudeAuth.ts`) — Clance never
+      handles a raw API key itself. This makes the globally-installed
+      `claude` CLI a required dependency; see the Setup Wizard note above.
 - [x] Does the popup stay open for multi-turn follow-up in the same
       invocation, or is each hotkey-press a fresh single-turn request?
       **Resolved:** multi-turn within one open (follow-ups resume the

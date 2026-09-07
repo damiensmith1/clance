@@ -52,11 +52,86 @@
         padding: 52px 32px 32px;
         overflow-y: auto;
       }
-      .section-placeholder h2 {
+      .section-placeholder h2,
+      .section-settings h2 {
         margin: 0 0 8px;
         color: var(--text-primary);
       }
       .section-placeholder p {
+        color: var(--text-secondary);
+      }
+      .section-settings .setup-step {
+        max-width: none;
+        text-align: left;
+        margin-bottom: 24px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--surface-border);
+      }
+      .setup-wizard {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        padding: 32px;
+        box-sizing: border-box;
+      }
+      .setup-step {
+        max-width: 420px;
+        text-align: center;
+      }
+      .setup-step h2 {
+        margin: 0 0 12px;
+        color: var(--text-primary);
+      }
+      .setup-step p {
+        color: var(--text-secondary);
+        margin: 0 0 16px;
+      }
+      .setup-step button {
+        background: var(--surface-active);
+        color: var(--text-primary);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-md);
+        padding: 8px 16px;
+        font-size: 13px;
+        cursor: pointer;
+        margin: 4px;
+        font-family: inherit;
+      }
+      .setup-error {
+        color: rgba(255, 120, 120, 0.9);
+        font-size: 12px;
+        margin: 8px 0 0;
+      }
+      .setup-success {
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 12px;
+        margin: 8px 0 0;
+      }
+      .permission-row,
+      .shortcut-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--surface-border);
+        text-align: left;
+      }
+      .shortcut-row input {
+        background: var(--surface-bg);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-md);
+        color: var(--text-primary);
+        padding: 4px 8px;
+        font-size: 13px;
+        font-family: inherit;
+      }
+      .loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
         color: var(--text-secondary);
       }
     </style>
