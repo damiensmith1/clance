@@ -139,7 +139,9 @@ export function Shell() {
             `
           )}
         </div>
-        <main class="content">${activeTab && renderTabContent(activeTab, openChatTab)}</main>
+        <main class="content ${activeTab?.type === "chatDetail" ? "content-chat" : ""}">
+          ${activeTab && renderTabContent(activeTab, openChatTab)}
+        </main>
       </div>
     </div>
   `;

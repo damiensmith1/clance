@@ -141,10 +141,15 @@ status: draft
   in Settings), opens the popup in a searchable session-picker mode
   instead — picking a session loads its real prior transcript and resumes
   it, so screen context captured on the next turn effectively gets added
-  to that existing conversation. A "Continue in Popup" action on a
-  session's page in the Chats section does the same thing directly,
-  skipping the picker. Both reuse the same `resume` mechanism as any other
-  follow-up turn — see `docs/design.md`.
+  to that existing conversation. Both reuse the same `resume` mechanism as
+  any other follow-up turn — see `docs/design.md`.
+- **A session can also be continued directly in the main window**, without
+  the popup at all: opening a session from the Chats section is a live
+  chat, not just a read-only transcript — typing at the bottom sends a
+  real follow-up turn via `resume`, same as the popup, just without screen
+  context or the propose/accept text-injection affordance (there's no
+  "frontmost app" to inject into from inside Clance itself). See
+  `docs/design.md`.
 - Screen context is re-captured fresh on every turn, even within the same
   open conversation (the screen may have changed since the last turn).
 
@@ -172,10 +177,9 @@ status: draft
   covering both Clance's own sessions and real Claude Code CLI sessions
   from any project on the machine
 - Click a session to open its full back-and-forth as its own closable tab
-  (see the main window's tab system in `docs/design.md`). The tab view
-  itself stays read-only (no editing history in place), but a "Continue in
-  Popup" action opens that same session, fully resumed, in the popup —
-  see "Multi-turn conversations" above.
+  (see the main window's tab system in `docs/design.md`). The tab is a
+  live, resumable chat, not a static transcript — see "Multi-turn
+  conversations" above.
 - Since storage is JSONL-based, history view is just a JSONL
   reader/renderer, not a separate SQLite-driven UI
 - Optional: SQLite as a lightweight index/cache on top of the JSONL files

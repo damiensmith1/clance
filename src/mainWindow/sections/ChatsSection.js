@@ -24,12 +24,6 @@ function dayGroupLabel(iso) {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-// Clance's own sessions live under one fixed bucket labeled "Clance" by
-// chatHistory.ts; anything else came from a real Claude Code CLI project.
-function isCliSession(session) {
-  return session.projectLabel !== "Clance";
-}
-
 function SessionList({ sessions, loading, onOpen }) {
   if (loading) {
     return html`<p class="empty-note">Loading…</p>`;
@@ -116,16 +110,15 @@ function ToolGroup({ items }) {
     <div class="tool-group">
       <button class="tool-group-header" onClick=${() => setOpen(!open)}>
         <span class="tool-group-chevron ${open ? "tool-group-chevron-open" : ""}">
-          ${Icon.chevronRight(14)}
+          ${Icon.chevronRight(11)}
         </span>
-        ${Icon.search(14)}
-        <span>THOUGHT & TOOL EXECUTION</span>
+        <span>${items.length} ${items.length === 1 ? "action" : "actions"}</span>
       </button>
       ${open &&
       html`<div class="tool-group-body">
         ${items.map(
           (item) => html`<div class="tool-group-item">
-            ${item.type === "thinking" ? "💭 Thinking…" : item.label}
+            ${item.type === "thinking" ? "✻ Thinking…" : `⏺ ${item.label}`}
           </div>`
         )}
       </div>`}
@@ -172,53 +165,165 @@ function TurnView({ turn }) {
   `;
 }
 
+// While a response streams in, text chunks land on the same in-progress
+// assistant turn (marked __streaming) rather than each starting a new one.
+function appendAssistantChunk(turns, text) {
+  const last = turns[turns.length - 1];
+  if (last && last.role === "assistant" && last.__streaming) {
+    const blocks = last.blocks.slice();
+    const lastBlock = blocks[blocks.length - 1];
+    if (lastBlock && lastBlock.type === "text") {
+      blocks[blocks.length - 1] = { type: "text", text: lastBlock.text + text };
+    } else {
+      blocks.push({ type: "text", text });
+    }
+    return [...turns.slice(0, -1), { ...last, blocks }];
+  }
+  return [...turns, { role: "assistant", blocks: [{ type: "text", text }], __streaming: true }];
+}
+
 export function ChatDetailSection({ session }) {
-  const [detail, setDetail] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const containerRef = useRef(null);
+  const [turns, setTurns] = useState(null);
+  const [loadError, setLoadError] = useState(false);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const scrollRef = useRef(null);
+  const textareaRef = useRef(null);
+
+  function autoResizeTextarea() {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const maxHeight = window.innerHeight * (2 / 3);
+    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+  }
+
+  useEffect(() => {
+    autoResizeTextarea();
+  }, [input]);
+
+  useEffect(() => {
+    window.addEventListener("resize", autoResizeTextarea);
+    // The vendored webfont can still be loading at mount, which measures
+    // the wrong scrollHeight (fallback font metrics) and locks in a stale
+    // size until the next keystroke — re-measure once it's actually ready,
+    // and once more after the browser's settled the initial layout.
+    document.fonts?.ready.then(autoResizeTextarea);
+    requestAnimationFrame(autoResizeTextarea);
+    return () => window.removeEventListener("resize", autoResizeTextarea);
+  }, []);
 
   useEffect(() => {
     window.clanceApp.getChatSession(session.filePath).then((result) => {
-      setDetail(result);
-      setLoading(false);
+      if (!result) {
+        setLoadError(true);
+        setTurns([]);
+      } else {
+        setTurns(result.turns);
+      }
     });
   }, [session.filePath]);
 
   useEffect(() => {
-    if (containerRef.current) attachCopyHandler(containerRef.current);
+    if (scrollRef.current) attachCopyHandler(scrollRef.current);
   }, []);
 
-  const cli = isCliSession(session);
+  // Auto-scroll to the newest message whenever the transcript grows.
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [turns]);
+
+  useEffect(() => {
+    const offChunk = window.clanceApp.onChatChunk(({ sessionId, text }) => {
+      if (sessionId !== session.id) return;
+      setTurns((current) => appendAssistantChunk(current ?? [], text));
+    });
+    const offDone = window.clanceApp.onChatDone(({ sessionId }) => {
+      if (sessionId !== session.id) return;
+      setSending(false);
+      // Re-read the transcript from disk so any tool calls the model made
+      // mid-turn (not surfaced by the live text stream) show up correctly.
+      window.clanceApp.getChatSession(session.filePath).then((result) => {
+        if (result) setTurns(result.turns);
+      });
+    });
+    const offError = window.clanceApp.onChatError(({ sessionId, message }) => {
+      if (sessionId !== session.id) return;
+      setSending(false);
+      setTurns((current) => [
+        ...(current ?? []),
+        { role: "assistant", blocks: [{ type: "text", text: `⚠ ${message}` }] },
+      ]);
+    });
+    return () => {
+      offChunk();
+      offDone();
+      offError();
+    };
+  }, [session.id, session.filePath]);
+
+  function handleSend() {
+    const goal = input.trim();
+    if (!goal || sending) return;
+    setTurns((current) => [...(current ?? []), { role: "user", blocks: [{ type: "text", text: goal }] }]);
+    setInput("");
+    setSending(true);
+    window.clanceApp.sendChatMessage(session.id, goal);
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  }
 
   return html`
-    <div class="section-page" ref=${containerRef}>
-      ${loading
-        ? html`<p class="empty-note">Loading…</p>`
-        : !detail
-        ? html`<p class="empty-note">Couldn't load this session.</p>`
-        : html`
-            <div class="detail-meta-row">
-              <span class="pill pill-strong">${cli ? "CLI SESSION" : "CLANCE SESSION"}</span>
-              ${cli && html`<span class="detail-meta-text">project: ${detail.projectLabel}</span>`}
-            </div>
-            <div class="detail-title-row">
-              <h1 class="page-title">${detail.title}</h1>
-              <button
-                class="btn-secondary"
-                onClick=${() =>
-                  window.clanceApp.continueSessionInPopup({
-                    id: session.id,
-                    filePath: session.filePath,
-                    title: detail.title,
-                  })}
+    <div class="chat-live">
+      <div class="chat-transcript" ref=${scrollRef}>
+        ${turns === null
+          ? html`<p class="empty-note">Loading…</p>`
+          : loadError
+          ? html`<p class="empty-note">Couldn't load this session.</p>`
+          : turns.length === 0
+          ? html`<p class="empty-note">No messages yet.</p>`
+          : html`<div class="turn-list">
+              ${turns.map((turn) => html`<${TurnView} turn=${turn} />`)}
+            </div>`}
+      </div>
+      <div class="chat-composer">
+        <div class="chat-composer-box">
+          <button class="composer-icon-btn" title="Attachments (coming soon)">
+            ${Icon.addServer(16)}
+          </button>
+          <textarea
+            class="chat-composer-input"
+            rows="1"
+            ref=${textareaRef}
+            placeholder="Message Clance…"
+            value=${input}
+            disabled=${sending}
+            onInput=${(e) => setInput(e.target.value)}
+            onKeyDown=${handleKeyDown}
+          ></textarea>
+          <span class="composer-model-label">Haiku 4.5</span>
+          ${input.trim()
+            ? html`<button
+                class="composer-send-btn"
+                title="Send"
+                disabled=${sending}
+                onClick=${handleSend}
               >
-                Continue in Popup
-              </button>
-            </div>
-            <div class="turn-list">
-              ${detail.turns.map((turn) => html`<${TurnView} turn=${turn} />`)}
-            </div>
-          `}
+                ${Icon.arrowUp(15)}
+              </button>`
+            : html`<button class="composer-icon-btn" title="Voice input (coming soon)">
+                ${Icon.mic(16)}
+              </button>`}
+        </div>
+      </div>
     </div>
   `;
 }

@@ -175,6 +175,30 @@ ipcMain.handle(
   }
 );
 
+// Lets the main window's Chat Detail tab continue a session directly,
+// independent of the popup's single shared currentSessionId — each tab
+// resumes its own session explicitly rather than sharing global state.
+ipcMain.on(
+  "chatDetail:submit-goal",
+  async (event, payload: { sessionId: string; goal: string }) => {
+    try {
+      for await (const agentEvent of askClance(payload.goal, payload.sessionId, undefined)) {
+        if (agentEvent.kind === "text" || agentEvent.kind === "proposal") {
+          event.sender.send("chatDetail:response-chunk", {
+            sessionId: payload.sessionId,
+            text: agentEvent.text,
+          });
+        } else {
+          event.sender.send("chatDetail:response-done", { sessionId: payload.sessionId });
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      event.sender.send("chatDetail:response-error", { sessionId: payload.sessionId, message });
+    }
+  }
+);
+
 ipcMain.handle("settings:get-preferences", () => ({
   launchOnLogin: getLaunchOnLogin(),
   reuseTabs: readConfig().reuseTabs,

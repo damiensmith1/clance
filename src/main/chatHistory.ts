@@ -198,12 +198,26 @@ export async function getSession(filePath: string): Promise<SessionDetail | null
     const blocks = normalizeBlocks(message?.content);
     if (blocks.length === 0) continue;
 
-    if (title === undefined && entry.type === "user") {
+    const isRealUserMessage =
+      entry.type === "user" && blocks.some((block) => block.type === "text");
+
+    if (title === undefined && isRealUserMessage) {
       const textBlock = blocks.find((block): block is { type: "text"; text: string } => block.type === "text");
       if (textBlock) title = truncate(textBlock.text, TITLE_MAX_LENGTH);
     }
 
-    turns.push({ role: entry.type as "user" | "assistant", blocks });
+    // A "user" entry with no real text is just the SDK feeding a tool
+    // result back to the model — not something the human typed. Folding it
+    // into the ongoing assistant turn (instead of giving it its own "YOU"
+    // turn) keeps a whole tool-use loop as one continuous exchange, rather
+    // than a wall of alternating one-line turns.
+    const role: "user" | "assistant" = isRealUserMessage ? "user" : "assistant";
+    const last = turns[turns.length - 1];
+    if (last && last.role === role) {
+      last.blocks.push(...blocks);
+    } else {
+      turns.push({ role, blocks });
+    }
   }
 
   return {

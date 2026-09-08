@@ -146,9 +146,9 @@ resuming after a rejected proposal) shares the same plumbing.
   `chatHistory.ts`'s `listSessions()`), and `"resume"` (preloads the real
   prior transcript via `getChatSession()` before showing the input, so
   "which conversation am I in" is never ambiguous). Picking a session from
-  the picker transitions into resume mode in place. A "Continue in Popup"
-  action on the Chat History detail view (`ChatsSection.js`) opens resume
-  mode directly, skipping the picker.
+  the picker transitions into resume mode in place. (An earlier "Continue
+  in Popup" action on the Chat History detail view was removed once that
+  view became a live chat in its own right — see below.)
 - **A real latent race condition, found while testing the picker:**
   `popup.webContents.send("popup-shown", ...)` silently drops the event if
   popup.js hasn't finished loading and attached its listener yet — there's
@@ -156,6 +156,37 @@ resuming after a rejected proposal) shares the same plumbing.
   was undetectable there (a missed event's fallback state looks identical
   to the intended one). Fixed by tracking a `did-finish-load` promise per
   popup window and awaiting it before every send.
+- **The Chat History detail tab is a live chat, not a read-only
+  transcript** (`ChatDetailSection` in `ChatsSection.js`). Typing at the
+  bottom sends a real follow-up turn to the same `resume`d session used
+  everywhere else — this made the earlier "Continue in Popup" button
+  redundant (it existed only to get resume capability, which the tab now
+  has natively), so it was removed rather than kept alongside a
+  functionally-overlapping feature.
+  - Deliberately **not** wired through the popup's existing
+    `submit-goal`/`currentSessionId` IPC channel, since that channel
+    assumes one globally-shared "current session" for the whole app. A
+    second dedicated pair (`chatDetail:submit-goal` /
+    `chatDetail:response-*`) takes an explicit `sessionId` on every call
+    instead, so a main-window tab and the popup can't stomp on each
+    other's session state.
+  - No screenshot context and no `proposeText`/accept-insert affordance
+    here — there's no "frontmost app" to capture or type into when the
+    input lives inside Clance itself, so proposal events are just
+    rendered as plain assistant text.
+  - Live text streams in optimistically, but once the turn finishes the
+    tab re-fetches the full transcript from disk via `getChatSession()`
+    and replaces the optimistic turns wholesale. This is what makes any
+    tool calls the model made mid-turn show up correctly — the live text
+    stream only ever carries `text`/`proposal` events (see above), so
+    without this reconciliation step a turn with tool use would render
+    with the tool calls silently missing until the next reload.
+  - Tool/thinking blocks render as minimal single-line, CLI-style entries
+    (a bullet + label, monospace, no card chrome) grouped under one
+    expandable disclosure per consecutive run — deliberately far lighter
+    than the boxed "THOUGHT & TOOL EXECUTION" panel this replaced, to
+    match Claude Code's own terminal output rather than a generic app
+    widget.
 
 ## Main application window
 

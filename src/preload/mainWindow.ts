@@ -19,6 +19,25 @@ contextBridge.exposeInMainWorld("clanceApp", {
     ipcRenderer.invoke("chatHistory:get-session", filePath),
   continueSessionInPopup: (session: { id: string; filePath: string; title: string }) =>
     ipcRenderer.invoke("popup:continue-session", session),
+  sendChatMessage: (sessionId: string, goal: string) =>
+    ipcRenderer.send("chatDetail:submit-goal", { sessionId, goal }),
+  onChatChunk: (callback: (payload: { sessionId: string; text: string }) => void) => {
+    const listener = (_event: unknown, payload: { sessionId: string; text: string }) =>
+      callback(payload);
+    ipcRenderer.on("chatDetail:response-chunk", listener);
+    return () => ipcRenderer.removeListener("chatDetail:response-chunk", listener);
+  },
+  onChatDone: (callback: (payload: { sessionId: string }) => void) => {
+    const listener = (_event: unknown, payload: { sessionId: string }) => callback(payload);
+    ipcRenderer.on("chatDetail:response-done", listener);
+    return () => ipcRenderer.removeListener("chatDetail:response-done", listener);
+  },
+  onChatError: (callback: (payload: { sessionId: string; message: string }) => void) => {
+    const listener = (_event: unknown, payload: { sessionId: string; message: string }) =>
+      callback(payload);
+    ipcRenderer.on("chatDetail:response-error", listener);
+    return () => ipcRenderer.removeListener("chatDetail:response-error", listener);
+  },
   getPreferences: () => ipcRenderer.invoke("settings:get-preferences"),
   setLaunchOnLogin: (enabled: boolean) =>
     ipcRenderer.invoke("settings:set-launch-on-login", enabled),

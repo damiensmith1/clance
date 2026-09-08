@@ -140,4 +140,14 @@ export const Icon = {
     ),
 
   addServer: (size = 14) => svg(size, html`<path d="M12 5v14M5 12h14" />`),
+
+  mic: (size = 16) =>
+    svg(
+      size,
+      html`<path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z" />
+        <path d="M19 11a7 7 0 0 1-14 0" />
+        <path d="M12 19v3" />`
+    ),
+
+  arrowUp: (size = 16) => svg(size, html`<path d="M12 19V5M5 12l7-7 7 7" />`),
 };
