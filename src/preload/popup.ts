@@ -22,11 +22,6 @@ contextBridge.exposeInMainWorld("clance", {
     ipcRenderer.on("response-note", (_event, message: string) => callback(message)),
   onShown: (callback: (payload: PopupShownPayload) => void) =>
     ipcRenderer.on("popup-shown", (_event, payload: PopupShownPayload) => callback(payload)),
-  onSessionUpdated: (callback: (payload: { sessionId: string }) => void) => {
-    const listener = (_event: unknown, payload: { sessionId: string }) => callback(payload);
-    ipcRenderer.on("session:updated", listener);
-    return () => ipcRenderer.removeListener("session:updated", listener);
-  },
 });
 
 type PopupShownPayload =

@@ -1,13 +1,12 @@
-import { app, ipcMain, Menu } from "electron";
-import { watch } from "fs";
+import { app, ipcMain, Menu, BrowserWindow } from "electron";
 import { createTray } from "./tray";
 import { registerHotkey, unregisterAllHotkeys, isValidAccelerator } from "./hotkey";
-import { toggleClancePopup, togglePopupPicker, openPopupWithSession } from "./popupWindow";
-import { openMainWindow, getMainWindows } from "./mainWindow";
+import { toggleClancePopup, togglePopupPicker } from "./popupWindow";
+import { openMainWindow } from "./mainWindow";
 import { createAppMenu } from "./appMenu";
 import { askClance } from "./agent";
 import { captureActiveDisplay } from "./screenCapture";
-import { ensureSessionCwd, readLastSessionId, writeLastSessionId } from "./paths";
+import { ensureSessionCwd, readLastSessionId, writeLastSessionId, SESSION_CWD } from "./paths";
 import { getSetupStatus } from "./setupStatus";
 import { readConfig, writeConfig } from "./config";
 import { connectClaude, disconnectClaude, openInstallDocs } from "./claudeAuth";
@@ -22,38 +21,13 @@ import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
 import { listSkills, setSkillEnabled } from "./skills";
 import { listMcpServers, setMcpServerEnabled } from "./mcpConfig";
 import { typeIntoCapturedWindow } from "./frontApp";
-import { spawnClaudeChatSession } from "./terminalSession";
+import { createPtySession, writeToPty, resizePty, killPty } from "./ptyManager";
+import { resolveOpenArgs } from "./agentSessions";
 
 app.dock?.show();
 
 let currentSessionId: string | undefined;
 let warnedAboutScreenCapture = false;
-
-// Track file watchers to detect external updates (e.g., from CLI)
-const sessionFileWatchers = new Map<string, ReturnType<typeof watch>>();
-
-function watchSessionFile(filePath: string, sessionId: string): void {
-  if (sessionFileWatchers.has(filePath)) return;
-
-  const watcher = watch(filePath, { persistent: false }, (eventType) => {
-    if (eventType === "change") {
-      // Broadcast to all main windows so they re-fetch the updated session
-      getMainWindows().forEach((win) => {
-        win.webContents.send("session:updated", { sessionId });
-      });
-    }
-  });
-
-  sessionFileWatchers.set(filePath, watcher);
-}
-
-function unwatchSessionFile(filePath: string): void {
-  const watcher = sessionFileWatchers.get(filePath);
-  if (watcher) {
-    watcher.close();
-    sessionFileWatchers.delete(filePath);
-  }
-}
 
 async function handleTrayPopupClick(): Promise<void> {
   const status = await getSetupStatus();
@@ -166,10 +140,6 @@ ipcMain.on("submit-goal", async (event, goal: string) => {
           writeLastSessionId(agentEvent.sessionId);
         }
         event.sender.send("response-done");
-        // Broadcast to all main windows so any viewing this session re-fetches it
-        getMainWindows().forEach((win) => {
-          win.webContents.send("session:updated", { sessionId: agentEvent.sessionId || currentSessionId });
-        });
       }
     }
   } catch (error) {
@@ -200,39 +170,8 @@ ipcMain.handle("chatHistory:get-session", (_event, filePath: string) =>
   getSession(filePath)
 );
 
-ipcMain.handle(
-  "popup:continue-session",
-  (_event, session: { id: string; filePath: string; title: string }) => {
-    openPopupWithSession(session);
-  }
-);
-
-// Lets the main window's Chat Detail tab continue a session directly,
-// independent of the popup's single shared currentSessionId — each tab
-// resumes its own session explicitly rather than sharing global state.
-ipcMain.on(
-  "chatDetail:submit-goal",
-  async (event, payload: { sessionId: string; goal: string }) => {
-    try {
-      for await (const agentEvent of askClance(payload.goal, payload.sessionId, undefined)) {
-        if (agentEvent.kind === "text" || agentEvent.kind === "proposal") {
-          event.sender.send("chatDetail:response-chunk", {
-            sessionId: payload.sessionId,
-            text: agentEvent.text,
-          });
-        } else {
-          event.sender.send("chatDetail:response-done", { sessionId: payload.sessionId });
-          // Broadcast to all main windows so any viewing this session re-fetches it
-          getMainWindows().forEach((win) => {
-            win.webContents.send("session:updated", { sessionId: payload.sessionId });
-          });
-        }
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      event.sender.send("chatDetail:response-error", { sessionId: payload.sessionId, message });
-    }
-  }
+ipcMain.handle("chatHistory:resolve-open-args", (_event, sessionId: string) =>
+  resolveOpenArgs(sessionId)
 );
 
 ipcMain.handle("settings:get-preferences", () => ({
@@ -267,22 +206,25 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
-  "chatHistory:watch-session",
-  (_event, filePath: string, sessionId: string) => {
-    watchSessionFile(filePath, sessionId);
+  "terminal:create",
+  (event, payload: { terminalId: string; command: string; args: string[] }) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return;
+    createPtySession(payload.terminalId, payload.command, payload.args, SESSION_CWD, win);
   }
 );
 
-ipcMain.handle(
-  "chatHistory:unwatch-session",
-  (_event, filePath: string) => {
-    unwatchSessionFile(filePath);
+ipcMain.on("terminal:input", (_event, payload: { terminalId: string; data: string }) => {
+  writeToPty(payload.terminalId, payload.data);
+});
+
+ipcMain.on(
+  "terminal:resize",
+  (_event, payload: { terminalId: string; cols: number; rows: number }) => {
+    resizePty(payload.terminalId, payload.cols, payload.rows);
   }
 );
 
-ipcMain.handle(
-  "chatHistory:spawn-cli-session",
-  (_event, sessionId: string) => {
-    spawnClaudeChatSession(sessionId);
-  }
-);
+ipcMain.on("terminal:kill", (_event, payload: { terminalId: string }) => {
+  killPty(payload.terminalId);
+});

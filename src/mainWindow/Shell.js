@@ -1,8 +1,9 @@
 import { html, useEffect, useState } from "../shared/vendor/preact-htm-standalone.module.js";
 import { Icon } from "../shared/icons.js";
-import { ChatsListSection, ChatDetailSection } from "./sections/ChatsSection.js";
+import { ChatsListSection } from "./sections/ChatsSection.js";
 import { SkillsSection } from "./sections/SkillsSection.js";
 import { SettingsSection } from "./sections/SettingsSection.js";
+import { TerminalSection, nextTerminalId } from "./sections/TerminalSection.js";
 
 const LAUNCHER_ITEMS = [
   { id: "chats", label: "Chats", icon: "chat" },
@@ -16,16 +17,16 @@ function tabIcon(tab) {
   return Icon[tab.icon] ? Icon[tab.icon](15) : null;
 }
 
-function renderTabContent(tab, openChatTab) {
+function renderTabContent(tab, openChatTab, openNewChatTab) {
   switch (tab.type) {
     case "chats":
-      return html`<${ChatsListSection} onOpenChat=${openChatTab} />`;
+      return html`<${ChatsListSection} onOpenChat=${openChatTab} onNewChat=${openNewChatTab} />`;
     case "skills":
       return html`<${SkillsSection} />`;
     case "settings":
       return html`<${SettingsSection} />`;
-    case "chatDetail":
-      return html`<${ChatDetailSection} session=${tab.session} />`;
+    case "terminal":
+      return html`<${TerminalSection} terminalId=${tab.terminalId} args=${tab.args} />`;
     default:
       return null;
   }
@@ -64,13 +65,31 @@ export function Shell() {
     openTab({ id, type: id, label: item.label, icon: item.icon });
   }
 
-  function openChatTab(session) {
+  function openNewChatTab() {
+    const terminalId = nextTerminalId();
+    openTab({
+      id: terminalId,
+      type: "terminal",
+      label: "New Chat",
+      icon: "terminal",
+      terminalId,
+      args: [],
+    });
+  }
+
+  async function openChatTab(session) {
+    const terminalId = nextTerminalId();
+    // A session already running as a background agent can't be resumed —
+    // it needs `attach` instead; resolved on the main process via `claude
+    // agents --json` since that's the source of truth for what's running.
+    const args = await window.clanceApp.resolveOpenArgs(session.id);
     openTab({
       id: `chat:${session.filePath}`,
-      type: "chatDetail",
+      type: "terminal",
       label: session.title,
-      icon: session.projectLabel === "Clance" ? "chat" : "terminal",
-      session,
+      icon: "terminal",
+      terminalId,
+      args,
     });
   }
 
@@ -139,8 +158,8 @@ export function Shell() {
             `
           )}
         </div>
-        <main class="content ${activeTab?.type === "chatDetail" ? "content-chat" : ""}">
-          ${activeTab && renderTabContent(activeTab, openChatTab)}
+        <main class="content ${activeTab?.type === "terminal" ? "content-chat" : ""}">
+          ${activeTab && renderTabContent(activeTab, openChatTab, openNewChatTab)}
         </main>
       </div>
     </div>

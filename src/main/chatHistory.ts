@@ -47,6 +47,18 @@ function projectLabelFor(dirName: string): string {
   return segments[segments.length - 1] || dirName;
 }
 
+// The CLI injects these as synthetic "user" messages when a local slash
+// command runs (e.g. /clear, /model) — not something the human actually
+// typed, so they should never surface as a session title or a "YOU" turn.
+function isSyntheticLocalCommandText(text: string): boolean {
+  const trimmed = text.trimStart();
+  return (
+    trimmed.startsWith("<local-command-caveat>") ||
+    trimmed.startsWith("<local-command-stdout>") ||
+    trimmed.startsWith("<command-name>")
+  );
+}
+
 function truncate(text: string, maxLength: number): string {
   const trimmed = text.trim();
   return trimmed.length > maxLength ? `${trimmed.slice(0, maxLength)}…` : trimmed;
@@ -85,7 +97,9 @@ async function firstUserTitle(filePath: string): Promise<string> {
       if (entry.type !== "user") continue;
       const message = entry.message as Record<string, unknown> | undefined;
       const text = extractText(message?.content);
-      if (text && text.trim()) return truncate(text, TITLE_MAX_LENGTH);
+      if (text && text.trim() && !isSyntheticLocalCommandText(text)) {
+        return truncate(text, TITLE_MAX_LENGTH);
+      }
     }
   } finally {
     rl.close();
@@ -199,10 +213,14 @@ export async function getSession(filePath: string): Promise<SessionDetail | null
     if (blocks.length === 0) continue;
 
     const isRealUserMessage =
-      entry.type === "user" && blocks.some((block) => block.type === "text");
+      entry.type === "user" &&
+      blocks.some((block) => block.type === "text" && !isSyntheticLocalCommandText(block.text));
 
     if (title === undefined && isRealUserMessage) {
-      const textBlock = blocks.find((block): block is { type: "text"; text: string } => block.type === "text");
+      const textBlock = blocks.find(
+        (block): block is { type: "text"; text: string } =>
+          block.type === "text" && !isSyntheticLocalCommandText(block.text)
+      );
       if (textBlock) title = truncate(textBlock.text, TITLE_MAX_LENGTH);
     }
 

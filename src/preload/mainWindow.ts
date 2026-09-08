@@ -15,39 +15,27 @@ contextBridge.exposeInMainWorld("clanceApp", {
     ipcRenderer.invoke("setup:save-shortcuts", shortcuts),
   completeSetup: () => ipcRenderer.invoke("setup:complete"),
   listChatSessions: () => ipcRenderer.invoke("chatHistory:list-sessions"),
-  getChatSession: (filePath: string) =>
-    ipcRenderer.invoke("chatHistory:get-session", filePath),
-  watchSessionFile: (filePath: string, sessionId: string) =>
-    ipcRenderer.invoke("chatHistory:watch-session", filePath, sessionId),
-  unwatchSessionFile: (filePath: string) =>
-    ipcRenderer.invoke("chatHistory:unwatch-session", filePath),
-  spawnCliSession: (sessionId: string) =>
-    ipcRenderer.invoke("chatHistory:spawn-cli-session", sessionId),
-  continueSessionInPopup: (session: { id: string; filePath: string; title: string }) =>
-    ipcRenderer.invoke("popup:continue-session", session),
-  sendChatMessage: (sessionId: string, goal: string) =>
-    ipcRenderer.send("chatDetail:submit-goal", { sessionId, goal }),
-  onChatChunk: (callback: (payload: { sessionId: string; text: string }) => void) => {
-    const listener = (_event: unknown, payload: { sessionId: string; text: string }) =>
+  resolveOpenArgs: (sessionId: string) =>
+    ipcRenderer.invoke("chatHistory:resolve-open-args", sessionId),
+  createTerminal: (terminalId: string, command: string, args: string[]) =>
+    ipcRenderer.invoke("terminal:create", { terminalId, command, args }),
+  writeTerminal: (terminalId: string, data: string) =>
+    ipcRenderer.send("terminal:input", { terminalId, data }),
+  resizeTerminal: (terminalId: string, cols: number, rows: number) =>
+    ipcRenderer.send("terminal:resize", { terminalId, cols, rows }),
+  killTerminal: (terminalId: string) =>
+    ipcRenderer.send("terminal:kill", { terminalId }),
+  onTerminalData: (callback: (payload: { terminalId: string; data: string }) => void) => {
+    const listener = (_event: unknown, payload: { terminalId: string; data: string }) =>
       callback(payload);
-    ipcRenderer.on("chatDetail:response-chunk", listener);
-    return () => ipcRenderer.removeListener("chatDetail:response-chunk", listener);
+    ipcRenderer.on("terminal:data", listener);
+    return () => ipcRenderer.removeListener("terminal:data", listener);
   },
-  onChatDone: (callback: (payload: { sessionId: string }) => void) => {
-    const listener = (_event: unknown, payload: { sessionId: string }) => callback(payload);
-    ipcRenderer.on("chatDetail:response-done", listener);
-    return () => ipcRenderer.removeListener("chatDetail:response-done", listener);
-  },
-  onChatError: (callback: (payload: { sessionId: string; message: string }) => void) => {
-    const listener = (_event: unknown, payload: { sessionId: string; message: string }) =>
+  onTerminalExit: (callback: (payload: { terminalId: string; exitCode: number }) => void) => {
+    const listener = (_event: unknown, payload: { terminalId: string; exitCode: number }) =>
       callback(payload);
-    ipcRenderer.on("chatDetail:response-error", listener);
-    return () => ipcRenderer.removeListener("chatDetail:response-error", listener);
-  },
-  onSessionUpdated: (callback: (payload: { sessionId: string }) => void) => {
-    const listener = (_event: unknown, payload: { sessionId: string }) => callback(payload);
-    ipcRenderer.on("session:updated", listener);
-    return () => ipcRenderer.removeListener("session:updated", listener);
+    ipcRenderer.on("terminal:exit", listener);
+    return () => ipcRenderer.removeListener("terminal:exit", listener);
   },
   getPreferences: () => ipcRenderer.invoke("settings:get-preferences"),
   setLaunchOnLogin: (enabled: boolean) =>
