@@ -1,8 +1,8 @@
 import { app, ipcMain, Menu, BrowserWindow } from "electron";
 import { createTray } from "./tray";
 import { registerHotkey, unregisterAllHotkeys, isValidAccelerator } from "./hotkey";
-import { toggleClancePopup, togglePopupPicker } from "./popupWindow";
-import { openMainWindow } from "./mainWindow";
+import { toggleClancePopup, togglePopupPicker, openPopupWithArgs } from "./popupWindow";
+import { openMainWindow, openSessionInMainWindow } from "./mainWindow";
 import { createAppMenu } from "./appMenu";
 import { ensureSessionCwd, SESSION_CWD } from "./paths";
 import { getSetupStatus } from "./setupStatus";
@@ -19,7 +19,7 @@ import { getSession, listSessions } from "./chatHistory";
 import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
 import { listSkills, setSkillEnabled } from "./skills";
 import { listMcpServers, setMcpServerEnabled } from "./mcpConfig";
-import { createPtySession, writeToPty, resizePty, killPty } from "./ptyManager";
+import { createPtySession, writeToPty, resizePty, killPty, reparentPty } from "./ptyManager";
 import { resolveOpenArgs } from "./agentSessions";
 import { copyDroppedFile } from "./dropFiles";
 import { readWindowLayout, writeWindowLayout } from "./windowLayout";
@@ -129,6 +129,14 @@ ipcMain.handle("chatHistory:resolve-open-args", (_event, sessionId: string) =>
   resolveOpenArgs(sessionId)
 );
 
+ipcMain.handle("popup:open-with-args", (_event, args: string[]) => openPopupWithArgs(args));
+
+ipcMain.handle(
+  "popup:open-in-app",
+  (_event, payload: { terminalId: string; args: string[] }) =>
+    openSessionInMainWindow(payload.terminalId, payload.args)
+);
+
 ipcMain.handle("settings:get-preferences", () => ({
   launchOnLogin: getLaunchOnLogin(),
   reuseTabs: readConfig().reuseTabs,
@@ -199,6 +207,11 @@ ipcMain.on(
 
 ipcMain.on("terminal:kill", (_event, payload: { terminalId: string }) => {
   killPty(payload.terminalId);
+});
+
+ipcMain.handle("terminal:reparent", (event, terminalId: string) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  return win ? reparentPty(terminalId, win) : false;
 });
 
 ipcMain.handle("files:copy-dropped", (_event, sourcePath: string) =>

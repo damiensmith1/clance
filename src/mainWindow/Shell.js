@@ -88,7 +88,7 @@ function tabIcon(tab) {
   return Icon[tab.icon] ? Icon[tab.icon](15) : null;
 }
 
-function renderTabContent(tab, openChatTab, openNewChatTab) {
+function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut) {
   switch (tab.type) {
     case "chats":
       return html`<${ChatsListSection} onOpenChat=${openChatTab} onNewChat=${openNewChatTab} />`;
@@ -102,7 +102,12 @@ function renderTabContent(tab, openChatTab, openNewChatTab) {
       // potentially several clients sharing that single process — see the
       // isAttached comment in TerminalSection.js for why that changes how
       // resize is handled.
-      return html`<${TerminalSection} terminalId=${tab.terminalId} args=${tab.args} isAttached=${tab.args?.[0] === "attach"} />`;
+      return html`<${TerminalSection}
+        terminalId=${tab.terminalId}
+        args=${tab.args}
+        isAttached=${tab.args?.[0] === "attach"}
+        onPopOut=${onPopOut}
+      />`;
     default:
       return null;
   }
@@ -207,6 +212,15 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
     : [];
   const showLauncher = node.id === launcher.topRightPaneId;
 
+  // Closes this tab and reopens the same session in the popup widget —
+  // window.clanceApp.openInWidget resumes it there via the same args this
+  // terminal was opened with (a plain "--resume"/"attach" args array, so it
+  // continues the same session rather than starting a new one).
+  function popOutTab(tab) {
+    window.clanceApp.openInWidget(tab.args ?? []);
+    closeTab(node.id, tab.id);
+  }
+
   return html`
     <div class="pane-leaf" onMouseDown=${() => activatePane(node.id)}>
       <div class="tab-bar ${node.id === topLeftPaneId ? "tab-bar-inset" : ""}" data-pane-id=${node.id}>
@@ -256,7 +270,18 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
         `}
       </div>
       <main class="content ${activeTab?.type === "terminal" ? "content-chat" : ""}">
-        ${activeTab && renderTabContent(activeTab, openChatTab, openNewChatTab)}
+        ${activeTab &&
+        renderTabContent(
+          activeTab,
+          openChatTab,
+          openNewChatTab,
+          // A brand-new, never-yet-run chat (empty args) has no resumable
+          // session id yet — popping it out would silently start an
+          // unrelated session in the widget rather than continuing this
+          // one, so the button only appears once there's something to
+          // actually resume.
+          activeTab.args?.length ? () => popOutTab(activeTab) : undefined
+        )}
         ${dragTab &&
         splittableEdges.length > 0 &&
         (dragTab.paneId !== node.id || node.tabs.length > 1) &&
@@ -447,6 +472,20 @@ export function Shell() {
     window.clanceApp.getSetupStatus().then((status) => setClaudeConnected(status.claude.loggedIn));
     hydrateFromDisk();
   }, []);
+
+  // The popup widget's "Open in App" button hands off a still-running
+  // session: the pty itself is reparented to this window (so the CLI
+  // process isn't restarted and nothing in flight is lost) before the tab
+  // is opened to receive its output.
+  useEffect(() => {
+    return window.clanceApp.onOpenSessionTab(async ({ terminalId, args, title }) => {
+      await window.clanceApp.reparentTerminal(terminalId);
+      openTab(
+        { id: terminalId, type: "terminal", label: title ?? "New Chat", icon: "terminal", terminalId, args },
+        { paneId: getState().activePaneId, reuseTabs }
+      );
+    });
+  }, [reuseTabs]);
 
   function openSection(id) {
     const item = LAUNCHER_ITEMS.find((i) => i.id === id);

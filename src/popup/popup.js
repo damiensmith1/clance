@@ -4,20 +4,22 @@ const appEl = document.getElementById("app");
 const termInnerEl = document.getElementById("term-inner");
 const pickerSearchEl = document.getElementById("picker-search");
 const pickerListEl = document.getElementById("picker-list");
+const closeBtn = document.getElementById("close-btn");
+const openInAppBtn = document.getElementById("open-in-app-btn");
 
 let allSessions = [];
 let pickerContextText = "";
 let term = null;
 let fitAddon = null;
 let activeTerminalId = null;
+let activeArgs = [];
 let offTerminalData = null;
 
-// Window height tracks #app's natural content height (CSS caps it at the
-// same max the window used to be fixed at). Reports directly (no
-// requestAnimationFrame batching) since rAF is throttled while the window
-// is hidden/unfocused.
+// The window itself is now user-resizable (drag its edges/corners) rather
+// than sized to fit its content, so #app just fills whatever size the
+// window is — this only needs to keep the terminal's row/col count synced
+// to that.
 const resizeObserver = new ResizeObserver(() => {
-  window.clance.reportHeight(Math.ceil(appEl.offsetHeight));
   if (fitAddon && activeTerminalId) {
     fitAddon.fit();
     window.clance.resizeTerminal(activeTerminalId, term.cols, term.rows);
@@ -45,6 +47,22 @@ function teardownTerminal() {
   term = null;
   fitAddon = null;
   activeTerminalId = null;
+  activeArgs = [];
+  offTerminalData = null;
+  termInnerEl.replaceChildren();
+}
+
+// Like teardownTerminal, but leaves the underlying pty running — used by
+// "Open in App", which hands this same session off to the main window
+// rather than ending it.
+function detachTerminal() {
+  if (!activeTerminalId) return;
+  offTerminalData?.();
+  term?.dispose();
+  term = null;
+  fitAddon = null;
+  activeTerminalId = null;
+  activeArgs = [];
   offTerminalData = null;
   termInnerEl.replaceChildren();
 }
@@ -61,6 +79,7 @@ function openTerminal(args, visibleContext) {
   teardownTerminal();
   appEl.classList.remove("picker-active");
   appEl.classList.add("has-messages");
+  activeArgs = args;
 
   term = new window.Terminal({
     fontFamily: "JetBrains Mono, monospace",
@@ -203,17 +222,12 @@ pickerSearchEl.addEventListener("input", () => {
 // its filesystem path into the CLI's input as unsubmitted text, so the
 // user can add a prompt around it before hitting Enter — the CLI reads the
 // path itself via its own Read tool, same as any file path typed by hand.
-// Starting the drag from Finder blurs the popup before the drag arrives
-// (see popupWindow.ts's "blur" handler) — dragenter is the earliest point
-// the renderer can tell main to hold off on hiding it.
-document.addEventListener("dragenter", () => window.clance.holdOpen());
 termInnerEl.addEventListener("dragover", (event) => {
   event.preventDefault();
   event.dataTransfer.dropEffect = "copy";
 });
 termInnerEl.addEventListener("drop", async (event) => {
   event.preventDefault();
-  window.clance.holdOpen();
   if (!activeTerminalId) return;
   const sourcePaths = Array.from(event.dataTransfer.files)
     .map((file) => window.clance.getPathForFile(file))
@@ -230,6 +244,16 @@ termInnerEl.addEventListener("drop", async (event) => {
   if (paths.length === 0) return;
   window.clance.writeTerminal(activeTerminalId, filePathsToPastePayload(paths));
   term?.focus();
+});
+
+closeBtn.addEventListener("click", () => window.clance.closeWidget());
+
+openInAppBtn.addEventListener("click", () => {
+  if (!activeTerminalId) return;
+  const terminalId = activeTerminalId;
+  const args = activeArgs;
+  detachTerminal();
+  window.clance.openInApp(terminalId, args);
 });
 
 window.clance.onShown((payload) => {

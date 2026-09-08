@@ -1,9 +1,10 @@
 import { html, useEffect, useRef } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { Icon } from "../../shared/icons.js";
 import { filePathsToPastePayload } from "../../shared/dragDropPaste.js";
 
 let terminalCounter = 0;
 
-export function TerminalSection({ terminalId, args = [], isAttached = false }) {
+export function TerminalSection({ terminalId, args = [], isAttached = false, onPopOut }) {
   const containerRef = useRef(null);
   const termRef = useRef(null);
   const fitRef = useRef(null);
@@ -132,6 +133,7 @@ export function TerminalSection({ terminalId, args = [], isAttached = false }) {
   // row count overshoots the actually-visible area.
   return html`<div
     style=${{
+      position: "relative",
       width: "100%",
       height: "100%",
       padding: "20px",
@@ -139,6 +141,10 @@ export function TerminalSection({ terminalId, args = [], isAttached = false }) {
       background: "#F7F3EB",
     }}
   >
+    ${onPopOut &&
+    html`
+      <button class="terminal-pop-out" title="Open in Widget" onClick=${onPopOut}>${Icon.popOut(15)}</button>
+    `}
     <div ref=${containerRef} style=${{ width: "100%", height: "100%" }}></div>
   </div>`;
 }

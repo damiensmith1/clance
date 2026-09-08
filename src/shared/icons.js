@@ -132,6 +132,13 @@ export const Icon = {
 
   close: (size = 16) => svg(size, html`<path d="M6 6l12 12M18 6L6 18" />`),
 
+  popOut: (size = 16) =>
+    svg(
+      size,
+      html`<path d="M14 4h6v6M20 4L10 14" />
+        <path d="M19 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6" />`
+    ),
+
   copy: (size = 14) =>
     svg(
       size,

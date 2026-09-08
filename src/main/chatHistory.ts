@@ -107,6 +107,35 @@ async function firstUserTitle(filePath: string): Promise<string> {
   return "New conversation";
 }
 
+// Used to label a main-window tab opened from the popup widget's "Open in
+// App" button, which only has a session id (from the terminal's --resume
+// args), not a title. The session can be resumed from any project — the
+// terminal running it is always in SESSION_CWD, but that's unrelated to
+// where the *original* conversation's project directory was — so this has
+// to check each project bucket for the id the same way listSessions()
+// does, just stopping at the first match instead of reading every
+// session's title. Null if no project has that file (a brand-new session
+// that hasn't been resumed, so has no id to look up in the first place —
+// see resolveSessionId in agentSessions.ts) or it's somehow gone.
+export async function titleForSessionId(sessionId: string): Promise<string | null> {
+  let projectDirs: string[];
+  try {
+    projectDirs = await readdir(CLAUDE_PROJECTS_DIR);
+  } catch {
+    return null;
+  }
+
+  for (const dirName of projectDirs) {
+    const filePath = join(CLAUDE_PROJECTS_DIR, dirName, `${sessionId}.jsonl`);
+    try {
+      return await firstUserTitle(filePath);
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 export async function listSessions(): Promise<SessionSummary[]> {
   let projectDirs: string[];
   try {

@@ -161,6 +161,32 @@
         overflow: hidden;
         display: flex;
       }
+      /* Sits in the terminal's own 20px padding gutter (TerminalSection.js),
+         not overlapping the xterm viewport itself — deliberately tiny and
+         low-contrast so it doesn't compete with the terminal content. */
+      .terminal-pop-out {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        z-index: 5;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        background: transparent;
+        border: none;
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+        opacity: 0.5;
+        cursor: pointer;
+        transition: opacity 0.12s ease, background-color 0.12s ease, color 0.12s ease;
+      }
+      .terminal-pop-out:hover {
+        opacity: 1;
+        background: var(--surface-hover);
+        color: var(--text-primary);
+      }
 
       /* ---- Panes ---- */
       .pane-area {

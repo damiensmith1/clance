@@ -28,3 +28,20 @@ export async function resolveOpenArgs(sessionId: string): Promise<string[]> {
   if (running) return ["attach", running.id];
   return ["--resume", sessionId];
 }
+
+// The inverse of resolveOpenArgs — recovers the underlying session id from
+// a terminal's launch args, so a session moved into the main window (via
+// the popup widget's "Open in App" button) can be labeled with its real
+// title instead of a generic placeholder. `attach <shortId>` only carries
+// the short agent id, not the session id, so that direction needs the
+// same `claude agents --json` round trip in reverse. A freshly
+// hotkey-launched widget session (`--append-system-prompt ...`, no id at
+// all yet) has nothing to recover here — returns null.
+export async function resolveSessionId(args: string[]): Promise<string | null> {
+  if (args[0] === "--resume") return args[1] ?? null;
+  if (args[0] === "attach") {
+    const active = await listActiveSessions();
+    return active.find((s) => s.id === args[1])?.sessionId ?? null;
+  }
+  return null;
+}

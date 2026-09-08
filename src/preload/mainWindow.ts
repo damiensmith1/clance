@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld("clanceApp", {
   listChatSessions: () => ipcRenderer.invoke("chatHistory:list-sessions"),
   resolveOpenArgs: (sessionId: string) =>
     ipcRenderer.invoke("chatHistory:resolve-open-args", sessionId),
+  openInWidget: (args: string[]) => ipcRenderer.invoke("popup:open-with-args", args),
   createTerminal: (terminalId: string, command: string, args: string[], cols: number, rows: number) =>
     ipcRenderer.invoke("terminal:create", { terminalId, command, args, cols, rows }),
   writeTerminal: (terminalId: string, data: string) =>
@@ -32,6 +33,17 @@ contextBridge.exposeInMainWorld("clanceApp", {
     ipcRenderer.send("terminal:resize", { terminalId, cols, rows }),
   killTerminal: (terminalId: string) =>
     ipcRenderer.send("terminal:kill", { terminalId }),
+  reparentTerminal: (terminalId: string) => ipcRenderer.invoke("terminal:reparent", terminalId),
+  onOpenSessionTab: (
+    callback: (payload: { terminalId: string; args: string[]; title: string | null }) => void
+  ) => {
+    const listener = (
+      _event: unknown,
+      payload: { terminalId: string; args: string[]; title: string | null }
+    ) => callback(payload);
+    ipcRenderer.on("open-session-tab", listener);
+    return () => ipcRenderer.removeListener("open-session-tab", listener);
+  },
   onTerminalData: (callback: (payload: { terminalId: string; data: string }) => void) => {
     const listener = (_event: unknown, payload: { terminalId: string; data: string }) =>
       callback(payload);

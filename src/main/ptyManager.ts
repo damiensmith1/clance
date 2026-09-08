@@ -2,7 +2,13 @@ import * as pty from "node-pty";
 import { BrowserWindow } from "electron";
 import { execFileSync } from "child_process";
 
-const sessions = new Map<string, pty.IPty>();
+// `win` is mutable per-session (not just captured at spawn time) so a
+// session can be reparented to a different window after the fact — see
+// reparentPty, used when "Open in App" moves a popup's live session into
+// the main window without restarting the underlying CLI process.
+type PtySession = { proc: pty.IPty; win: BrowserWindow };
+
+const sessions = new Map<string, PtySession>();
 
 // GUI-launched apps (vs. a terminal-launched dev build) inherit launchd's
 // minimal PATH, missing directories a login shell would add (e.g. nvm,
@@ -58,31 +64,43 @@ export function createPtySession(
     } as Record<string, string>,
   });
 
+  const session: PtySession = { proc: ptyProcess, win };
+  sessions.set(terminalId, session);
+
   ptyProcess.onData((data) => {
-    if (!win.isDestroyed()) {
-      win.webContents.send("terminal:data", { terminalId, data });
+    if (!session.win.isDestroyed()) {
+      session.win.webContents.send("terminal:data", { terminalId, data });
     }
   });
 
   ptyProcess.onExit(({ exitCode }) => {
-    if (!win.isDestroyed()) {
-      win.webContents.send("terminal:exit", { terminalId, exitCode });
+    if (!session.win.isDestroyed()) {
+      session.win.webContents.send("terminal:exit", { terminalId, exitCode });
     }
     sessions.delete(terminalId);
   });
-
-  sessions.set(terminalId, ptyProcess);
 }
 
 export function writeToPty(terminalId: string, data: string): void {
-  sessions.get(terminalId)?.write(data);
+  sessions.get(terminalId)?.proc.write(data);
 }
 
 export function resizePty(terminalId: string, cols: number, rows: number): void {
-  sessions.get(terminalId)?.resize(cols, rows);
+  sessions.get(terminalId)?.proc.resize(cols, rows);
 }
 
 export function killPty(terminalId: string): void {
-  sessions.get(terminalId)?.kill();
+  sessions.get(terminalId)?.proc.kill();
   sessions.delete(terminalId);
+}
+
+// Redirects an existing session's pty output/exit events to `win` instead
+// of whichever window created it — the process itself (and the CLI
+// conversation it holds) is untouched. Returns false if the session is
+// gone (e.g. already exited) by the time the caller gets around to this.
+export function reparentPty(terminalId: string, win: BrowserWindow): boolean {
+  const session = sessions.get(terminalId);
+  if (!session) return false;
+  session.win = win;
+  return true;
 }

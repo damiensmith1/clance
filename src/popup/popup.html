@@ -8,16 +8,20 @@
     <style>
       html, body {
         margin: 0;
+        height: 100%;
         background: transparent;
         font-family: var(--font-sans);
         -webkit-font-smoothing: antialiased;
       }
 
+      /* The window is now user-resizable (drag its edges/corners) instead
+         of sized to fit its content — #app just fills whatever size the
+         window is, rather than growing up to a fixed max-height. */
       #app {
         position: relative;
         display: flex;
         flex-direction: column;
-        max-height: 480px;
+        height: 100%;
         box-sizing: border-box;
         padding: 14px;
         border-radius: var(--radius-lg);
@@ -29,9 +33,10 @@
       }
 
       #session {
-        order: 1;
+        order: 2;
         display: none;
-        height: 452px;
+        flex: 1 1 auto;
+        min-height: 0;
         box-sizing: border-box;
         flex-direction: column;
         border: 1px solid var(--surface-border);
@@ -42,17 +47,25 @@
         display: flex;
       }
 
-      #session-header {
+      /* Persistent across both modes (unlike the old #session-header,
+         which only existed inside the terminal view) — this is the
+         widget's only chrome now that dismissal is never automatic, so a
+         close button has to live somewhere always on-screen. It's also
+         the widget's drag handle (-webkit-app-region: drag), since there's
+         no native title bar to grab (frame: false) — buttons inside it
+         opt back out with no-drag so they stay clickable. */
+      #toolbar {
+        order: 1;
         display: flex;
         align-items: center;
         gap: 6px;
-        padding: 8px 12px;
+        padding: 2px;
         font-size: 10.5px;
         font-weight: 700;
         letter-spacing: 0.06em;
         color: var(--text-secondary);
-        border-bottom: 1px solid var(--surface-border);
         flex-shrink: 0;
+        -webkit-app-region: drag;
       }
       .status-dot {
         width: 6px;
@@ -60,6 +73,34 @@
         border-radius: 50%;
         background: var(--success);
         flex-shrink: 0;
+      }
+      .toolbar-spacer {
+        flex: 1 1 auto;
+      }
+      .toolbar-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        background: transparent;
+        border: none;
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+        cursor: pointer;
+        -webkit-app-region: no-drag;
+      }
+      .toolbar-btn:hover {
+        background: var(--surface-hover);
+        color: var(--text-primary);
+      }
+      /* Only makes sense once there's a live session to move. */
+      #open-in-app-btn {
+        display: none;
+      }
+      #app.has-messages #open-in-app-btn {
+        display: flex;
       }
 
       /* FitAddon sizes rows/cols off the mount element's *direct parent*
@@ -83,7 +124,7 @@
       /* ---- Session picker mode ---- */
       #picker {
         display: none;
-        order: 1;
+        order: 2;
         flex: 1 1 auto;
         min-height: 0;
         flex-direction: column;
@@ -152,8 +193,22 @@
   </head>
   <body>
     <div id="app">
+      <div id="toolbar">
+        <span class="status-dot"></span>CLAUDE
+        <div class="toolbar-spacer"></div>
+        <button id="open-in-app-btn" class="toolbar-btn" title="Open in App">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6" />
+            <path d="M20 4L10 14M10 8v6h6" />
+          </svg>
+        </button>
+        <button id="close-btn" class="toolbar-btn" title="Close">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      </div>
       <div id="session">
-        <div id="session-header"><span class="status-dot"></span>CLAUDE</div>
         <div id="term-mount"><div id="term-inner"></div></div>
       </div>
       <div id="picker">

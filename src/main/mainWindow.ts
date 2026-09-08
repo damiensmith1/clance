@@ -1,7 +1,11 @@
 import { BrowserWindow } from "electron";
 import { join } from "path";
+import { hidePopup } from "./popupWindow";
+import { resolveSessionId } from "./agentSessions";
+import { titleForSessionId } from "./chatHistory";
 
 let mainWindow: BrowserWindow | null = null;
+let mainWindowReady: Promise<void> | null = null;
 
 function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -22,6 +26,13 @@ function createMainWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  // webContents.send() silently drops the event if index.html hasn't
+  // finished loading yet — mirrors popupWindow.ts's popupReady, needed by
+  // openSessionInMainWindow below.
+  mainWindowReady = new Promise((resolve) => {
+    win.webContents.once("did-finish-load", () => resolve());
   });
 
   // Starts filling the whole screen (like clicking the green zoom button),
@@ -45,4 +56,20 @@ export function openMainWindow(): void {
 
   mainWindow.show();
   mainWindow.focus();
+}
+
+// Used by the popup widget's "Open in App" button: brings the main window
+// forward and hands it the live session to continue there, then dismisses
+// the widget. The terminal's pty isn't restarted — its ownership is
+// reparented to the main window separately (see ptyManager.reparentPty,
+// triggered by the renderer once it's ready to receive this session's
+// output), so an in-flight response isn't lost.
+export async function openSessionInMainWindow(terminalId: string, args: string[]): Promise<void> {
+  const sessionId = await resolveSessionId(args);
+  const title = sessionId ? await titleForSessionId(sessionId) : null;
+
+  openMainWindow();
+  await mainWindowReady;
+  mainWindow!.webContents.send("open-session-tab", { terminalId, args, title });
+  hidePopup();
 }

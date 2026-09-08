@@ -231,20 +231,98 @@ Clance-specific is the window chrome and which session gets opened:
   "Terminal-embedding architecture" above) rather than a default dark
   terminal. `backgroundColor` is used instead of `vibrancy`
   (`src/main/popupWindow.ts`).
-- **Dynamic sizing:** the window isn't a fixed size — `#app` uses
-  `height: auto` with a `max-height` (480px), sized by a `ResizeObserver`
-  on `#app` reporting real rendered height to the main process
-  (`resize-request` IPC → `win.setContentSize(w, h, true)`), reported
-  directly in the observer callback rather than batched via
-  `requestAnimationFrame` (rAF is throttled while the window is
-  hidden/unfocused). No "Hit Esc to dismiss" footer or extra bottom
-  padding — the terminal fills essentially the whole card now.
+- **User-resizable and draggable, like a normal borderless window**
+  (`src/main/popupWindow.ts`, `src/popup/popup.html`): it used to size
+  itself to fit its content (`#app` at `height: auto` up to a 480px
+  `max-height`, a `ResizeObserver` reporting real rendered height to the
+  main process via a `resize-request` IPC → `win.setContentSize`). Now the
+  window is `resizable: true` with a `minWidth`/`minHeight` floor
+  (360×220) and no max — the user drags its edges/corners like any window,
+  and `#app` is `height: 100%` so it (and `#session`'s
+  `flex: 1 1 auto`) just fills whatever size that ends up being; the
+  `ResizeObserver` still exists but only to keep the terminal's
+  `fitAddon.fit()`/row-col count in sync as that size changes.
+  `frame: false` means there's no native title bar to grab, so `#toolbar`
+  is the drag handle instead (`-webkit-app-region: drag`, with its buttons
+  opted back out via `no-drag` so they stay clickable) — dragging anywhere
+  else (the terminal, the picker list) intentionally doesn't move the
+  window, same as a real title bar. `positionNearCursor()` (still used to
+  place the widget near wherever you're working when it's first summoned)
+  stops running once the user has dragged it themselves — tracked via a
+  `move` listener on the window, ignoring the one `move` event that
+  listener's own `setPosition()` call generates — so a manual reposition
+  sticks instead of being undone the next time the hotkey opens it. No
+  "Hit Esc to dismiss" footer or extra bottom padding — the terminal fills
+  essentially the whole card.
 - **A real latent race condition, found while testing the picker:**
   `popup.webContents.send("popup-shown", ...)` silently drops the event if
   popup.js hasn't finished loading and attached its listener yet — there's
   no queuing for a missed IPC event. Fixed by tracking a `did-finish-load`
   promise per popup window and awaiting it before every send. Still
   applies under the terminal architecture.
+- **A third entry point, from the main window itself:** a terminal tab's
+  content area (`TerminalSection.js`) shows a tiny "Open in Widget"
+  pop-out button (top-right corner, in the terminal's own padding gutter —
+  not the tab bar, to avoid crowding the tab's close button) that closes
+  the tab and reopens its session in the popup via a new
+  `popup:open-with-args` IPC call → `openPopupWithArgs()`
+  (`src/main/popupWindow.ts`), a thin `showPopup({ mode: "new", args })`
+  with no screen-context capture (the session already exists — there's no
+  "just invoked via hotkey" moment to describe). Only shown once the tab
+  has real resume/attach args; a brand-new, never-yet-run chat has no
+  session id yet to hand the popup, so popping it out would silently
+  start an unrelated session rather than continuing this one.
+- **Dismissal is always explicit now, never focus-driven:** the widget used
+  to hide itself ~500ms after losing OS focus (`createPopup`'s `blur`
+  handler in `src/main/popupWindow.ts`), which made it vanish mid-drag or
+  whenever another app briefly stole focus — the drag case was specifically
+  worked around via a `popup:hold-open` IPC the renderer fired on
+  `dragenter`. Both are gone. A persistent `#toolbar` row (always visible,
+  above whichever of `#session`/`#picker` is showing — replaces the old
+  `#session-header`, which only existed inside the terminal view) carries a
+  close button (`popup:close` IPC → `hidePopup()`) as the only way the
+  widget goes away on its own initiative.
+- **A fourth entry point, in reverse — "Open in App":** the toolbar's other
+  button (only shown once a session is live, i.e. `#app.has-messages`)
+  moves the widget's current conversation into a main window tab and hides
+  the widget. Unlike the pop-out-to-widget direction, this doesn't restart
+  the CLI process via `--resume` — the session may be mid-response, or (if
+  opened fresh via the hotkey) have no resumable id at all yet, since its
+  launch args are just the invisible-context flags, not `--resume`.
+  Instead the pty itself is reparented: `ptyManager.ts`'s session map now
+  stores `{ proc, win }` per terminal instead of a bare `IPty`, and
+  `reparentPty(terminalId, win)` swaps which window its `onData`/`onExit`
+  forwarders target, so the process (and whatever it was mid-typing) keeps
+  running untouched. Flow: popup renderer calls `popup:open-in-app`
+  (`{ terminalId, args }`) → `openSessionInMainWindow()`
+  (`src/main/mainWindow.ts`) focuses/creates the main window, awaits its
+  own `did-finish-load` promise (mirrors `popupReady`), sends
+  `open-session-tab` to it, then calls `hidePopup()`. Before sending, it
+  also resolves a real tab title: `agentSessions.ts`'s new
+  `resolveSessionId(args)` recovers the session id from `--resume`/`attach`
+  args (the inverse of that file's existing `resolveOpenArgs`, going
+  through the same `claude agents --json` lookup for the `attach` case,
+  since that only carries the short agent id) and
+  `chatHistory.ts`'s new `titleForSessionId()` reads the session's first
+  user message the same way `listSessions()` does, but for one known id
+  in Clance's single project bucket rather than scanning every project.
+  Falls back to "New Chat" when there's no id to resolve at all (a
+  freshly hotkey-launched widget session that was never given a
+  `--resume`/`attach` arg in the first place). The main window's
+  `Shell.js` listens for that event, calls the new `terminal:reparent` IPC
+  (resolves to `reparentPty` keyed off the *calling* window via
+  `BrowserWindow.fromWebContents`) before opening the tab, so the handoff
+  completes before `TerminalSection` mounts and starts listening for
+  `terminal:data`. `TerminalSection` needs no changes — `createTerminal`
+  is still called on mount as normal, but `createPtySession`'s existing
+  `if (sessions.has(terminalId)) return` guard makes it a no-op since the
+  session's already running; the mount's own resize (pane size differs
+  from the widget's) reaches the pty regardless and, per the "attach"
+  behavior above, prompts the CLI to redraw for the new dimensions —
+  relied on here to repaint the conversation rather than replaying
+  buffered scrollback, which isn't implemented. The popup side tears down
+  its xterm instance without killing the pty (`detachTerminal()`, a
+  `teardownTerminal()` sibling that skips `killTerminal`).
 
 ## Main window Chats tab (supersedes the "Chat History detail" live-chat design)
 

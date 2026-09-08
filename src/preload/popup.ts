@@ -1,13 +1,14 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 contextBridge.exposeInMainWorld("clance", {
-  reportHeight: (height: number) => ipcRenderer.send("resize-request", height),
   // Dropped File objects no longer carry a real filesystem path in the
   // renderer (Electron removed File#path); webUtils.getPathForFile is the
   // replacement, and it only works from the preload/main-world boundary.
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   copyDroppedFile: (sourcePath: string) => ipcRenderer.invoke("files:copy-dropped", sourcePath),
-  holdOpen: () => ipcRenderer.send("popup:hold-open"),
+  closeWidget: () => ipcRenderer.send("popup:close"),
+  openInApp: (terminalId: string, args: string[]) =>
+    ipcRenderer.invoke("popup:open-in-app", { terminalId, args }),
   listChatSessions: () => ipcRenderer.invoke("chatHistory:list-sessions"),
   resolveOpenArgs: (sessionId: string) =>
     ipcRenderer.invoke("chatHistory:resolve-open-args", sessionId),
