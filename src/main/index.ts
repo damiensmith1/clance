@@ -2,7 +2,7 @@ import { app, ipcMain, Menu } from "electron";
 import { createTray } from "./tray";
 import { registerHotkey, unregisterAllHotkeys, isValidAccelerator } from "./hotkey";
 import { toggleClancePopup, togglePopupPicker, openPopupWithSession } from "./popupWindow";
-import { openMainWindow } from "./mainWindow";
+import { openMainWindow, getMainWindows } from "./mainWindow";
 import { createAppMenu } from "./appMenu";
 import { askClance } from "./agent";
 import { captureActiveDisplay } from "./screenCapture";
@@ -138,6 +138,10 @@ ipcMain.on("submit-goal", async (event, goal: string) => {
           writeLastSessionId(agentEvent.sessionId);
         }
         event.sender.send("response-done");
+        // Broadcast to all main windows so any viewing this session re-fetches it
+        getMainWindows().forEach((win) => {
+          win.webContents.send("session:updated", { sessionId: agentEvent.sessionId || currentSessionId });
+        });
       }
     }
   } catch (error) {
@@ -190,6 +194,10 @@ ipcMain.on(
           });
         } else {
           event.sender.send("chatDetail:response-done", { sessionId: payload.sessionId });
+          // Broadcast to all main windows so any viewing this session re-fetches it
+          getMainWindows().forEach((win) => {
+            win.webContents.send("session:updated", { sessionId: payload.sessionId });
+          });
         }
       }
     } catch (error) {

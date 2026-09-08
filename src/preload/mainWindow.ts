@@ -38,6 +38,11 @@ contextBridge.exposeInMainWorld("clanceApp", {
     ipcRenderer.on("chatDetail:response-error", listener);
     return () => ipcRenderer.removeListener("chatDetail:response-error", listener);
   },
+  onSessionUpdated: (callback: (payload: { sessionId: string }) => void) => {
+    const listener = (_event: unknown, payload: { sessionId: string }) => callback(payload);
+    ipcRenderer.on("session:updated", listener);
+    return () => ipcRenderer.removeListener("session:updated", listener);
+  },
   getPreferences: () => ipcRenderer.invoke("settings:get-preferences"),
   setLaunchOnLogin: (enabled: boolean) =>
     ipcRenderer.invoke("settings:set-launch-on-login", enabled),

@@ -258,10 +258,18 @@ export function ChatDetailSection({ session }) {
         { role: "assistant", blocks: [{ type: "text", text: `⚠ ${message}` }] },
       ]);
     });
+    const offSessionUpdated = window.clanceApp.onSessionUpdated(({ sessionId }) => {
+      if (sessionId !== session.id) return;
+      // Broadcast from another surface (popup or CLI) — re-fetch the session
+      window.clanceApp.getChatSession(session.filePath).then((result) => {
+        if (result) setTurns(result.turns);
+      });
+    });
     return () => {
       offChunk();
       offDone();
       offError();
+      offSessionUpdated();
     };
   }, [session.id, session.filePath]);
 

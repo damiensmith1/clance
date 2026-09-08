@@ -40,3 +40,10 @@ export function openMainWindow(): void {
   mainWindow.show();
   mainWindow.focus();
 }
+
+export function getMainWindows(): BrowserWindow[] {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    return [mainWindow];
+  }
+  return [];
+}
