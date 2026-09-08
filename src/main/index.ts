@@ -22,6 +22,7 @@ import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
 import { listSkills, setSkillEnabled } from "./skills";
 import { listMcpServers, setMcpServerEnabled } from "./mcpConfig";
 import { typeIntoCapturedWindow } from "./frontApp";
+import { spawnClaudeChatSession } from "./terminalSession";
 
 app.dock?.show();
 
@@ -276,5 +277,12 @@ ipcMain.handle(
   "chatHistory:unwatch-session",
   (_event, filePath: string) => {
     unwatchSessionFile(filePath);
+  }
+);
+
+ipcMain.handle(
+  "chatHistory:spawn-cli-session",
+  (_event, sessionId: string) => {
+    spawnClaudeChatSession(sessionId);
   }
 );
