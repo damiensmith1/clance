@@ -15,7 +15,8 @@ status: draft
 | Screenshot capture | Electron `desktopCapturer` | resized to Claude's recommended max edge (1568px), saved to a PNG under `~/.clance/screenshots/`, path handed to the CLI as context — never sent as raw bytes to the app itself |
 | Terminal embedding | `node-pty` (real pty process) + `xterm.js` + `@xterm/addon-fit` | vendored (not CDN-loaded) under `src/shared/vendor/xterm/`; `node-pty` is a native addon, requires `electron-rebuild`/`@electron/rebuild` against Electron's Node ABI |
 | AI / reasoning / session UI | The real `claude` CLI binary, run as a child pty process | superseded the Claude Agent SDK — see "Terminal-embedding architecture" below |
-| Frontmost-app read (window title, keystroke capture point) | `@nut-tree-fork/nut-js` | still used for capturing the frontmost window's title as context; the SDK-era `proposeText`/keystroke-injection flow this library also supported has been removed along with the custom chat UI |
+| Frontmost-app read (window title, keystroke injection) | `@nut-tree-fork/nut-js` | captures the frontmost window's title as context and backs `insert_text` (see "Text-insertion tool" below) — the SDK-era `proposeText` accept/reject *UI* is gone with the custom chat UI, but the underlying keystroke-injection capability is back, now surfaced as an MCP tool the CLI decides to call itself |
+| Text-insertion tool transport | `@modelcontextprotocol/sdk` (Streamable HTTP, stateless) | local-only MCP server run inside Electron's main process — see "Text-insertion tool (`insert_text`)" below |
 | Session storage | JSONL files under `~/.claude/projects/...`, written entirely by the CLI itself | Clance no longer writes session files — every session is a real CLI process, so this is the CLI's own format, not something Clance needs to keep byte-compatible with by hand |
 | Packaging | `electron-builder`, ad-hoc/Developer-ID signed, installed to `/Applications` in dev too | see "Packaging & macOS permissions" below — fixes TCC (Screen Recording/Accessibility) permission flakiness that plagued the raw dev Electron binary |
 
@@ -160,6 +161,55 @@ direct testing outside Electron:
     typed-context treatment as `--resume` — there's no meaningful
     difference from the injection site's perspective once the terminal is
     open.
+
+## Text-insertion tool (`insert_text`)
+
+Reintroduces the ability for a Clance-launched session to write text into
+another app — the old model-decided `proposeText`/accept-reject flow was
+removed with the custom chat UI (see "Terminal-embedding architecture"), but
+per requirements.md's "Custom tools" §, this kind of "type primitive" was
+always meant to come back as an MCP tool the CLI process calls itself, not
+as app-level mediation.
+
+- **Mechanism:** `src/main/insertTextServer.ts` runs a local
+  MCP-over-HTTP server (`@modelcontextprotocol/sdk`, stateless Streamable
+  HTTP transport, `127.0.0.1` + a random port picked fresh per app launch)
+  inside Electron's main process, exposing one tool: `insert_text(text)`.
+  The handler calls `typeIntoCapturedWindow()` in `src/main/frontApp.ts`
+  (previously dead code, written in anticipation of exactly this), which
+  refocuses the window captured by `captureFrontmostWindow()` right before
+  the popup stole focus, then delivers the text via a clipboard paste
+  (write to clipboard, simulate Cmd+V via `@nut-tree-fork/nut-js`, restore
+  the previous clipboard contents ~500ms later) rather than simulating each
+  keystroke — `keyboard.type()` was tried first but is noticeably slow for
+  anything longer than a sentence, since it sends one synthetic keypress
+  per character.
+- **Auth:** the port is random but not secret, so every request is checked
+  against a random per-launch bearer token (`crypto.randomBytes`, compared
+  with `timingSafeEqual`) passed to the CLI via `--mcp-config`'s `headers`,
+  plus a `Host`/`Origin` check against `127.0.0.1:<port>` as defense in
+  depth against DNS rebinding — otherwise any other local process (or a
+  malicious page in a browser, via DNS rebinding) could hit the endpoint
+  and type into whatever app the user last had focused.
+- **Why HTTP, not an in-process SDK tool:** the launched session is a real
+  `claude` CLI child process (see "Terminal-embedding architecture"), not
+  an Agent SDK `query()` call — there's no `query()` left to attach a
+  custom SDK tool to. A local-only MCP server is the CLI's own extension
+  point for this.
+- **Wired in via `--mcp-config`**, additive (not `--strict-mcp-config`), so
+  the user's own configured MCP servers still load alongside it — only for
+  `toggleClancePopup`'s brand-new hotkey-opened sessions
+  (`popupWindow.ts`'s `insertTextMcpArgs()`), and only when
+  `checkPermissions().accessibility` is already true; otherwise the flag is
+  omitted entirely so the CLI never offers a tool that would just fail.
+  Resumed/attached/picker sessions don't get it — there's no freshly
+  captured frontmost window for those to type back into.
+- **Model-decided, no app-level accept/reject:** the CLI calls the tool
+  like any other tool when it judges the user wants text written into the
+  app they were just using, rather than printed in the terminal. There is
+  still no Clance-mediated propose/confirm step — same principle as before
+  the Agent SDK was removed, just moved one layer down (CLI's own tool-use
+  loop instead of Clance's).
 
 ## Packaging & macOS permissions
 
@@ -628,11 +678,10 @@ directly in the embedded terminal.
       question no longer applies.** The model-decided `proposeText`
       accept/reject tool-call flow was removed along with the entire
       custom chat UI (see "Terminal-embedding architecture" above). There
-      is no more app-mediated "type it out" affordance at all — a
-      Clance-launched terminal session is just a normal Claude Code
-      session; if the user wants text typed somewhere, that happens the
-      same way it would in any terminal-based Claude Code session, not
-      through app-level injection.
+      is no more app-mediated accept/reject step — a launched session
+      decides for itself, the same way it decides to call any tool. See
+      "Text-insertion tool (`insert_text`)" below for the reintroduced
+      insertion path.
 - [x] Where does the Anthropic API key/auth live — env var, onboarding
       flow, macOS Keychain? **Resolved, unchanged by the terminal pivot:**
       delegated entirely to the `claude` CLI's own credential store via

@@ -179,15 +179,17 @@ status: draft
 
 ### Response modes (removed — superseded by the terminal pivot)
 
-- ~~**Talk back** / **Type it out**~~ — this entire section no longer
-  applies. There is no app-mediated propose/accept/reject text-injection
-  flow, no custom `proposeText` tool, no keystroke-injection-on-accept.
-  If the user wants Claude to help them write something into another app,
-  that happens the same way it would in any terminal-based Claude Code
-  session (copy from the terminal, or whatever workflow the CLI itself
-  supports) — Clance doesn't mediate it. See `docs/design.md`'s open
-  questions for whether some form of injection affordance is worth
-  reintroducing later.
+- ~~**Talk back** / **Type it out**~~ — the old app-mediated
+  propose/accept/reject text-injection flow (model-decided, with a custom
+  `proposeText` tool and keystroke-injection-on-accept) is gone and stays
+  gone. What replaced it: an `insert_text` **MCP tool**, offered only to
+  hotkey-opened ("new session") popup invocations, that types text into
+  whatever app was frontmost when the popup opened — see
+  `docs/design.md` §"Text-insertion tool (`insert_text`)". The model decides
+  when to call it, the same way it decides to call any other tool; there's
+  no app-level accept/reject step. For every other flow (resumed/picker
+  sessions, or just talking in the terminal), Clance still doesn't mediate
+  text delivery — same as any terminal-based Claude Code session.
 
 ### Multi-turn conversations
 
@@ -271,15 +273,15 @@ SDK query.
   (e.g. `--strict-mcp-config`/`--mcp-config` for MCP; skills have no
   obvious CLI-level enable/disable flag to hook), or scope the toggle UI
   down to "informational only," or drop it.
-- **Custom tools** — still not implemented. Deferred, unchanged. Planned
-  direction: multi-step computer-use (opening apps, clicking around,
-  multi-app workflows) is **not out of scope** — it's expected to arrive as
-  MCP tool(s) a Clance-launched CLI session calls itself (screenshot/click/
-  type primitives), consistent with "Clance stays the context provider +
-  session launcher, never the execution engine itself" in
-  `docs/background.md` §"Why this exists". Today each turn is still "read
-  screen once, respond once" only because no such tool exists yet, not
-  because it's ruled out.
+- **Custom tools** — first one implemented: `insert_text` (types into the
+  frontmost app), see `docs/design.md` §"Text-insertion tool (`insert_text`)".
+  Click/screenshot-on-demand primitives are still not implemented. Planned
+  direction unchanged beyond that: multi-step computer-use (opening apps,
+  clicking around, multi-app workflows) is **not out of scope** — expected
+  to arrive as further MCP tool(s) a Clance-launched CLI session calls
+  itself, consistent with "Clance stays the context provider + session
+  launcher, never the execution engine itself" in `docs/background.md`
+  §"Why this exists".
 - **Hooks** — still not implemented. Deferred, unchanged.
 - **Subagents** — still not implemented. Deferred, unchanged.
 - **Compatibility goal** — met for Skills and MCP servers in the sense

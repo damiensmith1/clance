@@ -2,6 +2,8 @@ import { BrowserWindow, ipcMain, screen } from "electron";
 import { join } from "path";
 import { captureFrontmostWindow } from "./frontApp";
 import { captureAndSaveActiveDisplay } from "./screenCapture";
+import { checkPermissions } from "./permissions";
+import { ensureInsertTextServer } from "./insertTextServer";
 
 const DEFAULT_WIDTH = 560;
 const DEFAULT_HEIGHT = 480;
@@ -97,8 +99,8 @@ ipcMain.on("popup:close", () => hidePopup());
 
 // windowTitle/screenshotPath are already resolved by the caller (they both
 // need the frontmost window captured before .show()/.focus() steal focus
-// onto the popup itself — the same capture also backs typeIntoCapturedWindow
-// for a future accept/reject text-insert flow).
+// onto the popup itself — the same capture also backs the insert_text MCP
+// tool, see insertTextMcpArgs below).
 async function showPopup(payload: PopupShownPayload): Promise<void> {
   if (!popup || popup.isDestroyed()) {
     popup = createPopup();
@@ -126,7 +128,11 @@ function sanitizeForTerminal(text: string): string {
 // Built fresh per invocation (never cached) so the CLI session always
 // reflects what the user was actually looking at and how they opened the
 // widget.
-function buildContextText(windowTitle: string | undefined, screenshotPath: string | undefined): string {
+function buildContextText(
+  windowTitle: string | undefined,
+  screenshotPath: string | undefined,
+  insertTextAvailable: boolean
+): string {
   const lines = [
     "The user just invoked Clance via its global screen-overlay shortcut — a quick-access popup, not a full coding session.",
   ];
@@ -138,15 +144,42 @@ function buildContextText(windowTitle: string | undefined, screenshotPath: strin
       `A screenshot of their screen at that moment was saved to: ${screenshotPath}. Read it if it's relevant to what they ask.`
     );
   }
+  if (insertTextAvailable) {
+    lines.push(
+      "You have an insert_text tool that types text directly into that frontmost app. If the user's request is " +
+        "naturally about producing content for that app — writing, drafting, replying, filling in something — use " +
+        "insert_text to deliver it there instead of just printing it in this terminal, without waiting to be told " +
+        "explicitly to insert/type/paste it. Don't use it for requests that are really just questions or unrelated " +
+        "to that app."
+    );
+  }
   return lines.join("\n");
 }
 
-async function captureContextText(): Promise<string> {
+async function captureContextText(insertTextAvailable: boolean): Promise<string> {
   const [windowTitle, screenshotPath] = await Promise.all([
     captureFrontmostWindow(),
     captureAndSaveActiveDisplay().catch(() => undefined),
   ]);
-  return buildContextText(windowTitle, screenshotPath);
+  return buildContextText(windowTitle, screenshotPath, insertTextAvailable);
+}
+
+// Gives the launched CLI session an `insert_text` tool that types into
+// whatever app was frontmost when the popup opened (see
+// src/main/insertTextServer.ts) — additive (not --strict-mcp-config), so the
+// user's own configured MCP servers still load too. Gated on Accessibility
+// since that's what the underlying keystroke injection needs; when it's not
+// granted, the CLI just doesn't see the tool rather than seeing one that
+// silently fails.
+async function insertTextMcpArgs(): Promise<string[]> {
+  if (!checkPermissions().accessibility) return [];
+  const { url, token } = await ensureInsertTextServer();
+  return [
+    "--mcp-config",
+    JSON.stringify({
+      mcpServers: { clance: { type: "http", url, headers: { Authorization: `Bearer ${token}` } } },
+    }),
+  ];
 }
 
 export async function toggleClancePopup(): Promise<void> {
@@ -154,14 +187,17 @@ export async function toggleClancePopup(): Promise<void> {
     hidePopup();
     return;
   }
-  const contextText = await captureContextText();
+  // insertTextMcpArgs first — buildContextText needs to know whether the
+  // tool is available so it can only tell the model about it when it is.
+  const mcpArgs = await insertTextMcpArgs();
+  const contextText = await captureContextText(mcpArgs.length > 0);
   // A brand-new session has no prior recorded system-prompt snapshot, so
   // this rides in invisibly — --system-prompt-snapshot off makes sure that
   // stays true on any *future* resume of this exact session too (see
   // togglePopupPicker below for why that flag matters).
   showPopup({
     mode: "new",
-    args: ["--append-system-prompt", contextText, "--system-prompt-snapshot", "off"],
+    args: ["--append-system-prompt", contextText, "--system-prompt-snapshot", "off", ...mcpArgs],
   });
 }
 
@@ -186,6 +222,7 @@ export async function togglePopupPicker(): Promise<void> {
   // started from a bare terminal, or any pre-existing session) — and
   // there's no way to tell which from here. So this is instead typed into
   // the terminal as visible, unsubmitted input once the session opens.
-  const contextText = await captureContextText();
+  // No insert_text tool for resumed/picker sessions (see insertTextMcpArgs).
+  const contextText = await captureContextText(false);
   showPopup({ mode: "picker", contextText });
 }
