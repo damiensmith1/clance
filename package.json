@@ -7,7 +7,27 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && mkdir -p dist/popup dist/mainWindow dist/shared && cp -r src/popup/. dist/popup/ && cp -r src/mainWindow/. dist/mainWindow/ && cp -r src/shared/. dist/shared/",
     "start": "npm run build && electron .",
-    "dev": "npm run build && npm start"
+    "dev": "npm run build && npm start",
+    "package": "npm run build && electron-builder --mac --dir",
+    "dist": "npm run build && electron-builder --mac",
+    "dev:packaged": "npm run build && sh scripts/dev-packaged.sh"
+  },
+  "build": {
+    "appId": "dev.damiensmith.clance",
+    "productName": "Clance",
+    "asar": false,
+    "files": [
+      "dist/**/*",
+      "package.json",
+      "!**/*.map"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": ["dmg", "zip"]
+    }
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.263",
@@ -21,6 +41,7 @@
     "@electron/rebuild": "^4.2.0",
     "@types/node": "^22.0.0",
     "electron": "^44.2.0",
+    "electron-builder": "^26.15.3",
     "typescript": "^7.0.2"
   }
 }

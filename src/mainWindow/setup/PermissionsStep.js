@@ -28,7 +28,7 @@ export function PermissionsStep({ onComplete } = {}) {
         title="Screen Recording"
         description="Required so Clance can read on-screen context when invoked."
         actionLabel=${status.screenRecording ? null : "Grant Access"}
-        onAction=${() => window.clanceApp.openScreenRecordingSettings()}
+        onAction=${() => window.clanceApp.requestScreenRecordingAccess()}
       />
       <${StatusCard}
         ok=${status.accessibility}
@@ -49,7 +49,7 @@ export function PermissionsStep({ onComplete } = {}) {
         title="Screen Recording"
         description="Lets Clance read on-screen context when invoked."
         actionLabel=${status.screenRecording ? null : "Open Settings"}
-        onAction=${() => window.clanceApp.openScreenRecordingSettings()}
+        onAction=${() => window.clanceApp.requestScreenRecordingAccess()}
       />
       <${StatusCard}
         ok=${status.accessibility}

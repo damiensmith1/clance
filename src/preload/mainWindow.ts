@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld("clanceApp", {
   recheckPermissions: () => ipcRenderer.invoke("setup:recheck-permissions"),
   openScreenRecordingSettings: () =>
     ipcRenderer.invoke("setup:open-screen-recording-settings"),
+  requestScreenRecordingAccess: () =>
+    ipcRenderer.invoke("setup:request-screen-recording"),
   openAccessibilitySettings: () =>
     ipcRenderer.invoke("setup:open-accessibility-settings"),
   getShortcutActions: () => ipcRenderer.invoke("setup:get-shortcut-actions"),

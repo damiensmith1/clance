@@ -10,6 +10,7 @@ import { readConfig, writeConfig } from "./config";
 import { connectClaude, disconnectClaude, openInstallDocs } from "./claudeAuth";
 import {
   checkPermissions,
+  requestScreenRecordingAccess,
   openScreenRecordingSettings,
   openAccessibilitySettings,
 } from "./permissions";
@@ -73,6 +74,10 @@ ipcMain.handle("setup:recheck-permissions", () => checkPermissions());
 
 ipcMain.handle("setup:open-screen-recording-settings", () =>
   openScreenRecordingSettings()
+);
+
+ipcMain.handle("setup:request-screen-recording", () =>
+  requestScreenRecordingAccess()
 );
 
 ipcMain.handle("setup:open-accessibility-settings", () =>
