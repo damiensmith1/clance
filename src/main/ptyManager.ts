@@ -38,7 +38,14 @@ export function createPtySession(
     cols: 80,
     rows: 30,
     cwd,
-    env: { ...process.env, PATH: getLoginShellPath() } as Record<string, string>,
+    env: {
+      ...process.env,
+      PATH: getLoginShellPath(),
+      // Clance's terminals aren't tied to whatever project a code editor
+      // happens to have open — auto-connecting to it just shows an
+      // unrelated file in the status line.
+      CLAUDE_CODE_AUTO_CONNECT_IDE: "false",
+    } as Record<string, string>,
   });
 
   ptyProcess.onData((data) => {

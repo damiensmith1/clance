@@ -15,11 +15,12 @@ export async function getSetupStatus(): Promise<SetupStatus> {
   const { shortcutsConfigured } = readConfig();
 
   const isComplete =
-    claude.installed &&
-    claude.loggedIn &&
-    permissions.screenRecording &&
-    permissions.accessibility &&
-    shortcutsConfigured;
+    Boolean(process.env.CLANCE_FORCE_MAIN_WINDOW) ||
+    (claude.installed &&
+      claude.loggedIn &&
+      permissions.screenRecording &&
+      permissions.accessibility &&
+      shortcutsConfigured);
 
   return { claude, permissions, shortcutsConfigured, isComplete };
 }

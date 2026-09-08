@@ -1,17 +1,15 @@
 import { BrowserWindow, ipcMain, screen } from "electron";
 import { join } from "path";
 import { captureFrontmostWindow } from "./frontApp";
-
-type ResumableSession = { id: string; filePath: string; title: string };
+import { captureAndSaveActiveDisplay } from "./screenCapture";
 
 const WIDTH = 560;
 const MIN_HEIGHT = 90; // just enough for the empty input row
 const MAX_HEIGHT = 480;
 
 type PopupShownPayload =
-  | { mode: "new" }
-  | { mode: "picker" }
-  | { mode: "resume"; sessionId: string; filePath: string; title: string };
+  | { mode: "new"; args: string[] }
+  | { mode: "picker"; contextText: string };
 
 let popup: BrowserWindow | null = null;
 let popupReady: Promise<void> | null = null;
@@ -78,15 +76,16 @@ ipcMain.on("resize-request", (event, height: number) => {
   win.setContentSize(currentWidth, clamped, true);
 });
 
-// Capturing the frontmost window happens here, before .show()/.focus()
-// steal focus onto the popup itself — this is the window a proposeText
-// tool's proposed text gets typed back into once accepted.
+// windowTitle/screenshotPath are already resolved by the caller (they both
+// need the frontmost window captured before .show()/.focus() steal focus
+// onto the popup itself — the same capture also backs typeIntoCapturedWindow
+// for a future accept/reject text-insert flow).
 async function showPopup(payload: PopupShownPayload): Promise<void> {
   if (!popup || popup.isDestroyed()) {
     popup = createPopup();
   }
 
-  await Promise.all([captureFrontmostWindow(), popupReady]);
+  await popupReady;
 
   positionNearCursor(popup);
   popup.show();
@@ -95,29 +94,72 @@ async function showPopup(payload: PopupShownPayload): Promise<void> {
   currentMode = payload.mode;
 }
 
-export function toggleClancePopup(): void {
+// windowTitle comes from whatever app happens to be frontmost — any app can
+// set its own window title to arbitrary text, including terminal escape
+// sequences, so this can't be trusted verbatim. Strips C0/C1 control chars
+// (this also destroys embedded bracketed-paste markers like \x1b[201~,
+// since ESC itself is stripped).
+function sanitizeForTerminal(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, "");
+}
+
+// Built fresh per invocation (never cached) so the CLI session always
+// reflects what the user was actually looking at and how they opened the
+// widget.
+function buildContextText(windowTitle: string | undefined, screenshotPath: string | undefined): string {
+  const lines = [
+    "The user just invoked Clance via its global screen-overlay shortcut — a quick-access popup, not a full coding session.",
+  ];
+  if (windowTitle) {
+    lines.push(`The frontmost window at the time was: "${sanitizeForTerminal(windowTitle)}".`);
+  }
+  if (screenshotPath) {
+    lines.push(
+      `A screenshot of their screen at that moment was saved to: ${screenshotPath}. Read it if it's relevant to what they ask.`
+    );
+  }
+  return lines.join("\n");
+}
+
+async function captureContextText(): Promise<string> {
+  const [windowTitle, screenshotPath] = await Promise.all([
+    captureFrontmostWindow(),
+    captureAndSaveActiveDisplay().catch(() => undefined),
+  ]);
+  return buildContextText(windowTitle, screenshotPath);
+}
+
+export async function toggleClancePopup(): Promise<void> {
   if (popup && !popup.isDestroyed() && popup.isVisible() && currentMode === "new") {
     popup.hide();
     currentMode = null;
     return;
   }
-  showPopup({ mode: "new" });
+  const contextText = await captureContextText();
+  // A brand-new session has no prior recorded system-prompt snapshot, so
+  // this rides in invisibly — --system-prompt-snapshot off makes sure that
+  // stays true on any *future* resume of this exact session too (see
+  // togglePopupPicker below for why that flag matters).
+  showPopup({
+    mode: "new",
+    args: ["--append-system-prompt", contextText, "--system-prompt-snapshot", "off"],
+  });
 }
 
-export function togglePopupPicker(): void {
+export async function togglePopupPicker(): Promise<void> {
   if (popup && !popup.isDestroyed() && popup.isVisible() && currentMode === "picker") {
     popup.hide();
     currentMode = null;
     return;
   }
-  showPopup({ mode: "picker" });
-}
-
-export function openPopupWithSession(session: ResumableSession): void {
-  showPopup({
-    mode: "resume",
-    sessionId: session.id,
-    filePath: session.filePath,
-    title: session.title,
-  });
+  // Resumed sessions can't reliably take a fresh --append-system-prompt:
+  // the CLI only honors it if the session's *original* launch had
+  // --system-prompt-snapshot off, which is true for sessions Clance itself
+  // created (see toggleClancePopup) but not for anything else (a session
+  // started from a bare terminal, or any pre-existing session) — and
+  // there's no way to tell which from here. So this is instead typed into
+  // the terminal as visible, unsubmitted input once the session opens.
+  const contextText = await captureContextText();
+  showPopup({ mode: "picker", contextText });
 }

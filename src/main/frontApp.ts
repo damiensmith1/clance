@@ -9,12 +9,16 @@ import type { Window } from "@nut-tree-fork/nut-js";
 // actually used.
 let capturedWindow: Window | null = null;
 
-export async function captureFrontmostWindow(): Promise<void> {
+// Returns the captured window's title (e.g. "Design.md — Obsidian"), used
+// to tell the popup's Claude CLI session which app it was invoked over.
+export async function captureFrontmostWindow(): Promise<string | undefined> {
   try {
     const { getActiveWindow } = await import("@nut-tree-fork/nut-js");
     capturedWindow = await getActiveWindow();
+    return await capturedWindow.title;
   } catch {
     capturedWindow = null;
+    return undefined;
   }
 }
 

@@ -4,9 +4,7 @@ import { registerHotkey, unregisterAllHotkeys, isValidAccelerator } from "./hotk
 import { toggleClancePopup, togglePopupPicker } from "./popupWindow";
 import { openMainWindow } from "./mainWindow";
 import { createAppMenu } from "./appMenu";
-import { askClance } from "./agent";
-import { captureActiveDisplay } from "./screenCapture";
-import { ensureSessionCwd, readLastSessionId, writeLastSessionId, SESSION_CWD } from "./paths";
+import { ensureSessionCwd, SESSION_CWD } from "./paths";
 import { getSetupStatus } from "./setupStatus";
 import { readConfig, writeConfig } from "./config";
 import { connectClaude, disconnectClaude, openInstallDocs } from "./claudeAuth";
@@ -20,14 +18,10 @@ import { getSession, listSessions } from "./chatHistory";
 import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
 import { listSkills, setSkillEnabled } from "./skills";
 import { listMcpServers, setMcpServerEnabled } from "./mcpConfig";
-import { typeIntoCapturedWindow } from "./frontApp";
 import { createPtySession, writeToPty, resizePty, killPty } from "./ptyManager";
 import { resolveOpenArgs } from "./agentSessions";
 
 app.dock?.show();
-
-let currentSessionId: string | undefined;
-let warnedAboutScreenCapture = false;
 
 async function handleTrayPopupClick(): Promise<void> {
   const status = await getSetupStatus();
@@ -46,7 +40,6 @@ function registerAllHotkeys(shortcuts: Record<string, string>): void {
 
 app.whenReady().then(async () => {
   ensureSessionCwd();
-  currentSessionId = readLastSessionId();
 
   Menu.setApplicationMenu(createAppMenu());
   createTray(handleTrayPopupClick, openMainWindow);
@@ -57,6 +50,8 @@ app.whenReady().then(async () => {
   } else {
     openMainWindow();
   }
+
+  if (process.env.CLANCE_FORCE_MAIN_WINDOW) openMainWindow();
 });
 
 app.on("activate", openMainWindow);
@@ -115,53 +110,6 @@ ipcMain.handle("setup:complete", async () => {
     registerAllHotkeys(readConfig().shortcuts);
   }
   return status;
-});
-
-ipcMain.on("submit-goal", async (event, goal: string) => {
-  try {
-    const screenshotBase64 = await captureActiveDisplay().catch(() => undefined);
-
-    if (!screenshotBase64 && !warnedAboutScreenCapture) {
-      warnedAboutScreenCapture = true;
-      event.sender.send(
-        "response-note",
-        "Screen Recording permission not granted — continuing without screen context."
-      );
-    }
-
-    for await (const agentEvent of askClance(goal, currentSessionId, screenshotBase64)) {
-      if (agentEvent.kind === "text") {
-        event.sender.send("response-chunk", agentEvent.text);
-      } else if (agentEvent.kind === "proposal") {
-        event.sender.send("response-proposal", { id: agentEvent.id, text: agentEvent.text });
-      } else {
-        if (agentEvent.sessionId) {
-          currentSessionId = agentEvent.sessionId;
-          writeLastSessionId(agentEvent.sessionId);
-        }
-        event.sender.send("response-done");
-      }
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    event.sender.send("response-error", message);
-  }
-});
-
-ipcMain.on("new-conversation", () => {
-  currentSessionId = undefined;
-});
-
-ipcMain.on("resume-conversation", (_event, sessionId: string) => {
-  currentSessionId = sessionId;
-});
-
-ipcMain.on("accept-proposal", async (_event, text: string) => {
-  try {
-    await typeIntoCapturedWindow(text);
-  } catch (error) {
-    console.error("Failed to type proposed text:", error);
-  }
 });
 
 ipcMain.handle("chatHistory:list-sessions", () => listSessions());

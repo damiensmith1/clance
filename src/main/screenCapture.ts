@@ -1,6 +1,10 @@
 import { desktopCapturer, screen } from "electron";
+import { mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
+import { SESSION_CWD } from "./paths";
 
 const MAX_DIMENSION = 1568; // Claude's recommended max image edge — larger wastes tokens.
+const SCREENSHOTS_DIR = join(SESSION_CWD, "screenshots");
 
 /**
  * Screenshot of the display nearest the cursor (where the popup opens),
@@ -32,4 +36,19 @@ export async function captureActiveDisplay(): Promise<string | undefined> {
   }
 
   return source.thumbnail.toPNG().toString("base64");
+}
+
+/**
+ * Captures the active display and writes it to a PNG file under the
+ * terminal's cwd, so it can be attached to a fresh Claude CLI session by
+ * path. Returns undefined if capture failed (see captureActiveDisplay).
+ */
+export async function captureAndSaveActiveDisplay(): Promise<string | undefined> {
+  const base64 = await captureActiveDisplay();
+  if (!base64) return undefined;
+
+  mkdirSync(SCREENSHOTS_DIR, { recursive: true });
+  const filePath = join(SCREENSHOTS_DIR, `clance-${Date.now()}.png`);
+  writeFileSync(filePath, Buffer.from(base64, "base64"));
+  return filePath;
 }
