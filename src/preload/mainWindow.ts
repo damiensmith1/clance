@@ -17,6 +17,10 @@ contextBridge.exposeInMainWorld("clanceApp", {
   listChatSessions: () => ipcRenderer.invoke("chatHistory:list-sessions"),
   getChatSession: (filePath: string) =>
     ipcRenderer.invoke("chatHistory:get-session", filePath),
+  watchSessionFile: (filePath: string, sessionId: string) =>
+    ipcRenderer.invoke("chatHistory:watch-session", filePath, sessionId),
+  unwatchSessionFile: (filePath: string) =>
+    ipcRenderer.invoke("chatHistory:unwatch-session", filePath),
   continueSessionInPopup: (session: { id: string; filePath: string; title: string }) =>
     ipcRenderer.invoke("popup:continue-session", session),
   sendChatMessage: (sessionId: string, goal: string) =>

@@ -1,4 +1,5 @@
 import { app, ipcMain, Menu } from "electron";
+import { watch } from "fs";
 import { createTray } from "./tray";
 import { registerHotkey, unregisterAllHotkeys, isValidAccelerator } from "./hotkey";
 import { toggleClancePopup, togglePopupPicker, openPopupWithSession } from "./popupWindow";
@@ -26,6 +27,32 @@ app.dock?.show();
 
 let currentSessionId: string | undefined;
 let warnedAboutScreenCapture = false;
+
+// Track file watchers to detect external updates (e.g., from CLI)
+const sessionFileWatchers = new Map<string, ReturnType<typeof watch>>();
+
+function watchSessionFile(filePath: string, sessionId: string): void {
+  if (sessionFileWatchers.has(filePath)) return;
+
+  const watcher = watch(filePath, { persistent: false }, (eventType) => {
+    if (eventType === "change") {
+      // Broadcast to all main windows so they re-fetch the updated session
+      getMainWindows().forEach((win) => {
+        win.webContents.send("session:updated", { sessionId });
+      });
+    }
+  });
+
+  sessionFileWatchers.set(filePath, watcher);
+}
+
+function unwatchSessionFile(filePath: string): void {
+  const watcher = sessionFileWatchers.get(filePath);
+  if (watcher) {
+    watcher.close();
+    sessionFileWatchers.delete(filePath);
+  }
+}
 
 async function handleTrayPopupClick(): Promise<void> {
   const status = await getSetupStatus();
@@ -236,4 +263,18 @@ ipcMain.handle("extensibility:list-mcp-servers", () => listMcpServers());
 ipcMain.handle(
   "extensibility:set-mcp-server-enabled",
   (_event, name: string, enabled: boolean) => setMcpServerEnabled(name, enabled)
+);
+
+ipcMain.handle(
+  "chatHistory:watch-session",
+  (_event, filePath: string, sessionId: string) => {
+    watchSessionFile(filePath, sessionId);
+  }
+);
+
+ipcMain.handle(
+  "chatHistory:unwatch-session",
+  (_event, filePath: string) => {
+    unwatchSessionFile(filePath);
+  }
 );

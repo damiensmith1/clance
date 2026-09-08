@@ -223,7 +223,13 @@ export function ChatDetailSection({ session }) {
         setTurns(result.turns);
       }
     });
-  }, [session.filePath]);
+    // Start watching the session file for external updates (e.g., from CLI)
+    window.clanceApp.watchSessionFile(session.filePath, session.id);
+    return () => {
+      // Stop watching when tab unmounts
+      window.clanceApp.unwatchSessionFile(session.filePath);
+    };
+  }, [session.filePath, session.id]);
 
   useEffect(() => {
     if (scrollRef.current) attachCopyHandler(scrollRef.current);
