@@ -3,7 +3,7 @@ import { filePathsToPastePayload } from "../../shared/dragDropPaste.js";
 
 let terminalCounter = 0;
 
-export function TerminalSection({ terminalId, args = [] }) {
+export function TerminalSection({ terminalId, args = [], isAttached = false }) {
   const containerRef = useRef(null);
   const termRef = useRef(null);
   const fitRef = useRef(null);
@@ -51,10 +51,11 @@ export function TerminalSection({ terminalId, args = [] }) {
     // fallback font's cell metrics and overestimate how many rows fit. Once
     // the real font is ready, re-fit and re-sync the pty so the CLI's TUI
     // isn't left rendering to a taller viewport than what's actually visible.
+    // Skipped for an attached session — see the resizeObserver comment below.
     document.fonts.ready.then(() => {
       if (termRef.current !== term) return;
       fitAddon.fit();
-      window.clanceApp.resizeTerminal(terminalId, term.cols, term.rows);
+      if (!isAttached) window.clanceApp.resizeTerminal(terminalId, term.cols, term.rows);
     });
 
     const offData = window.clanceApp.onTerminalData(({ terminalId: id, data }) => {
@@ -65,9 +66,22 @@ export function TerminalSection({ terminalId, args = [] }) {
       window.clanceApp.writeTerminal(terminalId, data);
     });
 
+    // An "attach"ed session's pty is shared with every other client
+    // currently attached to that same background agent (the CLI's own
+    // `claude attach <id>`, not a Clance concept — it's the same mechanism
+    // as attaching a second `tmux` client to one session) — the agent has
+    // exactly one shared terminal size, dictated by whichever attached
+    // client's resize the CLI honored most recently. So forwarding every
+    // local resize here wouldn't just resize this pane's own view, it
+    // reflows every *other* pane also attached to that session out from
+    // under itself. `fitAddon.fit()` still keeps this pane's own xterm.js
+    // viewport looking right locally; only the pty-resize forward (which
+    // is what actually broadcasts to the shared agent) is skipped, sized
+    // once at creation (via `createTerminal`'s initial cols/rows) and left
+    // alone after that.
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
-      window.clanceApp.resizeTerminal(terminalId, term.cols, term.rows);
+      if (!isAttached) window.clanceApp.resizeTerminal(terminalId, term.cols, term.rows);
     });
     resizeObserver.observe(containerRef.current);
 

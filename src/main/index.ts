@@ -22,6 +22,7 @@ import { listMcpServers, setMcpServerEnabled } from "./mcpConfig";
 import { createPtySession, writeToPty, resizePty, killPty } from "./ptyManager";
 import { resolveOpenArgs } from "./agentSessions";
 import { copyDroppedFile } from "./dropFiles";
+import { readWindowLayout, writeWindowLayout } from "./windowLayout";
 
 app.dock?.show();
 
@@ -143,6 +144,12 @@ ipcMain.handle("settings:set-reuse-tabs", (_event, enabled: boolean) => {
   config.reuseTabs = enabled;
   writeConfig(config);
   return config.reuseTabs;
+});
+
+ipcMain.handle("layout:get", () => readWindowLayout());
+
+ipcMain.handle("layout:save", (_event, layout: unknown) => {
+  writeWindowLayout(layout);
 });
 
 ipcMain.handle("extensibility:list-skills", () => listSkills());

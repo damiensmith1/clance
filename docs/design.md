@@ -95,6 +95,22 @@ first-party surface rather than a second implementation of it.
   whether the target session is a live background agent before deciding
   which args to launch with, so Clance never surfaces that CLI error to
   the user.
+  - **An attached session's terminal size is shared across every client
+    attached to it** — the same way a second `tmux`/`screen` client
+    attaching to one session shares that session's single size, not a
+    Clance concept. `claude attach <id>` connects into the one running
+    background-agent process; that process has exactly one terminal size,
+    dictated by whichever attached client's resize the CLI most recently
+    honored. If two Clance panes both have the same session open this
+    way, resizing either one reflows the other's rendering out from under
+    it. Clance can't fix the CLI's own multiplexing, but stops
+    contributing to it: `TerminalSection.js`'s `isAttached` prop (derived
+    from `tab.args[0] === "attach"`, computed once in `Shell.js`) skips
+    forwarding resize to the pty — from the ResizeObserver, and from the
+    post-font-load re-fit — for an attached terminal, sized once at
+    creation and left alone after that. `fitAddon.fit()` still runs
+    either way, so that pane's own xterm.js viewport keeps looking right
+    locally even though the underlying pty no longer tracks it.
 - **Session titles no longer leak CLI-internal text.** Local slash
   commands (e.g. `/clear`) make the CLI inject synthetic "user" messages
   wrapped in `<local-command-caveat>`/`<command-name>` tags into the
@@ -278,16 +294,169 @@ directly in the embedded terminal.
 - **Tab-based navigation (supersedes the original sidebar-swap model):**
   the sidebar (`src/mainWindow/Shell.js`) is a launcher, not a content
   switcher — clicking a launcher item or a chat-history row opens it as a
-  closable tab, and the tab bar (not the sidebar) is what actually
-  switches visible content. Tab state (`tabs`, `activeId`) lives in
-  `Shell.js` as plain Preact `useState`, keyed by a stable `id` per tab
+  closable tab. Tabs are keyed by a stable `id`
   (`"chats"`/`"skills"`/`"settings"` for the three launcher sections,
   `chat:<filePath>` for an opened conversation). Opening an id that's
   already open either activates the existing tab or opens a duplicate,
   governed by the `reuseTabs` preference (`~/.clance/config.json`,
-  default `true`, editable from Settings' "Tab Behavior" toggle) — see
-  `openTab()` in `Shell.js`. Still no router library; revisit only if
-  cross-session tab persistence or deep-linking is needed later.
+  default `true`, editable from Settings' "Tab Behavior" toggle).
+- **Panes (supersedes the single-tab-bar model above):** tabs now live in
+  a tree of resizable panes, not one flat tab bar — up to
+  `MAX_PANES = 4` at once (product decision: keeps the layout legible and
+  the persisted tree small). `src/mainWindow/state/layoutStore.js` owns
+  this as a small hand-rolled Redux-shaped store (`getState`/`subscribe`/
+  `dispatch` over a pure reducer) rather than pulling in real Redux —
+  this app has no bundler and vendors its own dependencies (see "Tech
+  stack" above), so a ~250-line local store beat vendoring one more
+  library for what's a single piece of local UI state.
+  - **Tree shape is deliberately fixed, not arbitrary** (product
+    decision, after the tree briefly allowed unrestrained nesting): a
+    leaf (`{ tabs, activeTabId }`) or a split
+    (`{ direction: "row"|"column", sizes, children }` — always exactly 2
+    children). The root may split once, and each of its two halves may
+    independently split once more, *perpendicular* to the first split —
+    exactly a 2x2 grid, or a 1-and-2 split on either side in either
+    direction, and nothing else (no 3-in-a-row, no deeper nesting, no
+    same-direction nesting that would just be an uneven way of faking a
+    3rd/4th pane). `isValidShape()` enforces this generically: every
+    split-producing reducer action computes its candidate tree first and
+    this validates the *result* against `depth <= 2` / `children.length
+    === 2` / `direction !== parentDirection`, rather than each call site
+    trying to avoid producing a bad shape in the first place — `applySplit`
+    itself is shape-agnostic, just locates the target and wraps it, and
+    lets this reject what doesn't fit. `canSplitAt()` mirrors the same
+    check for the UI (`Shell.js`) so a pane's edge zones only render for
+    edges that would actually do something, instead of accepting a drop
+    that silently no-ops. This naturally caps at 4 leaves total, making
+    the separate `MAX_PANES = 4` constant redundant with the shape rule
+    in practice — kept anyway as a cheap early-exit before computing a
+    candidate tree.
+  - **Moving/splitting off a pane's own *only* tab always empties that
+    pane out from under the operation** (`removePane`, pre-existing,
+    unrelated to the shape rule above) — and collapses its parent split
+    too if that leaves it with a single child. This means net pane count
+    can only grow by splitting off a tab from a pane that has *other*
+    tabs remaining; dragging a single-tab pane's only tab elsewhere is
+    net-neutral (moves content, doesn't add a pane), never net-growth —
+    surprising the first time you try to build a 2x2 grid by moving
+    single-tab panes around and watch the count stay flat instead of
+    climbing.
+  - **Drag-and-drop is hand-rolled on Pointer Events (`Shell.js`'s
+    `startDrag`), not native HTML5 `draggable`/dragstart/dragover/drop/
+    dragend.** This is the second design here, not the first — the native
+    version worked for exactly one drag and then permanently broke every
+    drag after it (confirmed live: an automated Playwright rig driving the
+    real packaged app hit the same wall independent of any app-level fix,
+    including with `-webkit-app-region` disabled entirely). The
+    mechanism, not any particular usage of it, was the problem: a
+    cross-pane move unmounts the dragged tab's own DOM node (it leaves
+    its old pane) as a direct consequence of the drop applying, and doing
+    that while Chromium's native drag-and-drop is still in its OS-level
+    nested run loop (`NSDraggingSession` on macOS) is a known way to
+    leave that browser-internal drag lock stuck. The pane-divider resize
+    two bullets up already worked this way (plain `mousedown`/`mousemove`/
+    `mouseup`, no native DnD) and was never implicated — this makes tabs
+    consistent with it rather than a special case.
+    - `onPointerDown` on a tab calls `setPointerCapture` and starts
+      tracking `pointermove`/`pointerup`/`pointercancel` directly on that
+      element (plus a window `keydown` listener so Escape cancels).
+      Crossing a small threshold (4px) promotes it from "might be a
+      click" to an actual drag: only past that point does it flip
+      `dragTab` state (mounting the drop-zone overlays) and spawn a
+      `.tab-drag-ghost` — a plain `<div>` appended straight to
+      `document.body`, positioned via `transform` on every `pointermove`,
+      **never through Preact state**. Below the threshold, `pointerup`
+      just calls `activateTab` — there's no separate `onClick` on a tab
+      anymore, since pointerdown/pointerup already fully own that
+      distinction.
+    - **Hit-testing during the drag is manual and purely geometric**,
+      since there's no `dragover` to lean on — deliberately *not*
+      `document.elementFromPoint(x, y)` finding the `.pane-drop-edge`/
+      `.pane-drop-edge-outer` overlay divs (an earlier version did this,
+      and it raced: those divs only exist once Preact commits the
+      re-render triggered by crossing the drag threshold, and a fast
+      pointermove could reach the target before that paint landed,
+      finding nothing there and silently missing the drop — intermittent,
+      confirmed by an automated rig hammering the same drag repeatedly and
+      missing a fraction of the time, not by inspection). `hitTest()`
+      instead compares the cursor directly against `getBoundingClientRect()`
+      of the pane-area and each pane's own `.content` box — elements that
+      are unconditionally in the DOM regardless of drag state — via
+      `edgeWithinRect()` using the same fractions as the CSS trigger
+      strips (`OUTER_FRACTION`/`INNER_FRACTION`, 10%/18%, kept in sync by
+      comment). The overlay divs still exist and are still styled by
+      plain CSS `:hover`, but purely as the visual affordance now — hit
+      accuracy no longer depends on them having painted. A tab-bar hit is
+      still checked first, unconditionally — the outer whole-layout edge
+      zone spans the entire pane area, which includes the row every
+      pane's own tab-bar sits in (and, in a stacked column layout, the
+      left/right zone crosses every tab-bar's full width), so without
+      that check a drop on a tab-bar inside that band would resolve to
+      the outer split instead of just moving the tab into that pane.
+    - `splitPane(tabId, fromPaneId, targetPaneId, edge)`'s `targetPaneId`
+      can name either a leaf (per-pane split) or a split node itself,
+      including the root (whole-layout split) — see `isValidShape`/
+      `applySplit` above. Dragging a pane's own tab onto that same pane's
+      edge is allowed too (the common single-pane case, splitting it in
+      two) — the reducer only blocks the degenerate case of splitting a
+      pane using its own *only* tab (would empty it out from under the
+      split), and `canSplitAt(root, fromPaneId, tabId, targetPaneId,
+      edge)` mirrors that exact check (plus the shape rule) for the UI,
+      taking the same drag-context arguments the reducer's action does
+      rather than a simplified approximation — so the two can't disagree.
+    - **A same-pane collapse can take the drop target's id down with it.**
+      An outer/whole-layout split targets the root — but if the dragged
+      tab was its pane's only tab *and* that pane was one of the root
+      split's own two direct children (the ordinary "2 panes side by
+      side, each with one tab" case), removing it collapses the root down
+      to just the other child, and the id captured as `targetPaneId`
+      (the *old* root, read before the drop was dispatched) no longer
+      exists — even though "split the whole layout" still perfectly well
+      applies to whatever the layout now consists of. `SPLIT_PANE` (and
+      `canSplitAt`, via the same shared `resolveEffectiveTarget()`)
+      re-resolves to the new root in exactly this case rather than
+      treating the target as gone and silently rejecting the drop.
+    - **Hover preview:** hit-testing calls `showPreview()`/`hidePreview()`
+      in `Shell.js` directly — a `.pane-preview` div, always mounted but
+      `display:none` by default, updated by setting its inline style from
+      a ref on every hit-test call. Sized to ~32% of the target (bigger
+      than the thin trigger strip itself, so it reads as "this is the new
+      pane," not just "you're near an edge").
+    - **Nothing above touches Preact state except at drag start/end.**
+      Both the tab-bar reorder highlight (`.tab-drop-before`, toggled via
+      `classList` directly) and the preview overlay update the DOM
+      straight from the pointermove handler; only crossing the drag
+      threshold and finishing the drag call `setDragTab`. `dragover`-rate
+      events are far too frequent to route through a full pane-tree
+      re-render — that would tear down and rebuild every tab's pointer
+      listeners on every tick of an active drag, which is exactly the
+      kind of churn that was suspected of contributing to the native-DnD
+      lockup above, and is pure waste even now that native DnD is gone.
+    - Dragging a divider between panes resizes them (`resizeSplit`),
+      clamped to a 15% minimum per side — unchanged, see above.
+    - **Moving or splitting a terminal tab into a different pane
+      regenerates its `terminalId`** (`MOVE_TAB`/`SPLIT_PANE` in
+      `layoutStore.js`), the same as a disk-hydrate restore. The tab
+      leaving one pane's leaf and landing in another's is itself an
+      unmount-then-remount of its `TerminalSection` (Preact has no notion
+      of relocating a live subtree to a different parent), so without a
+      fresh id the old instance's kill-on-unmount and the new instance's
+      create-on-mount would race over the same pty and could leave the
+      just-reopened terminal dead. A same-pane reorder never remounts
+      (only the active tab renders, and reordering doesn't change which
+      tab that is), so it's the one case that keeps the original id.
+  - **Persistence:** every dispatch schedules a debounced (400ms) write
+    of `{ root, activePaneId }` to `~/.clance/window-layout.json` (new
+    `layout:get`/`layout:save` IPC, `src/main/windowLayout.ts`) —
+    deliberately a separate file from `config.json`, which holds actual
+    settings rather than transient UI state. Restored on `Shell` mount
+    via `hydrateFromDisk()`. A pty obviously can't be persisted, so a
+    restored terminal tab relaunches with the same `args` it was opened
+    with rather than resuming in-process — for a `chat:` tab that's a
+    `claude --resume`, so it reopens where the on-disk session left off;
+    a bare "New Chat" tab just opens a fresh terminal. Each restored
+    terminal tab is assigned a brand-new `terminalId`, since the
+    persisted one names a pty from a process that no longer exists.
 - **Design system — "Editorial Warmth" (supersedes the flat/no-serif pass
   above):** built to match user-supplied UI mockups exactly, not just
   "inspired by." Palette: `--app-bg #F7F3EB`, `--surface-bg #EFEDE5`,

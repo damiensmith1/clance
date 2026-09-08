@@ -24,7 +24,7 @@
         box-sizing: border-box;
       }
       .sidebar {
-        width: 208px;
+        width: 176px;
         flex-shrink: 0;
         display: flex;
         flex-direction: column;
@@ -74,7 +74,6 @@
         white-space: nowrap;
         overflow: hidden;
       }
-      .sidebar-collapsed .launcher-label,
       .sidebar-collapsed .sidebar-item span,
       .sidebar-collapsed .sidebar-footer span {
         display: none;
@@ -85,15 +84,6 @@
       }
       .sidebar-collapsed .sidebar-footer {
         justify-content: center;
-      }
-      .launcher-label {
-        font-size: 11px;
-        font-weight: 600;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-        color: var(--text-secondary);
-        padding: 0 12px;
-        margin-bottom: 6px;
       }
       .sidebar-item {
         display: flex;
@@ -193,7 +183,8 @@
         white-space: nowrap;
       }
       .tab-close {
-        display: none;
+        display: flex;
+        visibility: hidden;
         flex-shrink: 0;
         margin-left: 2px;
         border-radius: 4px;
@@ -204,7 +195,7 @@
       }
       .tab:hover .tab-close,
       .tab-active .tab-close {
-        display: flex;
+        visibility: visible;
       }
 
       .content {
@@ -212,11 +203,188 @@
         min-height: 0;
         overflow-y: auto;
         padding: 108px 120px 64px;
+        position: relative;
       }
       .content-chat {
         padding: 0;
         overflow: hidden;
         display: flex;
+      }
+
+      /* ---- Panes ---- */
+      .pane-area {
+        position: relative;
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+      }
+      .pane-split {
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+      }
+      .pane-split-row {
+        flex-direction: row;
+      }
+      .pane-split-column {
+        flex-direction: column;
+      }
+      .pane-split-child {
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+      }
+      .pane-leaf {
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .pane-divider {
+        flex-shrink: 0;
+        background: var(--surface-border);
+        transition: background-color 0.12s ease;
+      }
+      .pane-divider-row {
+        width: 5px;
+        cursor: col-resize;
+      }
+      .pane-divider-column {
+        height: 5px;
+        cursor: row-resize;
+      }
+      .pane-divider:hover {
+        background: var(--accent);
+      }
+      /* Inner: split just the hovered pane. Scoped to that pane's own
+         content box, so these only ever coincide with the outer/whole-
+         layout zones below along a pane that happens to sit at the true
+         window edge — deliberately thinner than the outer zones so a
+         window-edge pane is still reachable for a purely local split. */
+      .pane-drop-edges {
+        position: absolute;
+        inset: 0;
+        z-index: 5;
+      }
+      .pane-drop-edge {
+        position: absolute;
+        background: transparent;
+        transition: background-color 0.12s ease;
+      }
+      .pane-drop-edge:hover {
+        background: rgba(217, 119, 87, 0.16);
+      }
+      .pane-drop-edge-left {
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 18%;
+      }
+      .pane-drop-edge-right {
+        right: 0;
+        top: 0;
+        bottom: 0;
+        width: 18%;
+      }
+      .pane-drop-edge-top {
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 18%;
+      }
+      .pane-drop-edge-bottom {
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 18%;
+      }
+
+      /* Outer: split the whole layout — spans every pane already inside
+         it (a bar under two side-by-side panes, a third pane extending a
+         row, etc.), not just the one under the cursor. Sits along the
+         true edge of the pane area, above the inner zones (z-index) but
+         only within its own thin strip, so it never blocks reaching an
+         inner zone further in. */
+      .pane-drop-edges-outer {
+        position: absolute;
+        inset: 0;
+        z-index: 10;
+        pointer-events: none;
+      }
+      .pane-drop-edge-outer {
+        position: absolute;
+        pointer-events: auto;
+        background: transparent;
+        border: 2px dashed transparent;
+        box-sizing: border-box;
+        transition: background-color 0.12s ease, border-color 0.12s ease;
+      }
+      .pane-drop-edge-outer:hover {
+        background: rgba(217, 119, 87, 0.24);
+        border-color: var(--accent);
+      }
+      .pane-drop-edge-outer-left {
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 10%;
+      }
+      .pane-drop-edge-outer-right {
+        right: 0;
+        top: 0;
+        bottom: 0;
+        width: 10%;
+      }
+      .pane-drop-edge-outer-top {
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 10%;
+      }
+      .pane-drop-edge-outer-bottom {
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 10%;
+      }
+
+      .pane-preview {
+        position: absolute;
+        z-index: 20;
+        pointer-events: none;
+        background: rgba(217, 119, 87, 0.16);
+        border: 2px solid var(--accent);
+        border-radius: var(--radius-sm);
+        box-sizing: border-box;
+        transition: left 0.08s ease, top 0.08s ease, width 0.08s ease, height 0.08s ease;
+      }
+
+      .tab-drop-before {
+        box-shadow: -2px 0 0 var(--accent) inset;
+      }
+
+      /* Follows the cursor during a pointer-based tab drag (see Shell.js —
+         appended straight to document.body, outside the Preact tree, and
+         positioned via transform on every pointermove; never goes through
+         Preact state). */
+      .tab-drag-ghost {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 9999;
+        pointer-events: none;
+        background: var(--surface-elevated);
+        border: 1px solid var(--accent);
+        border-radius: var(--radius-sm);
+        padding: 6px 12px;
+        font-size: 12.5px;
+        font-family: var(--font-sans);
+        color: var(--text-primary);
+        box-shadow: 0 4px 14px rgba(45, 41, 36, 0.18);
+        white-space: nowrap;
       }
 
       /* ---- Page header ---- */

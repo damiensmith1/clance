@@ -83,7 +83,7 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
 
   return html`
     <div class="section-page">
-      <h1 class="page-title">Conversation History</h1>
+      <h1 class="page-title">Sessions</h1>
       <p class="page-subtitle">Browse your past work and active CLI sessions.</p>
 
       <div class="search-row">
@@ -96,7 +96,7 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
             onInput=${(e) => setQuery(e.target.value)}
           />
         </div>
-        <button class="btn-primary" onClick=${onNewChat}>New Chat</button>
+        <button class="btn-ghost" onClick=${onNewChat}>${Icon.addServer(12)} New Session</button>
       </div>
 
       <${SessionList} sessions=${filtered} loading=${loading} onOpen=${onOpenChat} />

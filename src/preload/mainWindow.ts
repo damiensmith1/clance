@@ -45,6 +45,8 @@ contextBridge.exposeInMainWorld("clanceApp", {
     return () => ipcRenderer.removeListener("terminal:exit", listener);
   },
   getPreferences: () => ipcRenderer.invoke("settings:get-preferences"),
+  getWindowLayout: () => ipcRenderer.invoke("layout:get"),
+  saveWindowLayout: (layout: unknown) => ipcRenderer.invoke("layout:save", layout),
   setLaunchOnLogin: (enabled: boolean) =>
     ipcRenderer.invoke("settings:set-launch-on-login", enabled),
   setReuseTabs: (enabled: boolean) =>
