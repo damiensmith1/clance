@@ -16,6 +16,8 @@ const ROBOT_ICON =
 let currentReplyEl = null;
 let currentRawText = "";
 let allSessions = [];
+let currentSessionId = null;
+let currentSessionFilePath = null;
 
 // Window height tracks #app's natural content height (CSS caps it at the
 // same max the window used to be fixed at) so the popup starts as small as
@@ -181,6 +183,8 @@ function renderPickerList(sessions) {
     row.appendChild(title);
     row.appendChild(meta);
     row.addEventListener("click", () => {
+      currentSessionId = session.id;
+      currentSessionFilePath = session.filePath;
       window.clance.resumeConversation(session.id);
       loadResumeSession(session.filePath);
     });
@@ -305,9 +309,13 @@ window.clance.onShown((payload) => {
   if (payload.mode === "picker") {
     showPicker();
   } else if (payload.mode === "resume") {
+    currentSessionId = payload.sessionId;
+    currentSessionFilePath = payload.filePath;
     window.clance.resumeConversation(payload.sessionId);
     loadResumeSession(payload.filePath);
   } else {
+    currentSessionId = null;
+    currentSessionFilePath = null;
     window.clance.newConversation();
     goalInput.focus();
   }
@@ -346,6 +354,14 @@ window.clance.onError((message) => {
 
 window.clance.onNote((message) => {
   appendNote(message);
+});
+
+window.clance.onSessionUpdated(({ sessionId }) => {
+  // If this session was updated from elsewhere (main window or CLI),
+  // reload it to show the new messages
+  if (sessionId === currentSessionId && currentSessionFilePath && !currentReplyEl) {
+    loadResumeSession(currentSessionFilePath);
+  }
 });
 
 goalInput.addEventListener("keydown", (event) => {
