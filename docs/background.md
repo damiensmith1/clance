@@ -8,16 +8,31 @@ status: draft
 
 ## What Clance is
 
-Clance is a macOS menu-bar app (Apple Silicon) that puts a Claude-powered
-agent one hotkey away from anywhere on the system. Press the hotkey, type or
-speak a goal in natural language, and the app reads whatever's currently on
-screen as context, then either types/acts on your behalf in the focused app
-or just talks back in a popup — powered by the [[Claude Agent SDK]].
+Clance is a macOS menu-bar app (Apple Silicon) that puts the real Claude
+Code CLI one hotkey away from anywhere on the system, with screen context
+injected automatically. Press the hotkey, and an embedded terminal opens
+running an actual `claude` process — VS Code's integrated-terminal model,
+not a custom chat UI — pre-seeded with what you were looking at (frontmost
+window title, a screenshot) so you can ask about it immediately.
 
 The core loop:
 
-**Hotkey → Popup (type goal) → Read screen → Think → Respond (type it out,
-or talk back) → Logged**
+**Hotkey → Embedded terminal opens (real `claude` process) → Context
+injected → You talk to Claude Code directly → Session is a normal,
+CLI-resumable session**
+
+**Architecture pivot (superseded the original Agent SDK design):** Clance
+originally embedded the Claude Agent SDK directly and rendered its own chat
+UI (bubbles, avatars, a custom `proposeText` accept/reject flow for typing
+into other apps). That was replaced entirely with embedded terminals
+(`node-pty` + `xterm.js`) running the real CLI binary — see
+`docs/design.md` §"Terminal-embedding architecture" for why and what
+changed. Clance's job narrowed to being a **session launcher + context
+provider**: it decides *which* session to open (new vs. resume vs. attach)
+and *what context to hand it*, then gets out of the way and lets the CLI be
+the CLI. Custom text-injection UI (propose/accept/reject) no longer exists;
+if the user wants to type something out, they do it as they would with any
+terminal-based Claude Code session.
 
 It is explicitly **not** an ambient/always-watching assistant. The screen is
 only read on-demand, at the moment of invocation — never in the background.
@@ -28,14 +43,25 @@ only read on-demand, at the moment of invocation — never in the background.
   ("Rewrite", "Summarize") or are ambient/always-on, which trades away
   privacy and predictability. Clance is meant to sit in between: on-demand,
   open-ended, and local-first.
-- Existing agent tooling (the Claude Agent SDK, Claude Code CLI) already
-  solves reasoning, tool use, and session management well. The app's job is
-  to be a thin OS-integration shell around that — screen capture, text
-  injection, hotkey/tray presence — not to reinvent agent loops.
+- The Claude Code CLI already solves reasoning, tool use, session
+  management, and its own terminal UI well — reimplementing a chat
+  interface on top of the Agent SDK was pure duplicated surface area with
+  none of the CLI's polish (rendering, slash commands, permission
+  prompts). The app's job is to be a thin OS-integration shell around the
+  *real* CLI — screen capture, context injection, session launching,
+  hotkey/tray presence, terminal embedding — not to reinvent an agent UI.
 - Session-format compatibility with the Claude Code CLI is a deliberate
-  choice: a session started via the hotkey popup should be resumable from a
-  terminal (`claude --resume <id>`), and vice versa, so the two surfaces feel
-  like one continuous workspace rather than two separate products.
+  choice, and now falls out for free rather than needing to be
+  hand-maintained: every Clance-opened session *is* a real `claude`
+  process, so a session started via the hotkey popup is trivially
+  resumable from a terminal (`claude --resume <id>`), and vice versa — the
+  two surfaces are literally the same underlying sessions, not two
+  compatible-but-separate formats.
+- Longer-term vision: Clance as "Claude CLI anywhere on your computer," with
+  the app injecting context from whatever window/app you invoked it over,
+  and future MCP tools for screen reading and system automation delegated
+  to the CLI as the execution engine — Clance stays the context
+  provider + session launcher, never the execution engine itself.
 
 ## Core principles
 

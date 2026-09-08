@@ -15,11 +15,19 @@ status: draft
 - Global hotkey opens a popup widget
 - Free-text goal input (open-ended, not fixed actions like "Rewrite"/"Explain")
 - Dictation — speak your goal instead of typing it (local speech-to-text)
-- Screen content capture at time of invocation (screenshot → vision, and/or
-  accessibility-tree read of frontmost app) as context for the request
-- Claude Agent SDK handles reasoning/looping
-- Two response modes: **type it out** (inject text into the focused app) and
-  **talk back** (respond conversationally in the popup, no injection)
+- Screen content capture at time of invocation (screenshot + frontmost
+  window title, handed to the CLI as text/file-path context — not sent as
+  an SDK image content block; see §"Screen context capture") as context
+  for the request
+- The real Claude Code CLI, embedded as a terminal (`node-pty` + `xterm.js`)
+  and run as a real child process, handles all reasoning/looping/UI
+  rendering — **supersedes the original Claude Agent SDK plan**, see
+  `docs/design.md` §"Terminal-embedding architecture" for why
+- ~~Two response modes: **type it out** (inject text into the focused app)
+  and **talk back** (respond conversationally in the popup, no
+  injection)~~ — **removed.** There is no more app-mediated
+  propose/accept/reject text-injection flow; a Clance-launched session is
+  just a normal terminal-based Claude Code session
 - Multi-turn conversations *within one open* — the popup keeps context
   turn-to-turn while it's open, but every hotkey-open starts a brand new
   conversation (see §"Multi-turn conversations" — this reverses the
@@ -29,15 +37,22 @@ status: draft
   started in this app can be resumed via `claude` in the terminal, and
   vice versa
 - A pluggable extensibility layer (skills, tools, MCP servers, hooks,
-  subagents — see §4.8) so the community can add capabilities without
-  forking the app
-- No notarization/permission-hardening yet — assume the user manually grants
-  Accessibility/Screen Recording permissions during dev
+  subagents — see §4.8) — now met almost incidentally, since every
+  Clance-launched session is a real CLI process reading `~/.claude/`
+  conventions natively; Clance's own toggle UI over this is a real gap,
+  see §"Extensibility layer"
+- **Packaged and signed** (supersedes "no notarization/permission-hardening
+  yet") — `electron-builder` produces a stable-identity signed `.app`,
+  installed to `/Applications` even for dev use, because the raw dev
+  Electron binary's TCC permission flakiness made manual-grant-during-dev
+  unworkable in practice. Full notarization for real distribution is still
+  out of scope.
 
 **Explicitly out of scope for v1:**
 
-- Notarization, code signing, Gatekeeper handling (later — this is what
-  actually triggers/streamlines the permission prompts for end users)
+- Full notarization for distribution (`npm run dist` produces a signed but
+  unnotarized build; notarization — Apple ID/App Store Connect API key,
+  `notarytool` — is not wired up)
 - Windows/Linux support
 - Multi-step autonomous computer-use (clicking around, multi-app workflows)
   — each turn is still "read screen once, respond once," even within a
@@ -57,23 +72,28 @@ status: draft
 3. User types or dictates their goal in natural language (e.g. "reply to
    this email politely declining", "summarize what's on my screen", "fill
    this form with my address")
-4. App captures current screen (screenshot) and/or frontmost app's
-   accessibility tree as context
-5. Goal + screen context (+ any prior turns, if continuing a session) sent
-   to Claude Agent SDK, along with whatever custom tools/skills/MCP
-   servers/hooks the user has configured
-6. Claude decides: respond conversationally, produce text to inject, or
-   invoke a custom tool/skill (e.g. a community-built Obsidian-canvas skill)
-7. If injecting: text is typed/inserted into the focused field via
-   accessibility API. If conversational: response shown in the popup
-8. Turn is appended to the session transcript (JSONL, Claude Code-compatible
-   format)
-9. User can continue submitting follow-up goals in the same popup open —
-   each one resumes the session from step 8. Closing the popup and
-   reopening it always starts a new conversation (see "Multi-turn
-   conversations" below)
-10. User can reopen the app's chat view to browse any past session,
-    including ones resumable from the CLI
+4. App captures current screen (a screenshot, saved to disk) and the
+   frontmost window's title as context
+5. An embedded terminal opens running the real `claude` CLI as a child
+   process — the goal isn't sent separately; the user types/talks to the
+   CLI directly inside that terminal, same as any Claude Code session
+6. Context reaches the CLI either invisibly (new sessions, via
+   `--append-system-prompt`) or as visible typed terminal input (resumed
+   sessions) — see `docs/design.md` §"Context injection" for why the two
+   paths differ
+7. Claude Code's own CLI handles everything from here: reasoning, tool
+   use, rendering, permission prompts. Text injection into other apps (if
+   the user wants it) happens however it would in any terminal-based
+   Claude Code session — there is no app-level propose/accept flow anymore
+8. The CLI itself writes the session transcript (JSONL, its own native
+   format) — Clance never writes session files
+9. The terminal session persists exactly as long as the user keeps it
+   open/running — reopening the popup's "new" hotkey always opens a fresh
+   terminal/session; the "continue a conversation" hotkey opens the picker
+   to resume or attach to an existing one
+10. User can reopen the app's Chats tab to browse any past session
+    (Clance's own or any real Claude Code CLI session on the machine) and
+    open it as a resumed terminal tab
 
 ## Functional requirements
 
@@ -87,142 +107,154 @@ status: draft
 
 ### Dictation
 
-- Push-to-talk or toggle mic input from within the popup, as an alternative
-  to typing
-- Local speech-to-text (e.g. Whisper running locally) — no audio sent to any
-  cloud service, consistent with the local-first principle
-- Transcribed text populates the goal input the same as if typed; user can
-  edit before submitting
+- ❌ Not implemented. Predates the terminal-embedding pivot — a "populate a
+  text input" model doesn't map directly onto a terminal's stdin the way it
+  did onto the old custom input field, so this needs a fresh look at how
+  dictation should work against an embedded terminal (push-to-talk that
+  writes to the pty? a separate always-available field that feeds the pty
+  once transcribed?) before implementing. See `docs/design.md`'s open
+  questions.
+- Local speech-to-text (e.g. Whisper running locally) remains the plan —
+  no audio sent to any cloud service, consistent with the local-first
+  principle. Engine choice still unresolved (see `docs/design.md`).
 
 ### Screen context capture
 
 - On invocation, capture:
-  - A screenshot of the active display (or frontmost window) for
-    vision-based context
-  - Optionally, the frontmost app's accessibility tree / focused element
-    content, for cases where structured text is more useful than pixels
-- Read-only and on-demand — never persistent/background capture in v1
+  - A screenshot of the active display nearest the cursor, saved to
+    `~/.clance/screenshots/` — the CLI is told the file **path**, not
+    handed raw image bytes directly, and reads it itself via a normal tool
+    call if relevant to what the user asks
+  - The frontmost window's title (`@nut-tree-fork/nut-js`) — a lighter
+    substitute for the originally-planned accessibility-tree read, not a
+    full structured-content dump
+- Read-only and on-demand — never persistent/background capture, unchanged
+  from the original plan
+- Accessibility-tree / focused-element content read is still deferred —
+  window title has been sufficient so far; revisit if it proves
+  insufficient for structured-app goals
 
-### Claude Agent SDK integration
+### Claude Code CLI integration (supersedes "Claude Agent SDK integration")
 
-- Use Claude Agent SDK (Node/TypeScript) for all reasoning
-- Screenshot passed as image input; goal text as the prompt
-- Stream responses into the popup
-- SDK decides response mode (text reply vs. actionable output) based on
-  prompt — or app-level logic inspects the response and branches
+- ✅ implemented, replacing the originally-planned direct Claude Agent SDK
+  embedding. The real `claude` CLI binary runs as a child pty process
+  (`node-pty`), rendered via an embedded `xterm.js` terminal — see
+  `docs/design.md` §"Terminal-embedding architecture" for why this
+  replaced the SDK approach and what it changed.
+- All reasoning, tool use, streaming, and rendering is the CLI's own —
+  Clance no longer parses SDK message events or renders any response UI of
+  its own.
+- Screen context (screenshot path + frontmost window title) is handed to
+  the CLI as text, not as an SDK image content block — see
+  `docs/design.md` §"Context injection".
 
-### Response modes
+### Response modes (removed — superseded by the terminal pivot)
 
-- **Talk back:** render Claude's response as chat text in the popup
-- **Type it out:** ✅ implemented, as a propose/accept/reject loop rather
-  than direct injection. The model calls a custom `proposeText` tool
-  (chosen from phrasing, not a user-facing mode switch) instead of
-  replying in prose; the popup shows the proposed text with **Accept &
-  Insert** or **Reject**. Accepting refocuses the app that was frontmost
-  when the popup opened and simulates real keystrokes via
-  `@nut-tree-fork/nut-js`'s `keyboard.type()` (not the originally-planned
-  AXUIElement direct text insertion — keystroke simulation is universal
-  across apps with no per-app Accessibility-tree work). Rejecting reveals
-  a "what should change?" input; the answer is a normal follow-up turn in
-  the same resumed session, so the model can revise and the loop repeats.
-  See `docs/design.md` §"Text injection and conversation continuity".
-- No clipboard-fallback path yet for injection failure — not hit in
-  testing, revisit if it proves necessary.
+- ~~**Talk back** / **Type it out**~~ — this entire section no longer
+  applies. There is no app-mediated propose/accept/reject text-injection
+  flow, no custom `proposeText` tool, no keystroke-injection-on-accept.
+  If the user wants Claude to help them write something into another app,
+  that happens the same way it would in any terminal-based Claude Code
+  session (copy from the terminal, or whatever workflow the CLI itself
+  supports) — Clance doesn't mediate it. See `docs/design.md`'s open
+  questions for whether some form of injection affordance is worth
+  reintroducing later.
 
 ### Multi-turn conversations
 
-- A single open of the popup is one conversation: turns within it share
-  full context via the SDK's session resume, and the transcript stays
-  visible turn-to-turn.
-- **The default hotkey opens a new conversation; a second hotkey resumes
-  one.** `Option+Space` (unchanged) always starts fresh: transcript
-  cleared, layout reset to input-only, new SDK session, no `resume`. A
-  second hotkey, `Option+Shift+Command+Space` ("Continue a Conversation"
-  in Settings), opens the popup in a searchable session-picker mode
-  instead — picking a session loads its real prior transcript and resumes
-  it, so screen context captured on the next turn effectively gets added
-  to that existing conversation. Both reuse the same `resume` mechanism as
-  any other follow-up turn — see `docs/design.md`.
-- **A session can also be continued directly in the main window**, without
-  the popup at all: opening a session from the Chats section is a live
-  chat, not just a read-only transcript — typing at the bottom sends a
-  real follow-up turn via `resume`, same as the popup, just without screen
-  context or the propose/accept text-injection affordance (there's no
-  "frontmost app" to inject into from inside Clance itself). See
-  `docs/design.md`.
-- Screen context is re-captured fresh on every turn, even within the same
-  open conversation (the screen may have changed since the last turn).
+- A terminal session's conversation lifetime is now just the lifetime of
+  its underlying `claude` process/session, the same as any terminal-based
+  Claude Code usage — there is no separate app-level "conversation state"
+  to reason about anymore.
+- **The default hotkey opens a new session; a second hotkey resumes one.**
+  `Option+Space` opens a fresh terminal running a brand-new `claude`
+  session (no `--resume`). `Option+Shift+Command+Space` ("Continue a
+  Conversation" in Settings) opens the popup in a searchable session-picker
+  mode instead — picking a session opens a terminal that resumes (or
+  attaches to, if it's a live background agent — see
+  `docs/design.md` §"Attach vs. resume") that session, with context typed
+  visibly into the terminal input rather than injected invisibly (see
+  `docs/design.md` §"Context injection" for why resumed sessions need a
+  different delivery path than new ones).
+- **A session can also be continued directly from the main window's Chats
+  tab** — clicking a session row opens the same kind of resumed/attached
+  terminal tab, just without the popup's screen-context capture (there's
+  no "just invoked from where" moment when opening from a persistent
+  window's session list).
+### Session storage (Claude Code-compatible — now trivially true, not app-maintained)
 
-### Session storage (Claude Code-compatible)
-
-- Write session transcripts as JSONL, one JSON object per line, append-only
-- Store under `~/.claude/projects/<encoded-path>/<session-uuid>.jsonl` —
-  same location/format the Claude Code CLI uses, so:
-  - Sessions started in this app are resumable via `claude --resume
-    <session-id>` (or equivalent) in the terminal
-  - Sessions started in the CLI could, in principle, be browsed in this
-    app's history view
-- Need to confirm exact JSONL schema (event types, message structure)
-  matches current Claude Code CLI version before relying on
-  cross-compatibility — this format is undocumented/reverse-engineered
-  externally, so treat as best-effort, not a guaranteed stable contract
-- "Project path" key: since this app isn't tied to a working directory the
-  way Claude Code CLI is, decide on a fixed pseudo-path (e.g.
-  `~/.claude/projects/-ambient-app/`) to key all its sessions under, or key
-  per-day/per-topic — see `docs/design.md` open questions
+- ✅ Sessions are resumable both directions, but not because Clance writes
+  compatible JSONL — **Clance never writes session files at all now.**
+  Every session is a real `claude` CLI process, so it writes its own
+  transcript in its own native format, in its own location
+  (`~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl`). Compatibility
+  is structural, not a format Clance has to keep in sync by hand.
+- Clance-launched sessions run with a fixed pseudo-`cwd`
+  (`~/.clance/`, see `src/main/paths.ts`), so they land under one stable
+  `~/.claude/projects/<encoded ~/.clance>/` bucket — this was decided
+  before the terminal pivot and still holds, since the CLI process itself
+  (not Clance) is what determines the storage path from its `cwd`.
+- Sessions started in a bare terminal (any real `claude` invocation
+  anywhere on the machine) are already visible in Clance's own chat
+  history browser — full compatibility, not "in principle."
 
 ### In-app chat history
 
-- Chat-style UI listing past sessions (most recent first, grouped by day),
-  covering both Clance's own sessions and real Claude Code CLI sessions
-  from any project on the machine
-- Click a session to open its full back-and-forth as its own closable tab
-  (see the main window's tab system in `docs/design.md`). The tab is a
-  live, resumable chat, not a static transcript — see "Multi-turn
-  conversations" above.
-- Since storage is JSONL-based, history view is just a JSONL
-  reader/renderer, not a separate SQLite-driven UI
-- Optional: SQLite as a lightweight index/cache on top of the JSONL files
-  for fast search/sort, if JSONL directory scanning becomes slow — not
-  required for v1
-- Full details in
-  `docs/superpowers/specs/2026-09-07-chat-history-design.md`
+- ✅ implemented. A session list (most recent first, grouped by day, in
+  the main window's Chats tab) covering both Clance's own sessions and
+  real Claude Code CLI sessions from any project on the machine.
+- Click a session to open it as a **resumed/attached terminal tab**, not a
+  rendered transcript view — the CLI renders its own history when a
+  session resumes. This supersedes the earlier "live chat rendered inside
+  a closable tab" design (`ChatDetailSection`), which no longer exists —
+  see `docs/design.md` §"Main window Chats tab".
+- Since storage is JSONL-based (written by the CLI, not Clance), the
+  session-list scan is still a JSONL reader, not a separate SQLite-driven
+  index.
+- Full details in `docs/superpowers/specs/2026-09-07-chat-history-design.md`
+  — note that spec's UI section describes the since-superseded
+  `ChatDetailSection`; its data-layer description (`chatHistory.ts`'s
+  session listing) is still accurate.
 
 ### Extensibility layer (plugins, skills, MCP, hooks)
 
-Goal: the app itself stays minimal — a shell, screen capture, injection,
-and storage — while all *capability* is added through the Claude Agent
-SDK's own extension points.
+Goal, updated for the terminal pivot: the app stays minimal — a shell,
+screen capture, context injection, and session launching — while all
+*capability* comes from the Claude Code CLI's own extension points, since
+every session Clance opens is a real CLI process rather than an app-owned
+SDK query.
 
-- **Skills** — ✅ implemented. Reuses `~/.claude/skills/` directly (Claude
-  Code's own convention, `SKILL.md` files), passed to the Agent SDK's
-  `skills` query option. Community members drop in a skill folder and it's
-  picked up automatically, no code changes.
-- **MCP servers (external)** — ✅ implemented. `~/.clance/mcp.json` mirrors
-  Claude Code's own `.mcp.json` server config shape (stdio/sse/http), with
-  a Clance-only `enabled` flag wrapping each entry — only enabled servers
-  are passed to the Agent SDK's `mcpServers` query option.
-- **Custom tools** — not yet implemented. Deferred: needs real code (the
-  SDK's `@tool` pattern), not just config, so no generic management UI can
-  offer this the way Skills/MCP toggles do.
-- **Hooks** — not yet implemented. Deferred as a security-sensitive gating
-  layer that deserves its own design pass.
-- **Subagents** — not yet implemented. Deferred alongside Custom tools and
-  Hooks.
-- **Config surface** — ✅ implemented for Skills and MCP servers: the
-  Skills & Plugins section lists both with enable/disable toggles
-  (`src/main/skills.ts`, `src/main/mcpConfig.ts`). Config files remain the
-  source of truth — the UI is a convenience layer over them, not a
-  replacement.
-- **Compatibility goal** — met for Skills (same directory, same `SKILL.md`
-  format) and MCP servers (same config shape). Not yet applicable to
-  Custom tools/Hooks/Subagents since those aren't built yet.
+- **Skills** — ✅ works, but not through anything Clance manages at
+  request-time. Every Clance-launched CLI session reads `~/.claude/skills/`
+  itself, exactly like any other `claude` invocation — no app-level plumbing
+  needed for this to work at all.
+- **MCP servers (external)** — ✅ works the same way: a launched session
+  reads its own project/user `.mcp.json` independently.
+- **Config surface — ⚠️ real gap, not resolved.** The Skills & Plugins
+  section still lists Skills and MCP servers with enable/disable toggles
+  (`src/main/skills.ts`, `src/main/mcpConfig.ts`, writing to
+  `~/.clance/mcp.json`'s per-entry `enabled` flag), but **nothing currently
+  reads that toggle state when launching a terminal session** — the
+  `agent.ts` `query()` call that used to consume it was deleted along with
+  the Agent SDK. The UI still writes real config; it just has no observed
+  effect on what a Clance-launched session can use. Needs a decision (see
+  `docs/design.md` open questions): wire the toggles into the launch args
+  (e.g. `--strict-mcp-config`/`--mcp-config` for MCP; skills have no
+  obvious CLI-level enable/disable flag to hook), or scope the toggle UI
+  down to "informational only," or drop it.
+- **Custom tools** — still not implemented. Deferred, unchanged.
+- **Hooks** — still not implemented. Deferred, unchanged.
+- **Subagents** — still not implemented. Deferred, unchanged.
+- **Compatibility goal** — met for Skills and MCP servers in the sense
+  that matters most now: a real `claude` session picks them up natively,
+  with zero Clance-specific format translation required.
 
-*Example scenario this should support:* a community member wants Clance to
-be able to create Obsidian canvases. They write an MCP server (or a skill,
-if no tool execution is needed) that exposes that capability, drop its
-config into the appropriate folder, and Clance picks it up on next launch —
-no PR to the core app required.
+*Example scenario this should support:* a community member wants Clance
+sessions to be able to create Obsidian canvases. They write an MCP server
+(or a skill) that exposes that capability, drop its config into the
+appropriate `~/.claude/` folder, and any Clance-launched terminal session
+picks it up automatically — no PR to the core app required, and (unlike
+the toggle-managed path above) no Clance-specific wiring needed at all.
 
 ### System presence
 
@@ -247,8 +279,15 @@ no PR to the core app required.
   `setLoginItemSettings()`; not duplicated into Clance's own config since
   the OS already persists it
 - Minimal resource footprint while idle
-- No notarization for v1 — user manually grants Accessibility + Screen
-  Recording permissions via System Settings on first run
+- **Packaged as a signed `.app` (supersedes "no notarization, raw dev
+  binary" plan)** — `electron-builder` produces a stable-identity, signed
+  `Clance.app` (Developer ID or ad-hoc), installed to `/Applications`. Not
+  notarized yet (real distribution — `npm run dist` — would need that; dev
+  use doesn't). This wasn't optional polish: the raw dev Electron binary
+  shared TCC permission grants with every other Electron project on the
+  machine and lost them on every rebuild, which made Screen
+  Recording/Accessibility grants unusable in practice during development.
+  See `docs/design.md` §"Packaging & macOS permissions".
 
 ### First-run setup
 
@@ -274,32 +313,54 @@ no PR to the core app required.
 
 ## Non-functional requirements
 
-- Latency: response should start streaming within ~1-2s of request
+- Latency: a Clance-launched terminal should show the CLI's first output
+  within ~1-2s of the session starting — mechanism changed (terminal boot
+  + CLI startup, not an SDK stream-start), but the target is the same
 - Privacy: screen content is only captured at the moment of invocation,
-  sent only to Claude's API for that one request, never stored as raw
-  images (only the resulting text conversation is persisted)
-- Reliability: failed injection should never lose the model's output
-  (always recoverable via clipboard/chat history)
-- No persistent screen recording or ambient capture of any kind in v1
-- macOS Apple Silicon only — no Intel Mac support required for v1
+  saved to disk (`~/.clance/screenshots/`, not held only in memory the way
+  the old in-memory base64 approach did) and read by the CLI only if it
+  chooses to; only the resulting session transcript (written by the CLI
+  itself) persists long-term
+- ~~Reliability: failed injection should never lose the model's output
+  (always recoverable via clipboard/chat history)~~ — **removed**, no
+  app-mediated injection exists to fail; the CLI's own output is always in
+  its own transcript/terminal scrollback regardless
+- No persistent screen recording or ambient capture of any kind — unchanged
+- macOS Apple Silicon only — no Intel Mac support required — unchanged
 
 ## Success criteria for v1
 
-- Hotkey reliably opens the popup from any app, any time
-- Can read screen content and produce a relevant response for at least a
-  few real scenarios (e.g. "summarize this," "draft a reply to this email")
-- Text injection works in at least one real target app (e.g. Mail, Notes,
-  or a browser text field)
-- Dictation works as a reliable alternative to typing the goal
-- A session created in the app can be resumed in the Claude Code CLI (or at
-  minimum, is stored in a format that could support this without redesign)
-- Submitting follow-up goals within one popup open keeps working multi-turn
-  context; reopening the popup reliably starts a clean, new conversation
-- Chat history view accurately shows all past sessions
-- At least one third-party capability (a skill or MCP server not built by
-  the core team) can be dropped in and used, without modifying app code —
-  proves the extensibility layer actually works, not just documented as a
-  goal
+- Hotkey reliably opens the popup (an embedded terminal) from any app, any
+  time
+- Screen context (screenshot + frontmost window title) is captured and
+  reaches the CLI correctly for both new and resumed sessions — for new
+  sessions, invisibly; for resumed sessions, as visible typed terminal
+  input (see `docs/design.md` §"Context injection")
+- ~~Text injection works in at least one real target app~~ — **removed**,
+  no longer an app-owned feature to validate
+- ❌ Dictation not yet implemented — still an open item, not yet a met
+  success criterion
+- ✅ A session created via Clance is resumable in a bare `claude`
+  terminal, and vice versa — structurally guaranteed now (every session
+  is a real CLI process), not just "in a format that could support this"
+- ✅ Both new-session and resume/attach flows work reliably: `Option+Space`
+  opens a clean new session every time; the picker resumes or attaches to
+  an existing one without surfacing the CLI's "already running as
+  background agent" error to the user (see `docs/design.md` §"Attach vs.
+  resume")
+- Chat history view accurately shows all past sessions (Clance's own and
+  any real CLI session on the machine), opening each as a resumed terminal
+  tab
+- ⚠️ At least one third-party capability (a skill or MCP server not built
+  by the core team) works in a Clance-launched session — **true almost by
+  construction now** (any real `claude` session reads `~/.claude/skills/`
+  and MCP config natively), but Clance's own Skills & Plugins toggle UI
+  does *not* currently gate this (see the Extensibility layer gap above) —
+  so this criterion is met at the CLI level, not yet at the
+  Clance-config level
 - Everything works fully offline except the actual Claude API call
-- Graceful fallback (clipboard) when permissions aren't granted or
-  injection fails
+- ~~Graceful fallback (clipboard) when permissions aren't granted or
+  injection fails~~ — **removed**, no injection path exists; Screen
+  Recording permission being ungranted just means context injection is
+  missing the screenshot line (window title still comes through), not a
+  failure mode needing a fallback
