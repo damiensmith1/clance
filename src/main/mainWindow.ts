@@ -10,6 +10,12 @@ function createMainWindow(): BrowserWindow {
     minWidth: 720,
     minHeight: 480,
     titleBarStyle: "hiddenInset",
+    // Vertically centers the traffic lights within our tab bar's actual
+    // height (~39px: 8px top padding + tab's 7px+7px padding + ~15px line
+    // height + 1px bottom border) — Electron's unset default assumes a
+    // shorter native title bar and places them noticeably higher, so they
+    // read as a different size/row than the tabs.
+    trafficLightPosition: { x: 20, y: 19 },
     backgroundColor: "#f7f3eb",
     webPreferences: {
       preload: join(__dirname, "../preload/mainWindow.js"),

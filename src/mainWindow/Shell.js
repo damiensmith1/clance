@@ -139,7 +139,26 @@ function clearTabBarHighlight() {
   document.querySelectorAll(".tab-drop-before").forEach((el) => el.classList.remove("tab-drop-before"));
 }
 
-function PaneTree({ node, openChatTab, openNewChatTab, dragTab, startDrag, root }) {
+// The leaf occupying the window's actual top-left corner — its tab bar is
+// the only one that ever sits under the traffic lights, so it's the only
+// one that needs left clearance for them (see `.tab-bar-inset`). The tree
+// always splits with children in visual left-to-right/top-to-bottom order
+// (see layoutStore), so this is just "keep taking the first child."
+function topLeftLeafId(node) {
+  return node.type === "leaf" ? node.id : topLeftLeafId(node.children[0]);
+}
+
+// Mirror of the above for the top-right corner, where the launcher cluster
+// lives: for a row split that's the last child (rightmost), for a column
+// split it's still the first child (topmost — a column split's last child
+// is the bottom one, not the top-right one).
+function topRightLeafId(node) {
+  if (node.type === "leaf") return node.id;
+  const child = node.direction === "row" ? node.children[node.children.length - 1] : node.children[0];
+  return topRightLeafId(child);
+}
+
+function PaneTree({ node, openChatTab, openNewChatTab, dragTab, startDrag, root, topLeftPaneId, launcher }) {
   if (node.type === "leaf") {
     return html`<${PaneLeaf}
       node=${node}
@@ -148,6 +167,8 @@ function PaneTree({ node, openChatTab, openNewChatTab, dragTab, startDrag, root 
       dragTab=${dragTab}
       startDrag=${startDrag}
       root=${root}
+      topLeftPaneId=${topLeftPaneId}
+      launcher=${launcher}
     />`;
   }
   const items = [];
@@ -161,6 +182,8 @@ function PaneTree({ node, openChatTab, openNewChatTab, dragTab, startDrag, root 
           dragTab=${dragTab}
           startDrag=${startDrag}
           root=${root}
+          topLeftPaneId=${topLeftPaneId}
+          launcher=${launcher}
         />
       </div>
     `);
@@ -177,15 +200,16 @@ function PaneTree({ node, openChatTab, openNewChatTab, dragTab, startDrag, root 
   return html`<div class="pane-split pane-split-${node.direction}">${items}</div>`;
 }
 
-function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root }) {
+function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root, topLeftPaneId, launcher }) {
   const activeTab = node.tabs.find((t) => t.id === node.activeTabId) ?? node.tabs[0];
   const splittableEdges = dragTab
     ? EDGES.filter((edge) => canSplitAt(root, dragTab.paneId, dragTab.tabId, node.id, edge))
     : [];
+  const showLauncher = node.id === launcher.topRightPaneId;
 
   return html`
     <div class="pane-leaf" onMouseDown=${() => activatePane(node.id)}>
-      <div class="tab-bar" data-pane-id=${node.id}>
+      <div class="tab-bar ${node.id === topLeftPaneId ? "tab-bar-inset" : ""}" data-pane-id=${node.id}>
         ${node.tabs.map(
           (tab, i) => html`
             <button
@@ -208,6 +232,28 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root 
             </button>
           `
         )}
+        ${showLauncher &&
+        html`
+          <div class="tab-bar-spacer"></div>
+          <div class="launcher-cluster">
+            <span
+              class="status-dot ${launcher.claudeConnected ? "status-dot-ok" : "status-dot-off"}"
+              title=${launcher.claudeConnected ? "Claude Connected" : "Claude Disconnected"}
+            ></span>
+            ${LAUNCHER_ITEMS.map(
+              (item) => html`
+                <button
+                  key=${item.id}
+                  class="launcher-item ${launcher.activeSectionId === item.id ? "launcher-item-active" : ""}"
+                  title=${item.label}
+                  onClick=${() => launcher.openSection(item.id)}
+                >
+                  ${Icon[item.icon](15)}
+                </button>
+              `
+            )}
+          </div>
+        `}
       </div>
       <main class="content ${activeTab?.type === "terminal" ? "content-chat" : ""}">
         ${activeTab && renderTabContent(activeTab, openChatTab, openNewChatTab)}
@@ -237,7 +283,6 @@ export function Shell() {
   const state = usePaneState();
   const [reuseTabs, setReuseTabs] = useState(true);
   const [claudeConnected, setClaudeConnected] = useState(null);
-  const [collapsed, setCollapsed] = useState(false);
   const [dragTab, setDragTab] = useState(null);
   const paneAreaRef = useRef(null);
   const previewRef = useRef(null);
@@ -435,38 +480,17 @@ export function Shell() {
       ? EDGES.filter((edge) => canSplitAt(state.root, dragTab.paneId, dragTab.tabId, state.root.id, edge))
       : [];
 
+  const topLeftPaneId = topLeftLeafId(state.root);
+  const topRightPaneId = topRightLeafId(state.root);
+  const launcher = {
+    topRightPaneId,
+    claudeConnected,
+    activeSectionId: activeTab?.type,
+    openSection,
+  };
+
   return html`
     <div class="shell">
-      <nav class="sidebar ${collapsed ? "sidebar-collapsed" : ""}">
-        <div class="sidebar-header">
-          ${!collapsed && html`<div class="brand">Clance</div>`}
-          <button
-            class="sidebar-collapse-btn"
-            title=${collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            onClick=${() => setCollapsed(!collapsed)}
-          >
-            <span style=${{ display: "flex", transform: collapsed ? "none" : "rotate(180deg)" }}>
-              ${Icon.chevronRight(14)}
-            </span>
-          </button>
-        </div>
-        ${LAUNCHER_ITEMS.map(
-          (item) => html`
-            <button
-              class="sidebar-item ${activeTab?.type === item.id ? "sidebar-item-active" : ""}"
-              title=${item.label}
-              onClick=${() => openSection(item.id)}
-            >
-              ${Icon[item.icon](16)}
-              <span>${item.label}</span>
-            </button>
-          `
-        )}
-        <div class="sidebar-footer">
-          <span class="status-dot ${claudeConnected ? "status-dot-ok" : "status-dot-off"}"></span>
-          <span>${claudeConnected ? "Claude Connected" : "Claude Disconnected"}</span>
-        </div>
-      </nav>
       <div class="shell-main">
         <div class="pane-area" ref=${paneAreaRef}>
           <${PaneTree}
@@ -476,6 +500,8 @@ export function Shell() {
             dragTab=${dragTab}
             startDrag=${startDrag}
             root=${state.root}
+            topLeftPaneId=${topLeftPaneId}
+            launcher=${launcher}
           />
           ${splittableOuterEdges.length > 0 &&
           html`

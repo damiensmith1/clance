@@ -292,7 +292,7 @@ directly in the embedded terminal.
   needing a bundler. This is distinct from the popup, which stays vanilla
   JS with no framework.
 - **Tab-based navigation (supersedes the original sidebar-swap model):**
-  the sidebar (`src/mainWindow/Shell.js`) is a launcher, not a content
+  the launcher (`src/mainWindow/Shell.js`) is a launcher, not a content
   switcher — clicking a launcher item or a chat-history row opens it as a
   closable tab. Tabs are keyed by a stable `id`
   (`"chats"`/`"skills"`/`"settings"` for the three launcher sections,
@@ -300,6 +300,19 @@ directly in the embedded terminal.
   already open either activates the existing tab or opens a duplicate,
   governed by the `reuseTabs` preference (`~/.clance/config.json`,
   default `true`, editable from Settings' "Tab Behavior" toggle).
+- **Launcher lives in a floating top-right cluster, not a left sidebar**
+  (supersedes the collapsible left-sidebar launcher above): with only
+  three items (Sessions/Skills & Plugins/Settings), a full-height rail
+  was mostly empty space that also ate pane width, and a full-width top
+  bar just for those three felt like a second, redundant tab-bar-shaped
+  row. Instead `.launcher-cluster` (`src/mainWindow/Shell.js`) is a
+  small `position: fixed` pill floating over the window's top-right
+  corner (icon buttons + the Claude connection status dot) — it doesn't
+  reserve a row, so it costs no layout space and doesn't shift when
+  panes split. Per-pane tab bars are otherwise unchanged; only the pane
+  actually occupying the top-left corner gets `.tab-bar-inset` (left
+  padding to clear the `hiddenInset` traffic lights), computed via
+  `topLeftLeafId()` walking `node.children[0]` down the tree.
 - **Panes (supersedes the single-tab-bar model above):** tabs now live in
   a tree of resizable panes, not one flat tab bar — up to
   `MAX_PANES = 4` at once (product decision: keeps the layout legible and

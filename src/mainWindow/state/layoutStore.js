@@ -49,6 +49,22 @@ function paneExists(node, id) {
   return findPane(node, id) !== null;
 }
 
+// Finds a tab by id anywhere in the tree, not just one pane — used so
+// opening a tab that's already open in some *other* pane focuses it there
+// instead of opening a second copy (a "session" is a singleton across the
+// whole window, not per-pane).
+function findTabAnywhere(node, tabId) {
+  if (node.type === "leaf") {
+    const tab = node.tabs.find((t) => t.id === tabId);
+    return tab ? { paneId: node.id, tab } : null;
+  }
+  for (const child of node.children) {
+    const found = findTabAnywhere(child, tabId);
+    if (found) return found;
+  }
+  return null;
+}
+
 function findFirstLeaf(node) {
   if (node.type === "leaf") return node;
   return findFirstLeaf(node.children[0]);
@@ -205,13 +221,15 @@ function reduce(state, action) {
 
     case "OPEN_TAB": {
       const paneId = action.paneId ?? state.activePaneId;
-      const pane = findPane(state.root, paneId);
-      if (!pane) return state;
-      const existing = pane.tabs.find((t) => t.id === action.tab.id);
+      if (!findPane(state.root, paneId)) return state;
+      // Search the whole tree, not just the target pane — the same tab
+      // could already be open in a different pane, and we never want two
+      // copies of it open at once.
+      const existing = findTabAnywhere(state.root, action.tab.id);
       if (existing) {
         if (action.reuseTabs) {
-          const root = updateLeaf(state.root, paneId, (leaf) => ({ ...leaf, activeTabId: existing.id }));
-          return { ...state, root, activePaneId: paneId };
+          const root = updateLeaf(state.root, existing.paneId, (leaf) => ({ ...leaf, activeTabId: existing.tab.id }));
+          return { ...state, root, activePaneId: existing.paneId };
         }
         const uniqueTab = { ...action.tab, id: `${action.tab.id}#${Date.now()}` };
         const root = updateLeaf(state.root, paneId, (leaf) => ({
