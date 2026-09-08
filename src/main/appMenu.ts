@@ -20,7 +20,7 @@ export function createAppMenu(): Menu {
     },
     {
       label: "View",
-      submenu: [{ role: "reload" }],
+      submenu: [{ role: "reload" }, { role: "toggleDevTools" }],
     },
     {
       label: "Window",

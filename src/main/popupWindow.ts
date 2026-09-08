@@ -14,6 +14,14 @@ type PopupShownPayload =
 let popup: BrowserWindow | null = null;
 let popupReady: Promise<void> | null = null;
 let currentMode: PopupShownPayload["mode"] | null = null;
+let blurHideTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearBlurHideTimer(): void {
+  if (blurHideTimer) {
+    clearTimeout(blurHideTimer);
+    blurHideTimer = null;
+  }
+}
 
 function createPopup(): BrowserWindow {
   const win = new BrowserWindow({
@@ -41,10 +49,19 @@ function createPopup(): BrowserWindow {
   });
 
   win.loadFile(join(__dirname, "../popup/popup.html"));
+  // Starting an OS-level drag (dragging a file from Finder toward the
+  // popup to drop it) makes the drag's source the key window first, which
+  // fires blur here before the drag ever arrives — hiding immediately
+  // would pull the popup out from under it. Give it a moment, cancelled by
+  // regaining focus or by the renderer reporting an active drag/drop.
   win.on("blur", () => {
-    win.hide();
-    currentMode = null;
+    clearBlurHideTimer();
+    blurHideTimer = setTimeout(() => {
+      win.hide();
+      currentMode = null;
+    }, 500);
   });
+  win.on("focus", clearBlurHideTimer);
 
   return win;
 }
@@ -64,6 +81,11 @@ function positionNearCursor(win: BrowserWindow): void {
   );
   win.setPosition(Math.max(x, display.workArea.x), Math.max(y, display.workArea.y));
 }
+
+// The renderer reports an active drag entering (or a drop landing on) the
+// terminal so the pending blur-hide (see createPopup's "blur" handler)
+// doesn't fire out from under it.
+ipcMain.on("popup:hold-open", () => clearBlurHideTimer());
 
 ipcMain.on("resize-request", (event, height: number) => {
   const win = BrowserWindow.fromWebContents(event.sender);

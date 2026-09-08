@@ -1,19 +1,29 @@
 import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-// prettier-ignore
-import type { McpStdioServerConfig, McpSSEServerConfig, McpHttpServerConfig } from "@anthropic-ai/claude-agent-sdk" with { "resolution-mode": "import" };
 import { SESSION_CWD } from "./paths";
 
-// stdio/sse/http only — the SDK's fourth mcpServers variant ("sdk", an
-// in-process server) carries a live, non-serializable object instance and
-// has no place in a JSON config file.
+// Mirrors Claude Code CLI's own .mcp.json server config shape directly, per
+// the compatibility goal in the requirements doc.
+export type McpStdioServerConfig = {
+  type?: "stdio";
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+};
+export type McpSSEServerConfig = {
+  type: "sse";
+  url: string;
+  headers?: Record<string, string>;
+};
+export type McpHttpServerConfig = {
+  type: "http";
+  url: string;
+  headers?: Record<string, string>;
+};
 export type StoredMcpServerConfig = McpStdioServerConfig | McpSSEServerConfig | McpHttpServerConfig;
 
-// The inner shape (command/args/env for stdio; url/headers for sse/http)
-// mirrors Claude Code's own .mcp.json server config directly, per the
-// compatibility goal in the requirements doc — only the wrapping "enabled"
-// flag is Clance's own addition, since the SDK's own mcpServers option has
-// no concept of a disabled-but-configured entry.
+// The wrapping "enabled" flag is Clance's own addition — the CLI's own
+// .mcp.json has no concept of a disabled-but-configured entry.
 export type McpServerEntry = {
   enabled: boolean;
   config: StoredMcpServerConfig;
@@ -28,9 +38,10 @@ const MCP_CONFIG_PATH = join(SESSION_CWD, "mcp.json");
 const DEFAULT_CONFIG: McpConfig = { mcpServers: {} };
 
 // mcp.json entries end up spawning real child processes (stdio servers) or
-// making real network requests (http/sse) via the Agent SDK, so a
-// malformed or corrupted file must not silently pass through to that sink
-// — each entry's shape is checked before it's treated as configured at all.
+// making real network requests (http/sse) once a launched CLI session reads
+// them, so a malformed or corrupted file must not silently pass through to
+// that sink — each entry's shape is checked before it's treated as configured
+// at all.
 function isStoredMcpServerConfig(value: unknown): value is StoredMcpServerConfig {
   if (!value || typeof value !== "object") return false;
   const config = value as Record<string, unknown>;
@@ -103,8 +114,9 @@ export function setMcpServerEnabled(name: string, enabled: boolean): McpServerLi
   return listMcpServers();
 }
 
-// What actually gets passed to query()'s mcpServers option — enabled
-// entries only, with Clance's own "enabled" wrapper stripped back off.
+// Enabled entries only, with Clance's own "enabled" wrapper stripped back
+// off — see requirements.md's "Config surface" gap: nothing currently wires
+// this into a launched session's --mcp-config yet.
 export function getActiveMcpServers(): Record<string, StoredMcpServerConfig> {
   const config = readMcpConfig();
   const active: Record<string, StoredMcpServerConfig> = {};

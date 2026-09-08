@@ -54,9 +54,6 @@ status: draft
   unnotarized build; notarization — Apple ID/App Store Connect API key,
   `notarytool` — is not wired up)
 - Windows/Linux support
-- Multi-step autonomous computer-use (clicking around, multi-app workflows)
-  — each turn is still "read screen once, respond once," even within a
-  multi-turn conversation
 - Ambient/background screen watching
 - Cloud sync of any kind
 - A built-in plugin marketplace/installer UI (the extensibility *mechanism*
@@ -117,6 +114,38 @@ status: draft
 - Local speech-to-text (e.g. Whisper running locally) remains the plan —
   no audio sent to any cloud service, consistent with the local-first
   principle. Engine choice still unresolved (see `docs/design.md`).
+
+### File drag-and-drop
+
+- ✅ implemented. Dropping a file (a screenshot, most commonly) onto either
+  terminal surface (popup or a main-window terminal tab) resolves its real
+  filesystem path (`webUtils.getPathForFile`, exposed from the preload
+  scripts — `File#path` no longer exists in the renderer as of this
+  Electron version), **copies it immediately into `~/.clance/dropped-files/`
+  (`src/main/dropFiles.ts`)**, and pastes the copy's path into the CLI's
+  input as unsubmitted bracketed-paste text, the same technique used for
+  context injection — the user can add a prompt around it before hitting
+  Enter, and the CLI reads the file itself via its own Read tool.
+- The eager copy exists because a file dragged from macOS system UI (e.g.
+  the floating screenshot thumbnail) is often only a **file promise**
+  (`NSFilePromiseProvider`), not a real file — Chromium's HTML5 drag-and-drop
+  (all Electron exposes) doesn't implement Apple's promise-resolution
+  protocol, so what resolves is a transient staging copy under
+  `TemporaryItems/NSIRD_screencaptureui_.../` that can vanish moments after
+  the drop. Copying it out immediately, before the CLI ever tries to read
+  the original path, is the only mitigation available at this layer — it's
+  a race, not a guarantee; if the source is already gone by drop time, the
+  copy (and thus the paste) is silently skipped.
+- This is the answer to "I'm driving Clance's own development through a
+  Clance terminal and can't drag a screenshot to Claude" — no separate
+  upload/attachment mechanism, just a real (now Clance-owned) path handed
+  to the CLI the same way any typed path would be.
+- The popup surface also needed a fix here beyond the drop handler itself:
+  it hides on window blur, and starting an OS drag from Finder shifts key
+  window focus to Finder first, hiding the popup out from under the drag
+  before it could ever land. Blur now waits ~500ms before hiding, cancelled
+  by regaining focus or by the renderer reporting an active drag/drop
+  (`popup:hold-open` IPC). See `docs/design.md` for the mechanism.
 
 ### Screen context capture
 
@@ -242,7 +271,15 @@ SDK query.
   (e.g. `--strict-mcp-config`/`--mcp-config` for MCP; skills have no
   obvious CLI-level enable/disable flag to hook), or scope the toggle UI
   down to "informational only," or drop it.
-- **Custom tools** — still not implemented. Deferred, unchanged.
+- **Custom tools** — still not implemented. Deferred, unchanged. Planned
+  direction: multi-step computer-use (opening apps, clicking around,
+  multi-app workflows) is **not out of scope** — it's expected to arrive as
+  MCP tool(s) a Clance-launched CLI session calls itself (screenshot/click/
+  type primitives), consistent with "Clance stays the context provider +
+  session launcher, never the execution engine itself" in
+  `docs/background.md` §"Why this exists". Today each turn is still "read
+  screen once, respond once" only because no such tool exists yet, not
+  because it's ruled out.
 - **Hooks** — still not implemented. Deferred, unchanged.
 - **Subagents** — still not implemented. Deferred, unchanged.
 - **Compatibility goal** — met for Skills and MCP servers in the sense

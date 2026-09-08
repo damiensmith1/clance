@@ -1,5 +1,7 @@
+import { filePathsToPastePayload } from "../shared/dragDropPaste.js";
+
 const appEl = document.getElementById("app");
-const termMountEl = document.getElementById("term-mount");
+const termInnerEl = document.getElementById("term-inner");
 const pickerSearchEl = document.getElementById("picker-search");
 const pickerListEl = document.getElementById("picker-list");
 
@@ -44,7 +46,7 @@ function teardownTerminal() {
   fitAddon = null;
   activeTerminalId = null;
   offTerminalData = null;
-  termMountEl.replaceChildren();
+  termInnerEl.replaceChildren();
 }
 
 // Opens a fresh Claude CLI terminal in the popup. `visibleContext`, if
@@ -64,6 +66,7 @@ function openTerminal(args, visibleContext) {
     fontFamily: "JetBrains Mono, monospace",
     fontSize: 11,
     lineHeight: 1.15,
+    minimumContrastRatio: 4.5,
     theme: {
       background: "#F7F3EB",
       foreground: "#2D2924",
@@ -72,31 +75,44 @@ function openTerminal(args, visibleContext) {
       selectionBackground: "rgba(217, 119, 87, 0.14)",
       black: "#2D2924",
       red: "#B23B3B",
-      green: "#4A7A4E",
+      green: "#3C6B40",
       yellow: "#C9773F",
-      blue: "#3B6EA5",
+      blue: "#2E5A88",
       magenta: "#8B5FBF",
       cyan: "#3B8FA3",
-      white: "#7A7267",
+      white: "#FDFBF6",
       brightBlack: "#7A7267",
       brightRed: "#D9534F",
-      brightGreen: "#5C9161",
+      brightGreen: "#4A7A4E",
       brightYellow: "#D97757",
-      brightBlue: "#4F86C6",
+      brightBlue: "#3E699E",
       brightMagenta: "#A57CD9",
       brightCyan: "#4FA8BD",
-      brightWhite: "#2D2924",
+      brightWhite: "#FDFBF6",
     },
   });
   fitAddon = new window.FitAddon.FitAddon();
   term.loadAddon(fitAddon);
-  term.open(termMountEl);
+  term.open(termInnerEl);
   fitAddon.fit();
   term.focus();
 
-  activeTerminalId = `popup-${Date.now()}`;
-  window.clance.createTerminal(activeTerminalId, "claude", args).then(() => {
-    if (activeTerminalId) window.clance.resizeTerminal(activeTerminalId, term.cols, term.rows);
+  const terminalId = (activeTerminalId = `popup-${Date.now()}`);
+  window.clance
+    .createTerminal(activeTerminalId, "claude", args, term.cols, term.rows)
+    .then(() => {
+      if (activeTerminalId) window.clance.resizeTerminal(activeTerminalId, term.cols, term.rows);
+    });
+
+  // The terminal opens (and does its first fit) before the JetBrains Mono
+  // web font is necessarily loaded, so that first fit can measure the
+  // fallback font's cell metrics and overestimate how many rows fit. Once
+  // the real font is ready, re-fit and re-sync the pty so the CLI's TUI
+  // isn't left rendering to a taller viewport than what's actually visible.
+  document.fonts.ready.then(() => {
+    if (terminalId !== activeTerminalId) return;
+    fitAddon.fit();
+    window.clance.resizeTerminal(terminalId, term.cols, term.rows);
   });
 
   offTerminalData = window.clance.onTerminalData(({ terminalId, data }) => {
@@ -181,6 +197,39 @@ pickerSearchEl.addEventListener("input", () => {
           s.projectLabel.toLowerCase().includes(query)
       );
   renderPickerList(filtered);
+});
+
+// Dropping a file (a screenshot, most commonly) onto the terminal pastes
+// its filesystem path into the CLI's input as unsubmitted text, so the
+// user can add a prompt around it before hitting Enter — the CLI reads the
+// path itself via its own Read tool, same as any file path typed by hand.
+// Starting the drag from Finder blurs the popup before the drag arrives
+// (see popupWindow.ts's "blur" handler) — dragenter is the earliest point
+// the renderer can tell main to hold off on hiding it.
+document.addEventListener("dragenter", () => window.clance.holdOpen());
+termInnerEl.addEventListener("dragover", (event) => {
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+});
+termInnerEl.addEventListener("drop", async (event) => {
+  event.preventDefault();
+  window.clance.holdOpen();
+  if (!activeTerminalId) return;
+  const sourcePaths = Array.from(event.dataTransfer.files)
+    .map((file) => window.clance.getPathForFile(file))
+    .filter(Boolean);
+  if (sourcePaths.length === 0) return;
+  // Copy immediately rather than handing the CLI the original path — a
+  // file dragged from macOS system UI (e.g. a screenshot thumbnail) is
+  // often a transient "file promise" staging copy that can vanish moments
+  // after the drop, before the CLI ever gets to read it.
+  const copied = await Promise.all(
+    sourcePaths.map((path) => window.clance.copyDroppedFile(path))
+  );
+  const paths = copied.filter(Boolean);
+  if (paths.length === 0) return;
+  window.clance.writeTerminal(activeTerminalId, filePathsToPastePayload(paths));
+  term?.focus();
 });
 
 window.clance.onShown((payload) => {

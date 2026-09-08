@@ -42,7 +42,13 @@ first-party surface rather than a second implementation of it.
   `CLAUDE_CODE_AUTO_CONNECT_IDE: "false"` in its env — without it, the CLI
   auto-connects to a running VS Code/JetBrains session and shows whatever
   file that editor happens to have open in its status line, which has
-  nothing to do with what Clance's terminal is for.
+  nothing to do with what Clance's terminal is for. Every `claude` launch
+  also gets `--settings '{"theme":"light"}'` appended to its args —
+  remapping xterm's own theme isn't enough on its own, since the CLI emits
+  several UI colors (diff add/remove, etc.) as hardcoded truecolor RGB tied
+  to its own light/dark theme setting rather than the basic ANSI palette;
+  left unset it defaults dark-tuned, which reads poorly against Clance's
+  light terminal background.
 - **`src/mainWindow/sections/TerminalSection.js`** and **`src/popup/popup.js`**
   wrap `xterm.js` on the renderer side — theme matches the app's own
   editorial palette (background `#F7F3EB`, accent `#D97757`, full 16-color
@@ -52,6 +58,22 @@ first-party surface rather than a second implementation of it.
   own rendering (box-drawing characters, wrapped lines) visibly breaks,
   since it renders for whatever terminal size it was told, not the actual
   xterm.js viewport.
+- **File drag-and-drop** (`src/main/dropFiles.ts`, wired into both terminal
+  renderers) — a dropped file's path is resolved via `webUtils.getPathForFile`
+  in the preload scripts (the renderer's `File#path` was removed in this
+  Electron version) and immediately copied into `~/.clance/dropped-files/`
+  before its path is pasted into the CLI's input. The copy exists because a
+  file dragged from macOS system UI (the floating screenshot thumbnail, most
+  notably) is often a `NSFilePromiseProvider` file promise rather than a
+  real file — Chromium's HTML5 D&D doesn't implement Apple's
+  promise-resolution protocol, so what resolves is `screencaptureui`'s
+  transient staging copy, which can be deleted moments after the drop. This
+  is a race Clance can narrow by copying early, not one it can eliminate.
+  The popup additionally delays its blur-triggered `hide()` by ~500ms
+  (`src/main/popupWindow.ts`, cancelled via the `popup:hold-open` IPC
+  channel on `dragenter`/`drop`) — starting the OS drag from Finder shifts
+  key-window focus to Finder first, which would otherwise blur-hide the
+  popup before the drag ever reached it.
 - **Sessions are opened, not synced.** There is no more cross-window
   message-syncing IPC (`session:updated` broadcasts, file-watchers) — that
   entire mechanism existed only because two separate custom-UI surfaces

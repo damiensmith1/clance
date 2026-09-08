@@ -62,11 +62,22 @@
         flex-shrink: 0;
       }
 
+      /* FitAddon sizes rows/cols off the mount element's *direct parent*
+       * clientHeight/Width without ever subtracting that parent's own
+       * padding (a known xterm.js limitation) — so the padding lives here,
+       * on the outer wrapper, while xterm mounts into the padding-free
+       * #term-inner below, or the computed row/col count overshoots the
+       * actually-visible area. */
       #term-mount {
         flex: 1 1 auto;
         min-height: 0;
         background: #F7F3EB;
-        padding: 8px;
+        padding: 14px;
+        box-sizing: border-box;
+      }
+      #term-inner {
+        width: 100%;
+        height: 100%;
       }
 
       /* ---- Session picker mode ---- */
@@ -143,7 +154,7 @@
     <div id="app">
       <div id="session">
         <div id="session-header"><span class="status-dot"></span>CLAUDE</div>
-        <div id="term-mount"></div>
+        <div id="term-mount"><div id="term-inner"></div></div>
       </div>
       <div id="picker">
         <input id="picker-search" type="text" placeholder="Search conversations…" />

@@ -29,14 +29,24 @@ export function createPtySession(
   command: string,
   args: string[],
   cwd: string,
-  win: BrowserWindow
+  win: BrowserWindow,
+  cols: number,
+  rows: number
 ): void {
   if (sessions.has(terminalId)) return;
 
-  const ptyProcess = pty.spawn(command, args, {
+  // Clance's embedded terminal always renders on a light background
+  // (see popup.js / TerminalSection.js xterm themes). Left unset, the CLI
+  // defaults to dark-theme-tuned colors and emits several UI colors (diff
+  // add/remove, etc.) as hardcoded truecolor RGB rather than the basic
+  // ANSI palette — those can't be fixed by remapping xterm's theme, so the
+  // CLI itself has to be told the background is light.
+  const ptyArgs = command === "claude" ? [...args, "--settings", '{"theme":"light"}'] : args;
+
+  const ptyProcess = pty.spawn(command, ptyArgs, {
     name: "xterm-256color",
-    cols: 80,
-    rows: 30,
+    cols: cols > 0 ? cols : 80,
+    rows: rows > 0 ? rows : 30,
     cwd,
     env: {
       ...process.env,

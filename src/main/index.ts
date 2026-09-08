@@ -21,6 +21,7 @@ import { listSkills, setSkillEnabled } from "./skills";
 import { listMcpServers, setMcpServerEnabled } from "./mcpConfig";
 import { createPtySession, writeToPty, resizePty, killPty } from "./ptyManager";
 import { resolveOpenArgs } from "./agentSessions";
+import { copyDroppedFile } from "./dropFiles";
 
 app.dock?.show();
 
@@ -160,10 +161,21 @@ ipcMain.handle(
 
 ipcMain.handle(
   "terminal:create",
-  (event, payload: { terminalId: string; command: string; args: string[] }) => {
+  (
+    event,
+    payload: { terminalId: string; command: string; args: string[]; cols: number; rows: number }
+  ) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) return;
-    createPtySession(payload.terminalId, payload.command, payload.args, SESSION_CWD, win);
+    createPtySession(
+      payload.terminalId,
+      payload.command,
+      payload.args,
+      SESSION_CWD,
+      win,
+      payload.cols,
+      payload.rows
+    );
   }
 );
 
@@ -181,3 +193,7 @@ ipcMain.on(
 ipcMain.on("terminal:kill", (_event, payload: { terminalId: string }) => {
   killPty(payload.terminalId);
 });
+
+ipcMain.handle("files:copy-dropped", (_event, sourcePath: string) =>
+  copyDroppedFile(sourcePath)
+);

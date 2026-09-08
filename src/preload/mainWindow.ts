@@ -1,6 +1,11 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 contextBridge.exposeInMainWorld("clanceApp", {
+  // Dropped File objects no longer carry a real filesystem path in the
+  // renderer (Electron removed File#path); webUtils.getPathForFile is the
+  // replacement, and it only works from the preload/main-world boundary.
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
+  copyDroppedFile: (sourcePath: string) => ipcRenderer.invoke("files:copy-dropped", sourcePath),
   getSetupStatus: () => ipcRenderer.invoke("setup:get-status"),
   connectClaude: () => ipcRenderer.invoke("setup:connect-claude"),
   disconnectClaude: () => ipcRenderer.invoke("setup:disconnect-claude"),
@@ -19,8 +24,8 @@ contextBridge.exposeInMainWorld("clanceApp", {
   listChatSessions: () => ipcRenderer.invoke("chatHistory:list-sessions"),
   resolveOpenArgs: (sessionId: string) =>
     ipcRenderer.invoke("chatHistory:resolve-open-args", sessionId),
-  createTerminal: (terminalId: string, command: string, args: string[]) =>
-    ipcRenderer.invoke("terminal:create", { terminalId, command, args }),
+  createTerminal: (terminalId: string, command: string, args: string[], cols: number, rows: number) =>
+    ipcRenderer.invoke("terminal:create", { terminalId, command, args, cols, rows }),
   writeTerminal: (terminalId: string, data: string) =>
     ipcRenderer.send("terminal:input", { terminalId, data }),
   resizeTerminal: (terminalId: string, cols: number, rows: number) =>
