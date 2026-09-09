@@ -198,7 +198,7 @@ function renderPickerList(sessions) {
     row.appendChild(title);
     row.appendChild(meta);
     row.addEventListener("click", async () => {
-      const args = await window.clance.resolveOpenArgs(session.id);
+      const args = await window.clance.resolveOpenArgs(session.id, session.title);
       openTerminal(args, pickerContextText);
     });
     pickerListEl.appendChild(row);

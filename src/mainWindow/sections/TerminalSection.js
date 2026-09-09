@@ -4,7 +4,7 @@ import { filePathsToPastePayload } from "../../shared/dragDropPaste.js";
 
 let terminalCounter = 0;
 
-export function TerminalSection({ terminalId, args = [], isAttached = false, onPopOut }) {
+export function TerminalSection({ terminalId, args = [], onPopOut }) {
   const containerRef = useRef(null);
   const termRef = useRef(null);
   const fitRef = useRef(null);
@@ -52,11 +52,10 @@ export function TerminalSection({ terminalId, args = [], isAttached = false, onP
     // fallback font's cell metrics and overestimate how many rows fit. Once
     // the real font is ready, re-fit and re-sync the pty so the CLI's TUI
     // isn't left rendering to a taller viewport than what's actually visible.
-    // Skipped for an attached session — see the resizeObserver comment below.
     document.fonts.ready.then(() => {
       if (termRef.current !== term) return;
       fitAddon.fit();
-      if (!isAttached) window.clanceApp.resizeTerminal(terminalId, term.cols, term.rows);
+      window.clanceApp.resizeTerminal(terminalId, term.cols, term.rows);
     });
 
     const offData = window.clanceApp.onTerminalData(({ terminalId: id, data }) => {
@@ -88,22 +87,19 @@ export function TerminalSection({ terminalId, args = [], isAttached = false, onP
       return true;
     });
 
-    // An "attach"ed session's pty is shared with every other client
-    // currently attached to that same background agent (the CLI's own
-    // `claude attach <id>`, not a Clance concept — it's the same mechanism
-    // as attaching a second `tmux` client to one session) — the agent has
-    // exactly one shared terminal size, dictated by whichever attached
-    // client's resize the CLI honored most recently. So forwarding every
-    // local resize here wouldn't just resize this pane's own view, it
-    // reflows every *other* pane also attached to that session out from
-    // under itself. `fitAddon.fit()` still keeps this pane's own xterm.js
-    // viewport looking right locally; only the pty-resize forward (which
-    // is what actually broadcasts to the shared agent) is skipped, sized
-    // once at creation (via `createTerminal`'s initial cols/rows) and left
-    // alone after that.
+    // Every terminal is an `attach <id>` client onto a background agent now
+    // (see docs/background-agent-architecture.md), so resize is always
+    // forwarded — there's no longer a "this one isn't really attached"
+    // case to special-case. This does mean two clients simultaneously
+    // attached to the *same* agent (two panes, or Clance + Remote Control)
+    // still fight over that agent's one shared terminal size, same as two
+    // `tmux` clients on one session — an accepted, rare tradeoff, not
+    // something Clance can fix on its own. Forwarding unconditionally is
+    // also what makes a reparented pty (the popup's "Open in App") redraw
+    // at its new window's size instead of staying blank.
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
-      if (!isAttached) window.clanceApp.resizeTerminal(terminalId, term.cols, term.rows);
+      window.clanceApp.resizeTerminal(terminalId, term.cols, term.rows);
     });
     resizeObserver.observe(containerRef.current);
 

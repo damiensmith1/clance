@@ -1,7 +1,6 @@
 import * as pty from "node-pty";
 import { BrowserWindow } from "electron";
 import { execFileSync } from "child_process";
-import { readConfig } from "./config";
 
 // `win` is mutable per-session (not just captured at spawn time) so a
 // session can be reparented to a different window after the fact — see
@@ -18,7 +17,7 @@ const sessions = new Map<string, PtySession>();
 // so we can spawn the target binary directly instead of through a shell
 // string (which would otherwise be a command-injection vector via `args`).
 let resolvedPath: string | undefined;
-function getLoginShellPath(): string {
+export function getLoginShellPath(): string {
   if (resolvedPath) return resolvedPath;
   try {
     const shell = process.env.SHELL || "/bin/zsh";
@@ -42,24 +41,7 @@ export function createPtySession(
 ): void {
   if (sessions.has(terminalId)) return;
 
-  // Clance's embedded terminal always renders on a light background
-  // (see popup.js / TerminalSection.js xterm themes). Left unset, the CLI
-  // defaults to dark-theme-tuned colors and emits several UI colors (diff
-  // add/remove, etc.) as hardcoded truecolor RGB rather than the basic
-  // ANSI palette — those can't be fixed by remapping xterm's theme, so the
-  // CLI itself has to be told the background is light.
-  const cliSettings: Record<string, unknown> = { theme: "light" };
-  // See the `desktopNotifications` comment in config.ts: without a
-  // recognized TERM_PROGRAM, the CLI's own turn-complete notification falls
-  // back to an `osascript` call that macOS shows as coming from "Script
-  // Editor." Rather than fake a terminal identity, this defaults the
-  // notification off entirely — opt-in via Settings, not on unless asked for.
-  if (!readConfig().desktopNotifications) {
-    cliSettings.preferredNotifChannel = "notifications_disabled";
-  }
-  const ptyArgs = command === "claude" ? [...args, "--settings", JSON.stringify(cliSettings)] : args;
-
-  const ptyProcess = pty.spawn(command, ptyArgs, {
+  const ptyProcess = pty.spawn(command, args, {
     name: "xterm-256color",
     cols: cols > 0 ? cols : 80,
     rows: rows > 0 ? rows : 30,

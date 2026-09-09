@@ -4,6 +4,7 @@ import { captureFrontmostWindow, captureSelectedText } from "./frontApp";
 import { captureAndSaveActiveDisplay } from "./screenCapture";
 import { checkPermissions } from "./permissions";
 import { ensureInsertTextServer } from "./insertTextServer";
+import { spawnBackgroundAgent } from "./agentSessions";
 
 const DEFAULT_WIDTH = 560;
 const DEFAULT_HEIGHT = 480;
@@ -237,9 +238,21 @@ export async function toggleClancePopup(): Promise<void> {
   // this rides in invisibly — --system-prompt-snapshot off makes sure that
   // stays true on any *future* resume of this exact session too (see
   // togglePopupPicker below for why that flag matters).
+  //
+  // Minted as a background agent immediately, same as every other
+  // Clance-launched session (see docs/background-agent-architecture.md) —
+  // the popup terminal that opens below is just an `attach` viewport onto
+  // it, so closing the widget or the app never ends the conversation.
+  const id = await spawnBackgroundAgent("Clance popup", [
+    "--append-system-prompt",
+    contextText,
+    "--system-prompt-snapshot",
+    "off",
+    ...mcpArgs,
+  ]);
   showPopup({
     mode: "new",
-    args: ["--append-system-prompt", contextText, "--system-prompt-snapshot", "off", ...mcpArgs],
+    args: ["attach", id],
     contextPreview: preview,
   });
 }

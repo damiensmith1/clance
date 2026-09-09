@@ -22,10 +22,14 @@ contextBridge.exposeInMainWorld("clanceApp", {
     ipcRenderer.invoke("setup:save-shortcuts", shortcuts),
   completeSetup: () => ipcRenderer.invoke("setup:complete"),
   listChatSessions: () => ipcRenderer.invoke("chatHistory:list-sessions"),
-  resolveOpenArgs: (sessionId: string) =>
-    ipcRenderer.invoke("chatHistory:resolve-open-args", sessionId),
+  resolveOpenArgs: (sessionId: string, name: string) =>
+    ipcRenderer.invoke("chatHistory:resolve-open-args", sessionId, name),
   setSessionArchived: (sessionId: string, archived: boolean) =>
     ipcRenderer.invoke("chatHistory:set-archived", sessionId, archived),
+  spawnNewAgent: (name: string, claudeArgs: string[] = []) =>
+    ipcRenderer.invoke("agents:spawn-new", name, claudeArgs),
+  stopAgent: (id: string) => ipcRenderer.invoke("agents:stop", id),
+  listAgents: (opts: { all?: boolean } = {}) => ipcRenderer.invoke("agents:list", opts),
   openInWidget: (args: string[]) => ipcRenderer.invoke("popup:open-with-args", args),
   createTerminal: (terminalId: string, command: string, args: string[], cols: number, rows: number) =>
     ipcRenderer.invoke("terminal:create", { terminalId, command, args, cols, rows }),

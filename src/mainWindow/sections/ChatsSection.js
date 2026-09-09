@@ -1,6 +1,12 @@
 import { html, useEffect, useMemo, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
 import { Icon } from "../../shared/icons.js";
 
+// How often the Active list re-polls `claude agents --json` while this
+// section is mounted — live status (busy/idle) can change between visits,
+// and a session can end from elsewhere (another Clance window, a bare
+// terminal, Remote Control) without Clance ever hearing about it directly.
+const ACTIVE_POLL_MS = 5000;
+
 function relativeTime(iso) {
   const diffMs = Date.now() - new Date(iso).getTime();
   const diffMin = Math.round(diffMs / 60000);
@@ -27,12 +33,11 @@ function dayGroupLabel(iso) {
 // never touches the actual transcript file, which is the real Claude Code
 // CLI's own storage and may belong to a project that has nothing to do
 // with Clance. That's also why there's no permanent-delete action here.
-function SessionList({ sessions, loading, showingArchived, onOpen, onSetArchived }) {
-  if (loading) {
-    return html`<p class="empty-note">Loading…</p>`;
-  }
+// Orthogonal to the Active/Closed split below (see
+// docs/background-agent-architecture.md) — composes with either.
+function SessionList({ sessions, emptyNote, showingArchived, onOpen, onSetArchived }) {
   if (sessions.length === 0) {
-    return html`<p class="empty-note">${showingArchived ? "No archived sessions." : "No past sessions found."}</p>`;
+    return html`<p class="empty-note">${emptyNote}</p>`;
   }
 
   const groups = [];
@@ -77,8 +82,42 @@ function SessionList({ sessions, loading, showingArchived, onOpen, onSetArchived
   `;
 }
 
+// Live sessions — sourced from `claude agents --json`, polled while
+// mounted. Global, not Clance-scoped: any running background agent shows
+// up here, whether Clance, a bare terminal, or Remote Control started it.
+function ActiveList({ agents, displayNameFor, onOpen, onClose }) {
+  if (agents.length === 0) {
+    return html`<p class="empty-note">No active sessions.</p>`;
+  }
+  return html`
+    <div class="list-group">
+      ${agents.map(
+        (agent) => html`
+          <div class="session-row" onClick=${() => onOpen(agent)}>
+            <div class="session-row-main">
+              <span class="session-headline">${displayNameFor(agent)}</span>
+              <span class="session-byline">${agent.status ?? "running"}</span>
+            </div>
+            <button
+              class="session-archive-btn"
+              title="Close"
+              onClick=${(e) => {
+                e.stopPropagation();
+                onClose(agent);
+              }}
+            >
+              ${Icon.close(14)}
+            </button>
+          </div>
+        `
+      )}
+    </div>
+  `;
+}
+
 export function ChatsListSection({ onOpenChat, onNewChat }) {
   const [sessions, setSessions] = useState([]);
+  const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
@@ -90,20 +129,78 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
     });
   }, []);
 
-  const filtered = useMemo(() => {
+  useEffect(() => {
+    let cancelled = false;
+    function poll() {
+      window.clanceApp.listAgents().then((result) => {
+        if (!cancelled) setAgents(result);
+      });
+    }
+    poll();
+    const interval = setInterval(poll, ACTIVE_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const liveSessionIds = useMemo(() => new Set(agents.map((a) => a.sessionId)), [agents]);
+
+  // Every Clance-minted agent gets a generic mint-time name ("New Chat",
+  // "Clance popup") — see docs/background-agent-architecture.md — since
+  // there's no real conversation yet to title it from. Once one exists,
+  // prefer the same first-user-message title chatHistory.ts already
+  // derives for the Closed list, so a live row reads the same way it will
+  // once it moves there, rather than showing its generic birth name
+  // forever. Falls back to the mint-time name for a session too new to
+  // have a transcript title yet.
+  const sessionTitleById = useMemo(() => new Map(sessions.map((s) => [s.id, s.title])), [sessions]);
+  function displayNameFor(agent) {
+    return sessionTitleById.get(agent.sessionId) || agent.name || agent.sessionId;
+  }
+
+  const filteredAgents = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return agents;
+    return agents.filter((a) => displayNameFor(a).toLowerCase().includes(q));
+  }, [agents, query, sessionTitleById]);
+
+  // "Closed" is everything with history that isn't currently a live
+  // background agent — see docs/background-agent-architecture.md. Opening
+  // either kind goes through the same resolveOpenArgs lookup (Shell.js),
+  // so there's no UI-level branching between "known stopped id" and
+  // "never had one."
+  const filteredSessions = useMemo(() => {
     const q = query.trim().toLowerCase();
     return sessions.filter((s) => {
       if (Boolean(s.archived) !== showArchived) return false;
+      if (!showArchived && liveSessionIds.has(s.id)) return false;
       if (!q) return true;
       return s.title.toLowerCase().includes(q) || s.projectLabel.toLowerCase().includes(q);
     });
-  }, [sessions, query, showArchived]);
+  }, [sessions, query, showArchived, liveSessionIds]);
 
   function handleSetArchived(sessionId, archived) {
     // Optimistic — the row just needs to move out of the current view,
     // not wait on a round trip to find out it's allowed to.
     setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, archived } : s)));
     window.clanceApp.setSessionArchived(sessionId, archived);
+  }
+
+  function handleOpenAgent(agent) {
+    // Goes through the same resolveOpenArgs lookup as any other row
+    // (Shell.js's openChatTab) — it's already live, so that lookup just
+    // finds it in the \`--all\` listing and returns \`attach\` args right
+    // back out, no re-spawn.
+    onOpenChat({ id: agent.sessionId, filePath: agent.sessionId, title: displayNameFor(agent) });
+  }
+
+  async function handleCloseAgent(agent) {
+    // Optimistic — this is exactly what moves the row from Active to
+    // Closed (see docs/background-agent-architecture.md req. 6); the next
+    // poll would confirm it, but there's no reason to wait on that.
+    setAgents((prev) => prev.filter((a) => a.id !== agent.id));
+    await window.clanceApp.stopAgent(agent.id);
   }
 
   return html`
@@ -129,7 +226,7 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
           class="segmented-item ${!showArchived ? "segmented-item-active" : ""}"
           onClick=${() => setShowArchived(false)}
         >
-          Active
+          All
         </button>
         <button
           class="segmented-item ${showArchived ? "segmented-item-active" : ""}"
@@ -139,13 +236,28 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
         </button>
       </div>
 
-      <${SessionList}
-        sessions=${filtered}
-        loading=${loading}
-        showingArchived=${showArchived}
-        onOpen=${onOpenChat}
-        onSetArchived=${handleSetArchived}
-      />
+      ${loading
+        ? html`<p class="empty-note">Loading…</p>`
+        : html`
+            ${!showArchived &&
+            html`
+              <div class="list-group-label">Active</div>
+              <${ActiveList}
+                agents=${filteredAgents}
+                displayNameFor=${displayNameFor}
+                onOpen=${handleOpenAgent}
+                onClose=${handleCloseAgent}
+              />
+              <div class="list-group-label">Closed</div>
+            `}
+            <${SessionList}
+              sessions=${filteredSessions}
+              emptyNote=${showArchived ? "No archived sessions." : "No closed sessions found."}
+              showingArchived=${showArchived}
+              onOpen=${onOpenChat}
+              onSetArchived=${handleSetArchived}
+            />
+          `}
     </div>
   `;
 }

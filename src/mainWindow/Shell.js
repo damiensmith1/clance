@@ -97,17 +97,7 @@ function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut) {
     case "settings":
       return html`<${SettingsSection} />`;
     case "terminal":
-      // "attach <id>" (as opposed to "--resume") means this session is
-      // already running as a background agent and this terminal is one of
-      // potentially several clients sharing that single process — see the
-      // isAttached comment in TerminalSection.js for why that changes how
-      // resize is handled.
-      return html`<${TerminalSection}
-        terminalId=${tab.terminalId}
-        args=${tab.args}
-        isAttached=${tab.args?.[0] === "attach"}
-        onPopOut=${onPopOut}
-      />`;
+      return html`<${TerminalSection} terminalId=${tab.terminalId} args=${tab.args} onPopOut=${onPopOut} />`;
     default:
       return null;
   }
@@ -490,24 +480,54 @@ export function Shell() {
     openTab({ id, type: id, label: item.label, icon: item.icon }, { paneId: state.activePaneId });
   }
 
-  function openNewChatTab() {
-    const terminalId = nextTerminalId();
-    openTab(
-      { id: terminalId, type: "terminal", label: "New Chat", icon: "terminal", terminalId, args: [] },
-      { paneId: state.activePaneId }
-    );
+  // Minting a background agent is a real subprocess round trip (~0.5-1s),
+  // not the old instant local pty spawn — long enough for an impatient
+  // double-click to fire a second open before the first tab has appeared.
+  // resolveOpenArgs itself now dedupes concurrent opens of the *same*
+  // session on the main-process side, but "New Chat" has no session id to
+  // key that on (each open is legitimately a distinct new chat) — guarded
+  // here instead, keyed per in-flight open so unrelated rows/new-chat
+  // clicks aren't blocked by each other, just literal re-clicks of the
+  // same one.
+  const openingRef = useRef(new Set());
+
+  async function openNewChatTab() {
+    const key = "__new__";
+    if (openingRef.current.has(key)) return;
+    openingRef.current.add(key);
+    try {
+      const terminalId = nextTerminalId();
+      // Every Clance-launched session is a background agent from birth
+      // (see docs/background-agent-architecture.md) — mint one first, then
+      // this tab is purely an `attach` viewport onto it, so tab-switch/
+      // close can never kill the underlying process.
+      const id = await window.clanceApp.spawnNewAgent("New Chat");
+      openTab(
+        { id: terminalId, type: "terminal", label: "New Chat", icon: "terminal", terminalId, args: ["attach", id] },
+        { paneId: state.activePaneId }
+      );
+    } finally {
+      openingRef.current.delete(key);
+    }
   }
 
   async function openChatTab(session) {
-    const terminalId = nextTerminalId();
-    // A session already running as a background agent can't be resumed —
-    // it needs `attach` instead; resolved on the main process via `claude
-    // agents --json` since that's the source of truth for what's running.
-    const args = await window.clanceApp.resolveOpenArgs(session.id);
-    openTab(
-      { id: `chat:${session.filePath}`, type: "terminal", label: session.title, icon: "terminal", terminalId, args },
-      { paneId: state.activePaneId }
-    );
+    if (openingRef.current.has(session.id)) return;
+    openingRef.current.add(session.id);
+    try {
+      const terminalId = nextTerminalId();
+      // A session already running as a background agent can't be resumed —
+      // it needs `attach` instead; resolved on the main process via
+      // `claude agents --json` since that's the source of truth for what's
+      // running.
+      const args = await window.clanceApp.resolveOpenArgs(session.id, session.title);
+      openTab(
+        { id: `chat:${session.filePath}`, type: "terminal", label: session.title, icon: "terminal", terminalId, args },
+        { paneId: state.activePaneId }
+      );
+    } finally {
+      openingRef.current.delete(session.id);
+    }
   }
 
   const activePane = findPane(state.root, state.activePaneId);

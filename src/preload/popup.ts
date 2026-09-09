@@ -10,8 +10,8 @@ contextBridge.exposeInMainWorld("clance", {
   openInApp: (terminalId: string, args: string[]) =>
     ipcRenderer.invoke("popup:open-in-app", { terminalId, args }),
   listChatSessions: () => ipcRenderer.invoke("chatHistory:list-sessions"),
-  resolveOpenArgs: (sessionId: string) =>
-    ipcRenderer.invoke("chatHistory:resolve-open-args", sessionId),
+  resolveOpenArgs: (sessionId: string, name: string) =>
+    ipcRenderer.invoke("chatHistory:resolve-open-args", sessionId, name),
   createTerminal: (terminalId: string, command: string, args: string[], cols: number, rows: number) =>
     ipcRenderer.invoke("terminal:create", { terminalId, command, args, cols, rows }),
   writeTerminal: (terminalId: string, data: string) =>

@@ -43,25 +43,47 @@ first-party surface rather than a second implementation of it.
   `CLAUDE_CODE_AUTO_CONNECT_IDE: "false"` in its env — without it, the CLI
   auto-connects to a running VS Code/JetBrains session and shows whatever
   file that editor happens to have open in its status line, which has
-  nothing to do with what Clance's terminal is for. Every `claude` launch
-  also gets a `--settings` JSON blob appended to its args, built fresh per
-  spawn from the current config rather than a fixed string: always
-  `theme: "light"` (remapping xterm's own theme isn't enough on its own,
-  since the CLI emits several UI colors — diff add/remove, etc. — as
-  hardcoded truecolor RGB tied to its own light/dark theme setting rather
-  than the basic ANSI palette; left unset it defaults dark-tuned, which
-  reads poorly against Clance's light terminal background), plus
-  `preferredNotifChannel: "notifications_disabled"` unless the
-  `desktopNotifications` config flag (`~/.clance/config.json`, default
-  `false`, opt-in via Settings' "Desktop Notifications" toggle — Clance's
-  own settings, not a macOS one) is explicitly turned on. That flag exists
-  because a Clance-launched pty has no `TERM_PROGRAM` — Clance is a GUI
-  app, not spawned from a shell — so the CLI's own turn-complete
-  notification can't tell it's in a recognized terminal and falls back to
-  shelling out to `osascript -e 'display notification'` directly, which
-  macOS attributes to "Script Editor" rather than Clance. Rather than fake
-  a terminal identity to fix the attribution, it defaults off and anyone
-  who wants it can opt in knowing what it'll look like.
+  nothing to do with what Clance's terminal is for.
+  - **`--settings` moved to mint time, not attach time** (see
+    `docs/background-agent-architecture.md`'s "Bug found post-launch"
+    note): now that every pty `createPtySession` spawns is a disposable
+    `claude attach <id>` viewport rather than the real conversation
+    process, the `--settings` JSON blob — always `theme: "light"`
+    (remapping xterm's own theme isn't enough on its own, since the CLI
+    emits several UI colors — diff add/remove, etc. — as hardcoded
+    truecolor RGB tied to its own light/dark theme setting rather than the
+    basic ANSI palette; left unset it defaults dark-tuned, which reads
+    poorly against Clance's light terminal background), plus
+    `preferredNotifChannel: "notifications_disabled"` unless the
+    `desktopNotifications` config flag (`~/.clance/config.json`, default
+    `false`, opt-in via Settings' "Desktop Notifications" toggle —
+    Clance's own settings, not a macOS one) is explicitly turned on — is
+    built by `agentSessions.ts`'s `cliSettingsArgs()` and appended to the
+    `claude --bg [-n <name>] [--resume <id>]` mint call instead.
+    `createPtySession` no longer touches CLI settings; `attach` accepts no
+    other flags anyway. The `desktopNotifications` flag exists because a
+    Clance-launched process has no `TERM_PROGRAM` — Clance is a GUI app,
+    not spawned from a shell — so the CLI's own turn-complete notification
+    can't tell it's in a recognized terminal and falls back to shelling
+    out to `osascript -e 'display notification'` directly, which macOS
+    attributes to "Script Editor" rather than Clance. Rather than fake a
+    terminal identity to fix the attribution, it defaults off and anyone
+    who wants it can opt in knowing what it'll look like. Since settings
+    are now only read at an agent's own mint time, flipping the toggle no
+    longer affects an already-running background agent — only sessions
+    minted afterward.
+    - **`preferredNotifChannel` alone isn't sufficient — the model has its
+      own first-party `PushNotification` tool** it can call proactively
+      with arbitrary content (confirmed live: a real notification quoted
+      the model's own answer text), entirely independent of that setting.
+      `cliSettingsArgs()` also appends `--disallowedTools PushNotification`
+      whenever `desktopNotifications` is off (verified live: the model
+      then reports the tool isn't available). Both are gated by the same
+      toggle, so turning it on doesn't just re-enable the terminal-bell
+      channel — it also gives back the tool, including its mobile-push
+      behavior if Remote Control is set up. Full trail (including two
+      wrong turns before finding this) in
+      `docs/background-agent-architecture.md`.
 - **`src/mainWindow/sections/TerminalSection.js`** and **`src/popup/popup.js`**
   wrap `xterm.js` on the renderer side — theme matches the app's own
   editorial palette (background `#F7F3EB`, accent `#D97757`, full 16-color
@@ -87,20 +109,25 @@ first-party surface rather than a second implementation of it.
   channel on `dragenter`/`drop`) — starting the OS drag from Finder shifts
   key-window focus to Finder first, which would otherwise blur-hide the
   popup before the drag ever reached it.
-- **Known issue: switching tabs kills the session.** `PaneLeaf`
-  (`Shell.js`) only ever renders the *active* tab's `TerminalSection`, so
-  switching tabs unmounts the previous one — whose `useEffect` cleanup
-  calls `killTerminal()` unconditionally. That means switching away from a
-  Clance-launched CLI session kills it outright, mid-response if one was
-  running. Not yet fixed: a first attempt kept every tab's
-  `TerminalSection` mounted (hidden via CSS) instead, but broke tab
-  switching outright (two CSS rules of equal specificity fought over
-  `display`, so every terminal-type panel rendered on top of every other
-  one regardless of which tab was "active") and was reverted; a second
-  attempt (kill-on-close-only, moving the `killTerminal()` call out of
-  unmount and into the tab-close/pop-out/move-to-another-pane call sites)
-  worked but was also reverted at the user's request before being kept —
-  this needs a real design discussion, not another quick patch.
+- **Fixed: switching/closing tabs no longer kills the session — every
+  session is now a background agent.** `PaneLeaf` (`Shell.js`) still only
+  ever renders the *active* tab's `TerminalSection`, and its `useEffect`
+  cleanup still calls `killTerminal()` unconditionally on unmount — but
+  that's inert by construction now, not patched around. Two earlier fix
+  attempts at the unmount lifecycle itself (keep every tab mounted +
+  CSS-hidden; move the kill call out of unmount into explicit close-only
+  sites) were each implemented and reverted. The actual fix, per
+  `docs/background-agent-architecture.md`: every Clance-launched
+  conversation is minted as a `claude --bg` background agent (a real
+  process supervised by the CLI's own daemon) the moment it's opened —
+  `Shell.js`'s `openNewChatTab`, `popupWindow.ts`'s `toggleClancePopup`,
+  and `agentSessions.ts`'s `resolveOpenArgs` (used by every resume/attach
+  path) all mint-then-attach. A tab's pty is purely a `claude attach <id>`
+  viewport onto that agent, so `killTerminal()` on unmount only ever kills
+  the thin attach client — confirmed live that `SIGTERM` to an `attach`
+  process leaves the background agent (a separate pid) running. A new
+  explicit "Close" action (Sessions tab's Active rows) maps to `claude
+  stop <id>` for when a session should actually end.
 - **Sessions are opened, not synced.** There is no more cross-window
   message-syncing IPC (`session:updated` broadcasts, file-watchers) — that
   entire mechanism existed only because two separate custom-UI surfaces
@@ -114,14 +141,16 @@ first-party surface rather than a second implementation of it.
   fresh one. `src/mainWindow/sections/ChatsSection.js` is now just the
   session list — `ChatDetailSection`, `ToolGroup`, and all transcript
   rendering/collapsing logic were deleted along with the custom chat UI.
-- **Attach vs. resume** (`src/main/agentSessions.ts`): `claude --resume
-  <id>` fails if that session is already running as a background agent
-  elsewhere (`claude --bg` or the CLI's own remote-control mode) — it
-  errors and tells you to use `claude attach <id>` instead.
-  `resolveOpenArgs(sessionId)` calls `claude agents --json` to check
-  whether the target session is a live background agent before deciding
-  which args to launch with, so Clance never surfaces that CLI error to
-  the user.
+- **Attach vs. resume — superseded, every open is now `attach`.**
+  `claude --resume <id>` fails if that session is already running as a
+  background agent elsewhere — it errors and tells you to use `claude
+  attach <id>` instead. Rather than deciding per-open which of
+  `--resume`/`attach` to use, `agentSessions.ts`'s `resolveOpenArgs
+  (sessionId, name)` now always produces `attach` args: it checks `claude
+  agents --json --all` for a known agent id (live or stopped) and attaches
+  that, or mints one via `claude --bg --resume <sessionId>` first — see
+  `docs/background-agent-architecture.md` for the full background-agent
+  design this is part of.
   - **An attached session's terminal size is shared across every client
     attached to it** — the same way a second `tmux`/`screen` client
     attaching to one session shares that session's single size, not a
@@ -130,14 +159,31 @@ first-party surface rather than a second implementation of it.
     dictated by whichever attached client's resize the CLI most recently
     honored. If two Clance panes both have the same session open this
     way, resizing either one reflows the other's rendering out from under
-    it. Clance can't fix the CLI's own multiplexing, but stops
-    contributing to it: `TerminalSection.js`'s `isAttached` prop (derived
-    from `tab.args[0] === "attach"`, computed once in `Shell.js`) skips
-    forwarding resize to the pty — from the ResizeObserver, and from the
-    post-font-load re-fit — for an attached terminal, sized once at
-    creation and left alone after that. `fitAddon.fit()` still runs
-    either way, so that pane's own xterm.js viewport keeps looking right
-    locally even though the underlying pty no longer tracks it.
+    it — an accepted, rare tradeoff (see below), not something Clance can
+    fix on its own.
+  - **`isAttached`'s resize-skip removed — it broke resize for every
+    terminal, not just the shared-size edge case above.** This existed
+    pre-migration for the rare case of resuming a session already live
+    elsewhere: `TerminalSection.js` skipped forwarding resize to the pty
+    (from the ResizeObserver, and the post-font-load re-fit) so as not to
+    reflow another attached client. `isAttached` was computed as
+    `tab.args[0] === "attach"` — harmless while only that rare case used
+    `attach`, but once the background-agent migration made *every* session
+    attach-based, that expression is true unconditionally, so resize
+    forwarding was silently dead for every terminal in the app: an
+    ordinary pane resize kept `fitAddon.fit()`'s local xterm.js view
+    correct but never told the real pty, so the CLI kept rendering at its
+    original size (wrapped at the wrong column, misaligned box-drawing).
+    Found via a report that "Open in App" (popup → main window) opened the
+    right tab but showed a blank terminal — same root cause: that flow
+    reparents an existing pty into a new window without a fresh `attach`
+    connection (which is what normally repaints on its own), and relies
+    entirely on a forwarded resize to force the CLI to redraw at the new
+    size; with forwarding dead, nothing ever repainted it. Fixed by
+    removing `isAttached` entirely (prop, computation in `Shell.js`, both
+    guards in `TerminalSection.js`) — resize is now always forwarded,
+    accepting the rare two-clients-on-one-session reflow tradeoff above in
+    exchange for resize actually working the other ~100% of the time.
 - **Session titles no longer leak CLI-internal text.** Local slash
   commands (e.g. `/clear`) make the CLI inject synthetic "user" messages
   wrapped in `<local-command-caveat>`/`<command-name>` tags into the
@@ -521,14 +567,27 @@ The Chats section's session-detail view (`ChatDetailSection`, its
 `submit-goal`-style dedicated IPC channel, live-streaming-with-reconciliation,
 the collapsible tool/thinking-block renderer) no longer exists — see
 "Terminal-embedding architecture" above. Clicking a chat-history row now
-just opens a resumed/attached terminal tab; there is nothing left to render
+just opens an attached terminal tab; there is nothing left to render
 custom UI for, since the CLI renders its own history and live output
 directly in the embedded terminal.
+
+- **Active/Closed split, plus a Close action** — `ChatsSection.js`'s
+  `ChatsListSection` polls `claude agents --json` (via the new
+  `agents:list` IPC) every 5s and renders a live **Active** group above
+  the existing day-grouped **Closed** history list (filtered to exclude
+  whatever's currently live, by matching session id). An Active row's
+  Close button calls `agents:stop` (`claude stop <id>`), optimistically
+  dropping it from the polled list. The pre-existing Active/Archived
+  bookkeeping toggle (see "Session archiving" below) was renamed to
+  All/Archived to free up "Active" for this meaning — the two are
+  orthogonal, not nested. Full rationale in
+  `docs/background-agent-architecture.md`.
 
 ## Session archiving
 
 "Clean up sessions" in the Chats tab is archive-only — there is deliberately
-no permanent-delete action.
+no permanent-delete action. Orthogonal to the Active/Closed split below —
+see `docs/background-agent-architecture.md`.
 
 - **Why:** `listSessions()`/the Chats tab reads from `~/.claude/projects/**`,
   the real Claude Code CLI's own transcript storage, shared across every

@@ -21,7 +21,7 @@ import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
 import { listSkills, setSkillEnabled } from "./skills";
 import { listMcpServers, setMcpServerEnabled } from "./mcpConfig";
 import { createPtySession, writeToPty, resizePty, killPty, reparentPty } from "./ptyManager";
-import { resolveOpenArgs } from "./agentSessions";
+import { resolveOpenArgs, spawnBackgroundAgent, stopAgent, listAgents } from "./agentSessions";
 import { copyDroppedFile } from "./dropFiles";
 import { readWindowLayout, writeWindowLayout } from "./windowLayout";
 
@@ -126,14 +126,23 @@ ipcMain.handle("chatHistory:get-session", (_event, filePath: string) =>
   getSession(filePath)
 );
 
-ipcMain.handle("chatHistory:resolve-open-args", (_event, sessionId: string) =>
-  resolveOpenArgs(sessionId)
+ipcMain.handle("chatHistory:resolve-open-args", (_event, sessionId: string, name: string) =>
+  resolveOpenArgs(sessionId, name)
 );
 
 ipcMain.handle(
   "chatHistory:set-archived",
   (_event, sessionId: string, archived: boolean) => setSessionArchived(sessionId, archived)
 );
+
+ipcMain.handle(
+  "agents:spawn-new",
+  (_event, name: string, claudeArgs: string[]) => spawnBackgroundAgent(name, claudeArgs)
+);
+
+ipcMain.handle("agents:stop", (_event, id: string) => stopAgent(id));
+
+ipcMain.handle("agents:list", (_event, opts: { all?: boolean }) => listAgents(opts));
 
 ipcMain.handle("popup:open-with-args", (_event, args: string[]) => openPopupWithArgs(args));
 
