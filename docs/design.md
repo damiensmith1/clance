@@ -48,42 +48,15 @@ first-party surface rather than a second implementation of it.
     `docs/background-agent-architecture.md`'s "Bug found post-launch"
     note): now that every pty `createPtySession` spawns is a disposable
     `claude attach <id>` viewport rather than the real conversation
-    process, the `--settings` JSON blob — always `theme: "light"`
-    (remapping xterm's own theme isn't enough on its own, since the CLI
-    emits several UI colors — diff add/remove, etc. — as hardcoded
-    truecolor RGB tied to its own light/dark theme setting rather than the
-    basic ANSI palette; left unset it defaults dark-tuned, which reads
-    poorly against Clance's light terminal background), plus
-    `preferredNotifChannel: "notifications_disabled"` unless the
-    `desktopNotifications` config flag (`~/.clance/config.json`, default
-    `false`, opt-in via Settings' "Desktop Notifications" toggle —
-    Clance's own settings, not a macOS one) is explicitly turned on — is
-    built by `agentSessions.ts`'s `cliSettingsArgs()` and appended to the
-    `claude --bg [-n <name>] [--resume <id>]` mint call instead.
-    `createPtySession` no longer touches CLI settings; `attach` accepts no
-    other flags anyway. The `desktopNotifications` flag exists because a
-    Clance-launched process has no `TERM_PROGRAM` — Clance is a GUI app,
-    not spawned from a shell — so the CLI's own turn-complete notification
-    can't tell it's in a recognized terminal and falls back to shelling
-    out to `osascript -e 'display notification'` directly, which macOS
-    attributes to "Script Editor" rather than Clance. Rather than fake a
-    terminal identity to fix the attribution, it defaults off and anyone
-    who wants it can opt in knowing what it'll look like. Since settings
-    are now only read at an agent's own mint time, flipping the toggle no
-    longer affects an already-running background agent — only sessions
-    minted afterward.
-    - **`preferredNotifChannel` alone isn't sufficient — the model has its
-      own first-party `PushNotification` tool** it can call proactively
-      with arbitrary content (confirmed live: a real notification quoted
-      the model's own answer text), entirely independent of that setting.
-      `cliSettingsArgs()` also appends `--disallowedTools PushNotification`
-      whenever `desktopNotifications` is off (verified live: the model
-      then reports the tool isn't available). Both are gated by the same
-      toggle, so turning it on doesn't just re-enable the terminal-bell
-      channel — it also gives back the tool, including its mobile-push
-      behavior if Remote Control is set up. Full trail (including two
-      wrong turns before finding this) in
-      `docs/background-agent-architecture.md`.
+    process, the `--settings` JSON blob — `theme: "light"` (remapping
+    xterm's own theme isn't enough on its own, since the CLI emits several
+    UI colors — diff add/remove, etc. — as hardcoded truecolor RGB tied to
+    its own light/dark theme setting rather than the basic ANSI palette;
+    left unset it defaults dark-tuned, which reads poorly against Clance's
+    light terminal background) — is built by `agentSessions.ts`'s
+    `cliSettingsArgs()` and appended to the `claude --bg [-n <name>]
+    [--resume <id>]` mint call instead. `createPtySession` no longer
+    touches CLI settings; `attach` accepts no other flags anyway.
 - **`src/mainWindow/sections/TerminalSection.js`** and **`src/popup/popup.js`**
   wrap `xterm.js` on the renderer side — theme matches the app's own
   editorial palette (background `#F7F3EB`, accent `#D97757`, full 16-color

@@ -12,14 +12,6 @@ export type ClanceConfig = {
   // broader grant than the app's setup flow gives anywhere else.
   // "all" remains a valid explicit value for anyone who wants it.
   enabledSkills: string[] | "all";
-  // The `claude` CLI's own turn-complete desktop notification. Defaults to
-  // false — a Clance-launched pty has no TERM_PROGRAM (Clance is a GUI
-  // app, not spawned from a shell), so the CLI can't tell it's in a "real"
-  // terminal and falls back to shelling out to `osascript -e 'display
-  // notification'` directly, which macOS attributes to "Script Editor"
-  // rather than Clance; opt-in via Settings rather than surprising anyone
-  // with that. See ptyManager.ts's use of this flag.
-  desktopNotifications: boolean;
 };
 
 const CONFIG_PATH = join(SESSION_CWD, "config.json");
@@ -28,7 +20,6 @@ const DEFAULT_CONFIG: ClanceConfig = {
   shortcuts: { togglePopup: "Alt+Space", sessionPicker: "Alt+Shift+Command+Space" },
   shortcutsConfigured: false,
   enabledSkills: [],
-  desktopNotifications: false,
 };
 
 export function readConfig(): ClanceConfig {

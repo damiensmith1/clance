@@ -67,8 +67,6 @@ contextBridge.exposeInMainWorld("clanceApp", {
   saveWindowLayout: (layout: unknown) => ipcRenderer.invoke("layout:save", layout),
   setLaunchOnLogin: (enabled: boolean) =>
     ipcRenderer.invoke("settings:set-launch-on-login", enabled),
-  setDesktopNotifications: (enabled: boolean) =>
-    ipcRenderer.invoke("settings:set-desktop-notifications", enabled),
   listSkills: () => ipcRenderer.invoke("extensibility:list-skills"),
   setSkillEnabled: (name: string, enabled: boolean) =>
     ipcRenderer.invoke("extensibility:set-skill-enabled", name, enabled),

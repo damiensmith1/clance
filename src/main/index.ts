@@ -154,19 +154,11 @@ ipcMain.handle(
 
 ipcMain.handle("settings:get-preferences", () => ({
   launchOnLogin: getLaunchOnLogin(),
-  desktopNotifications: readConfig().desktopNotifications,
 }));
 
 ipcMain.handle("settings:set-launch-on-login", (_event, enabled: boolean) => {
   setLaunchOnLogin(enabled);
   return getLaunchOnLogin();
-});
-
-ipcMain.handle("settings:set-desktop-notifications", (_event, enabled: boolean) => {
-  const config = readConfig();
-  config.desktopNotifications = enabled;
-  writeConfig(config);
-  return config.desktopNotifications;
 });
 
 ipcMain.handle("layout:get", () => readWindowLayout());

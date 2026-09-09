@@ -124,27 +124,23 @@ there's nothing Clance-specific to build for RC support.
   `toggleClancePopup` (hotkey-new, context flags go straight into the
   `--bg` launch instead of a raw `claude` invocation), and both pickers
   via `resolveOpenArgs`.
-- **Bug found post-launch: `--settings` (theme + notification
-  suppression) silently stopped reaching the real agent.**
-  `ptyManager.ts`/`createPtySession` used to build the `--settings <json>`
-  blob and append it to whatever `claude` command it spawned — that was
-  correct when the pty *was* the real conversation process, but after this
-  change every pty it spawns is just a disposable `claude attach <id>`
-  viewport, and `attach` silently ignores extra flags (confirmed live:
-  prints "extra arguments ignored", no error). The actual long-running
-  process — minted separately via `claude --bg` in `agentSessions.ts` —
-  never saw the flag at all, so `preferredNotifChannel:
-  notifications_disabled` (and `theme: light`) stopped taking effect for
-  every session, surfacing as the desktop-notifications-off setting being
-  ignored (osascript/"Script Editor" notifications firing regardless).
-  Fixed by moving `cliSettingsArgs()` into `agentSessions.ts` and applying
-  it at mint time (`spawnBackgroundAgent`/`spawnBackgroundResume`, i.e.
-  the actual `--bg [--resume]` call) instead of at attach time;
-  `createPtySession` no longer touches CLI settings at all. **Consequence
-  worth knowing**: since an agent only picks up settings at its own mint
-  time, changing the desktop-notifications toggle no longer affects
-  already-running background agents — only sessions minted after the
-  change. Same category of one-way-at-birth decision as
+- **Bug found post-launch: `--settings` (theme) silently stopped reaching
+  the real agent.** `ptyManager.ts`/`createPtySession` used to build the
+  `--settings <json>` blob and append it to whatever `claude` command it
+  spawned — that was correct when the pty *was* the real conversation
+  process, but after this change every pty it spawns is just a disposable
+  `claude attach <id>` viewport, and `attach` silently ignores extra flags
+  (confirmed live: prints "extra arguments ignored", no error). The
+  actual long-running process — minted separately via `claude --bg` in
+  `agentSessions.ts` — never saw the flag at all, so `theme: light`
+  stopped taking effect for every session. Fixed by moving
+  `cliSettingsArgs()` into `agentSessions.ts` and applying it at mint time
+  (`spawnBackgroundAgent`/`spawnBackgroundResume`, i.e. the actual `--bg
+  [--resume]` call) instead of at attach time; `createPtySession` no
+  longer touches CLI settings at all. **Consequence worth knowing**: since
+  an agent only picks up settings at its own mint time, a settings change
+  no longer affects already-running background agents — only sessions
+  minted after the change. Same category of one-way-at-birth decision as
   `--system-prompt-snapshot` above; not fixed, just noted.
 - **Same audit turned up two more instances of the identical class of
   bug** — anything the old pty spawn (the real process, pre-migration)
@@ -246,87 +242,3 @@ there's nothing Clance-specific to build for RC support.
     `sessionId` against the already-fetched history, no extra IPC call),
     falling back to the mint-time name only until a real transcript title
     exists.
-- **A reported "notification setting doesn't work" — real bug, root
-  cause found and fixed, after two wrong turns.**
-  - First wrong turn: assumed it was the CLI's own turn-complete
-    notification and re-verified `preferredNotifChannel` was being
-    applied (it was — a `d(e,...)` switch statement in the compiled
-    binary returns a no-op for `"disabled"`).
-  - Second wrong turn: found a real, separate, **hardcoded** `osascript
-    -e 'display notification "Your Claude assistant needs
-    re-authentication"'` call in the daemon's own OAuth-refresh logic,
-    which ignores `preferredNotifChannel` entirely, and reproduced it
-    live. This turned out to be real but *not* what was actually being
-    reported — `claude auth status --json` showed `loggedIn: true`
-    throughout, so this is very likely transient noise from the heavy
-    concurrent `--bg` spawn/stop/rm churn this debugging session itself
-    generated, not something end users hit in normal use. Still
-    unfixed/unfixable from Clance (the call site checks no setting at
-    all) — flagged separately, low priority.
-  - **The actual cause, found from a user screenshot**: a real macOS
-    notification properly branded "Claude Code" (not "Script Editor"),
-    with body text quoting the model's own answer verbatim ("You're
-    watching **The Mentalist**, Season 2..."). Not a system-level
-    completion beep — model-initiated. The CLI ships a first-party
-    `PushNotification` tool ("send a desktop notification ... and, when
-    Remote Control is connected, also push to their phone") that the
-    model can call proactively with arbitrary content, independent of
-    `preferredNotifChannel`. Confirmed via a live repro: a session minted
-    with `preferredNotifChannel: notifications_disabled` and explicitly
-    asked to use the tool still had access to it. The fix is
-    `--disallowedTools PushNotification` (verified live: the model then
-    replies "I don't have a PushNotification tool available") — the
-    only lever that actually reaches this specific tool. Wired into
-    `agentSessions.ts`'s `cliSettingsArgs()`, gated on the same
-    `desktopNotifications` toggle as `preferredNotifChannel` (off →
-    both suppressed; on → both available, so an opted-in user still
-    gets the mobile-push behavior if they've set up Remote Control).
-    **Kept — real and verified — but turned out not to be the (only)
-    culprit**, see below.
-  - **Still happening after that fix; root cause narrowed further, not
-    fully solved.** A follow-up report ("You're welcome!" as a
-    notification body, after a plain "thanks") had no `PushNotification`
-    tool_use anywhere in that session's transcript — so a second,
-    distinct mechanism exists. Also corrected a misreading: the
-    "Claude Code"-branded notification is still delivered via
-    `com.apple.ScriptEditor2` under the hood (confirmed via `log show
-    --predicate 'process == "usernoted"'`, which showed the same
-    `app:"com.apple.ScriptEditor2"` as every other notification here) —
-    "Claude Code" was just a custom title string passed to `osascript`,
-    not a distinct branded app identity as first assumed.
-    - **The actual trigger, isolated via a controlled A/B**: minting a
-      session and simply waiting for it to finish — never notifies.
-      Minting, then `claude attach <id>`-ing to it (even one already
-      done) — reliably notifies, every time, regardless of
-      `preferredNotifChannel`, `--disallowedTools`, or any `--settings`
-      key tried. So it's the **`attach` client itself**, not the
-      background worker, generating this — consistent with `attach`
-      taking no settings overrides at all (confirmed earlier: extra
-      flags are silently ignored).
-    - **Seven suppression attempts tried, all failed identically**: (1)
-      per-agent `--settings` at mint time — doesn't reach `attach`, as
-      established. (2) a Clance-owned project-scoped settings file at
-      `~/.clance/.claude/settings.local.json` (every Clance `attach` runs
-      with that cwd, so this should be read via ordinary project-settings
-      resolution) — tested live, notification still fired. (3)
-      `remoteControlAtStartup: false` in `--settings` at mint time (a
-      real settings key — `"Start Remote Control bridge automatically
-      each session"` — chased after finding a binary string implying an
-      org/GB-level auto-enable default exists) — looked promising in an
-      isolated no-attach test (zero notification activity logged) but
-      failed once an actual attach was added to the test. (4)-(7) several
-      env vars set specifically on the `attach` client's own process env
-      in `ptyManager.ts` (`CLAUDE_CODE_ENABLE_AWAY_SUMMARY`,
-      `CLAUDE_CODE_FORCE_RC_LONG_TURN_NUDGE`,
-      `CLAUDE_CODE_DISABLE_NOTIFICATION_PRESENCE_CHECK` variants, chosen
-      because their names describe exactly this kind of
-      reconnect-and-catch-up notification) — none changed the outcome.
-    - **Not fixed.** The evidence points at `attach` having some built-in
-      "catch you up" notification behavior with no exposed, working
-      override — but this is now past what can be responsibly diagnosed
-      by guessing at an undocumented, obfuscated-name env var surface
-      (hundreds of `CLAUDE_CODE_*` vars exist in the binary, most with
-      opaque codenames). Recommended next step: report this upstream as
-      CLI feedback (a background agent minted with notifications
-      explicitly disabled still notifies on `attach`) rather than
-      continuing to guess from Clance's side.

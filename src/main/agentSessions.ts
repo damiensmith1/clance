@@ -1,6 +1,5 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { readConfig } from "./config";
 import { getLoginShellPath } from "./ptyManager";
 import { SESSION_CWD } from "./paths";
 
@@ -41,31 +40,7 @@ function cliSettingsArgs(): string[] {
   // palette — those can't be fixed by remapping xterm's theme, so the CLI
   // itself has to be told the background is light.
   const cliSettings: Record<string, unknown> = { theme: "light" };
-  const args = ["--settings"];
-  // See the `desktopNotifications` comment in config.ts: without a
-  // recognized TERM_PROGRAM, the CLI's own turn-complete notification falls
-  // back to an `osascript` call that macOS shows as coming from "Script
-  // Editor." Rather than fake a terminal identity, this defaults the
-  // notification off entirely — opt-in via Settings, not on unless asked for.
-  //
-  // This alone doesn't cover everything: the model also has its own
-  // first-party `PushNotification` tool ("send a desktop notification ...
-  // and, when Remote Control is connected, also push to their phone") that
-  // it can call proactively with arbitrary content — confirmed live (a
-  // real notification read "You're watching **The Mentalist**, Season 2"),
-  // and confirmed it isn't gated by `preferredNotifChannel` at all, since a
-  // session minted with that setting still fired it. `--disallowedTools
-  // PushNotification` (verified live: the model then reports "I don't have
-  // a PushNotification tool available") is the only lever that actually
-  // reaches it — tied to the same toggle, since both are "let a
-  // Clance-launched session interrupt the user unprompted."
-  if (!readConfig().desktopNotifications) {
-    cliSettings.preferredNotifChannel = "notifications_disabled";
-    args.push(JSON.stringify(cliSettings), "--disallowedTools", "PushNotification");
-  } else {
-    args.push(JSON.stringify(cliSettings));
-  }
-  return args;
+  return ["--settings", JSON.stringify(cliSettings)];
 }
 
 export type AgentSession = {
