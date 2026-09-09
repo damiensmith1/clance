@@ -114,9 +114,9 @@ async function firstUserTitle(filePath: string): Promise<string> {
 // where the *original* conversation's project directory was — so this has
 // to check each project bucket for the id the same way listSessions()
 // does, just stopping at the first match instead of reading every
-// session's title. Null if no project has that file (a brand-new session
-// that hasn't been resumed, so has no id to look up in the first place —
-// see resolveSessionId in agentSessions.ts) or it's somehow gone.
+// session's title. Null if no project has that file, or it's somehow gone —
+// for a brand-new session with no resumed-from id at all, the caller finds
+// one first via findRecentClanceSessionId below.
 export async function titleForSessionId(sessionId: string): Promise<string | null> {
   let projectDirs: string[];
   try {
@@ -134,6 +134,45 @@ export async function titleForSessionId(sessionId: string): Promise<string | nul
     }
   }
   return null;
+}
+
+// Finds the session id for a brand-new (never `--resume`'d) Clance popup
+// session by its pty's own spawn time, for the "Open in App" case
+// resolveSessionId (agentSessions.ts) can't handle — such a session has no
+// id anywhere in its launch args (`--append-system-prompt ...`), so the
+// only place it exists yet is the CLI's own transcript file, created
+// moments after the process starts. All Clance sessions land in this one
+// bucket (CLANCE_PROJECT_DIR), unlike titleForSessionId which has to check
+// every project's bucket for a known id. Picks the file whose birthtime is
+// closest to (and no more than SPAWN_MATCH_TOLERANCE_MS earlier than)
+// spawnedAt. Not airtight — two brand-new Clance sessions starting within
+// the tolerance window could be mismatched — but there's no other id to
+// key off before the user's first turn lands.
+const SPAWN_MATCH_TOLERANCE_MS = 3000;
+
+export async function findRecentClanceSessionId(spawnedAt: number): Promise<string | null> {
+  const projectPath = join(CLAUDE_PROJECTS_DIR, CLANCE_PROJECT_DIR);
+  let entries: string[];
+  try {
+    entries = await readdir(projectPath);
+  } catch {
+    return null;
+  }
+
+  let best: { id: string; birthtimeMs: number } | null = null;
+  for (const entry of entries) {
+    if (extname(entry) !== ".jsonl") continue;
+    try {
+      const fileStat = await stat(join(projectPath, entry));
+      if (fileStat.birthtimeMs < spawnedAt - SPAWN_MATCH_TOLERANCE_MS) continue;
+      if (!best || fileStat.birthtimeMs < best.birthtimeMs) {
+        best = { id: basename(entry, ".jsonl"), birthtimeMs: fileStat.birthtimeMs };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return best?.id ?? null;
 }
 
 export async function listSessions(): Promise<SessionSummary[]> {

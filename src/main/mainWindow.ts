@@ -2,7 +2,7 @@ import { BrowserWindow } from "electron";
 import { join } from "path";
 import { hidePopup } from "./popupWindow";
 import { resolveSessionId } from "./agentSessions";
-import { titleForSessionId } from "./chatHistory";
+import { titleForSessionId, findRecentClanceSessionId } from "./chatHistory";
 
 let mainWindow: BrowserWindow | null = null;
 let mainWindowReady: Promise<void> | null = null;
@@ -58,6 +58,15 @@ export function openMainWindow(): void {
   mainWindow.focus();
 }
 
+// terminalId embeds its pty's spawn time (popup.js's `popup-${Date.now()}`,
+// TerminalSection.js's `term-${Date.now()}-<n>`) — the only clue left for a
+// brand-new session once resolveSessionId comes up empty (see
+// findRecentClanceSessionId in chatHistory.ts).
+function spawnTimestampFromTerminalId(terminalId: string): number | null {
+  const match = terminalId.match(/(\d{10,})/);
+  return match ? Number(match[1]) : null;
+}
+
 // Used by the popup widget's "Open in App" button: brings the main window
 // forward and hands it the live session to continue there, then dismisses
 // the widget. The terminal's pty isn't restarted — its ownership is
@@ -65,7 +74,14 @@ export function openMainWindow(): void {
 // triggered by the renderer once it's ready to receive this session's
 // output), so an in-flight response isn't lost.
 export async function openSessionInMainWindow(terminalId: string, args: string[]): Promise<void> {
-  const sessionId = await resolveSessionId(args);
+  let sessionId = await resolveSessionId(args);
+  if (!sessionId) {
+    // A brand-new (never --resume'd) session has no id in its launch args
+    // at all — fall back to finding it by spawn time so the tab still gets
+    // labeled with the real session title instead of a generic placeholder.
+    const spawnedAt = spawnTimestampFromTerminalId(terminalId);
+    if (spawnedAt) sessionId = await findRecentClanceSessionId(spawnedAt);
+  }
   const title = sessionId ? await titleForSessionId(sessionId) : null;
 
   openMainWindow();

@@ -23,6 +23,38 @@ export async function captureFrontmostWindow(): Promise<string | undefined> {
   }
 }
 
+// Grabs whatever text was highlighted in the frontmost app at invocation
+// time, so the popup can hand it to the CLI as focused context — must run
+// before the popup steals focus, same as captureFrontmostWindow. There's no
+// OS API to just ask "what's selected" generically across apps (that's the
+// accessibility-tree read docs/design.md still defers), so this simulates
+// Cmd+C and reads back the clipboard instead — the same trick
+// typeIntoCapturedWindow uses in reverse, and the same trade-off (briefly
+// overwrites the user's real clipboard, restored right after). The
+// clipboard is cleared to an empty sentinel *before* the copy, rather than
+// diffed against its previous contents, so "nothing selected" (copy is a
+// no-op) is distinguishable from "selection happens to match whatever was
+// already on the clipboard."
+export async function captureSelectedText(): Promise<string | undefined> {
+  try {
+    const { keyboard, Key } = await import("@nut-tree-fork/nut-js");
+
+    const previousClipboardText = await clipboard.readText();
+    await clipboard.writeText("");
+    await keyboard.pressKey(Key.LeftCmd, Key.C);
+    await keyboard.releaseKey(Key.LeftCmd, Key.C);
+    // Give the frontmost app a moment to actually write the selection to
+    // the pasteboard before reading it back.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const copied = await clipboard.readText();
+    await clipboard.writeText(previousClipboardText);
+
+    return copied.trim().length > 0 ? copied : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // Pastes rather than simulates individual keystrokes — `keyboard.type()`
 // sends one synthetic keypress per character with a fixed inter-key delay,
 // which is noticeably slow for anything longer than a sentence and gets

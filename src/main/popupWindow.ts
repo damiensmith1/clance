@@ -1,6 +1,6 @@
 import { BrowserWindow, ipcMain, screen } from "electron";
 import { join } from "path";
-import { captureFrontmostWindow } from "./frontApp";
+import { captureFrontmostWindow, captureSelectedText } from "./frontApp";
 import { captureAndSaveActiveDisplay } from "./screenCapture";
 import { checkPermissions } from "./permissions";
 import { ensureInsertTextServer } from "./insertTextServer";
@@ -10,9 +10,20 @@ const DEFAULT_HEIGHT = 480;
 const MIN_WIDTH = 360;
 const MIN_HEIGHT = 220;
 
+// Raw pieces behind the system-prompt/typed-context text, kept around
+// separately so the widget's "See context" hover card can show the actual
+// screenshot image and selection rather than re-parsing them back out of
+// buildContextText's prose.
+type ContextPreview = {
+  windowTitle?: string;
+  screenshotPath?: string;
+  selectedText?: string;
+  systemPrompt: string;
+};
+
 type PopupShownPayload =
-  | { mode: "new"; args: string[] }
-  | { mode: "picker"; contextText: string };
+  | { mode: "new"; args: string[]; contextPreview?: ContextPreview }
+  | { mode: "picker"; contextText: string; contextPreview?: ContextPreview };
 
 let popup: BrowserWindow | null = null;
 let popupReady: Promise<void> | null = null;
@@ -125,12 +136,23 @@ function sanitizeForTerminal(text: string): string {
   return text.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, "");
 }
 
+// A highlighted selection can be an entire document — cap what rides into
+// the system prompt so one huge selection can't blow out the context
+// window on every single invocation.
+const MAX_SELECTED_TEXT_CHARS = 4000;
+function truncateSelectedText(text: string): string {
+  return text.length > MAX_SELECTED_TEXT_CHARS
+    ? `${text.slice(0, MAX_SELECTED_TEXT_CHARS)}\n[...truncated]`
+    : text;
+}
+
 // Built fresh per invocation (never cached) so the CLI session always
 // reflects what the user was actually looking at and how they opened the
 // widget.
 function buildContextText(
   windowTitle: string | undefined,
   screenshotPath: string | undefined,
+  selectedText: string | undefined,
   insertTextAvailable: boolean
 ): string {
   const lines = [
@@ -142,6 +164,12 @@ function buildContextText(
   if (screenshotPath) {
     lines.push(
       `A screenshot of their screen at that moment was saved to: ${screenshotPath}. Read it if it's relevant to what they ask.`
+    );
+  }
+  if (selectedText) {
+    lines.push(
+      `The user had this text highlighted/selected in that app:\n"""\n${truncateSelectedText(sanitizeForTerminal(selectedText))}\n"""\n` +
+        "Treat this selection as the primary subject of their request — focus on it unless they clearly ask about something unrelated to it."
     );
   }
   if (insertTextAvailable) {
@@ -156,12 +184,23 @@ function buildContextText(
   return lines.join("\n");
 }
 
-async function captureContextText(insertTextAvailable: boolean): Promise<string> {
-  const [windowTitle, screenshotPath] = await Promise.all([
+// captureSelection gates on the same Accessibility permission insert_text
+// needs, since it's the same underlying mechanism (a simulated keystroke,
+// here Cmd+C instead of Cmd+V) — see captureSelectedText in frontApp.ts.
+async function captureContextText(
+  insertTextAvailable: boolean,
+  captureSelection: boolean
+): Promise<{ text: string; preview: ContextPreview }> {
+  const [windowTitle, screenshotPath, selectedText] = await Promise.all([
     captureFrontmostWindow(),
     captureAndSaveActiveDisplay().catch(() => undefined),
+    captureSelection ? captureSelectedText() : Promise.resolve(undefined),
   ]);
-  return buildContextText(windowTitle, screenshotPath, insertTextAvailable);
+  const text = buildContextText(windowTitle, screenshotPath, selectedText, insertTextAvailable);
+  return {
+    text,
+    preview: { windowTitle, screenshotPath, selectedText, systemPrompt: text },
+  };
 }
 
 // Gives the launched CLI session an `insert_text` tool that types into
@@ -189,8 +228,11 @@ export async function toggleClancePopup(): Promise<void> {
   }
   // insertTextMcpArgs first — buildContextText needs to know whether the
   // tool is available so it can only tell the model about it when it is.
+  // Its own Accessibility check also gates whether to attempt a selection
+  // capture (same underlying mechanism — see captureContextText).
   const mcpArgs = await insertTextMcpArgs();
-  const contextText = await captureContextText(mcpArgs.length > 0);
+  const accessibilityGranted = mcpArgs.length > 0;
+  const { text: contextText, preview } = await captureContextText(accessibilityGranted, accessibilityGranted);
   // A brand-new session has no prior recorded system-prompt snapshot, so
   // this rides in invisibly — --system-prompt-snapshot off makes sure that
   // stays true on any *future* resume of this exact session too (see
@@ -198,6 +240,7 @@ export async function toggleClancePopup(): Promise<void> {
   showPopup({
     mode: "new",
     args: ["--append-system-prompt", contextText, "--system-prompt-snapshot", "off", ...mcpArgs],
+    contextPreview: preview,
   });
 }
 
@@ -222,7 +265,11 @@ export async function togglePopupPicker(): Promise<void> {
   // started from a bare terminal, or any pre-existing session) — and
   // there's no way to tell which from here. So this is instead typed into
   // the terminal as visible, unsubmitted input once the session opens.
-  // No insert_text tool for resumed/picker sessions (see insertTextMcpArgs).
-  const contextText = await captureContextText(false);
-  showPopup({ mode: "picker", contextText });
+  // No insert_text tool here (see insertTextMcpArgs) — that needs the MCP
+  // server wired in at launch, which resumed sessions never get. Selection
+  // capture has no such requirement (it's just a simulated Cmd+C, same
+  // Accessibility gate), so it rides along in the typed context same as
+  // toggleClancePopup's.
+  const { text: contextText, preview } = await captureContextText(false, checkPermissions().accessibility);
+  showPopup({ mode: "picker", contextText, contextPreview: preview });
 }

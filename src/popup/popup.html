@@ -103,6 +103,92 @@
         display: flex;
       }
 
+      /* Plain text, not a button — hovering reveals what was actually
+         captured and handed to the CLI at invocation, so the wording
+         doesn't imply a click does anything. */
+      #context-link {
+        position: relative;
+        -webkit-app-region: no-drag;
+        cursor: default;
+        color: var(--text-secondary);
+      }
+      #context-link:hover {
+        color: var(--text-primary);
+      }
+      /* No margin-top gap between the link and the card on purpose — a
+         real gap is a dead zone the mouse has to cross in a straight line
+         to get from the text to the card, and leaving either one during
+         that crossing (easy to do, especially aiming for a scrollbar)
+         drops :hover and closes it. Flush against the link instead, so
+         there's no gap to fall through; the card's own padding still
+         gives its content breathing room. */
+      #context-dialog {
+        display: none;
+        position: absolute;
+        top: 100%;
+        right: 0;
+        width: 480px;
+        max-height: 560px;
+        overflow-y: auto;
+        box-sizing: border-box;
+        background: var(--surface-card);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-md);
+        box-shadow: 0 8px 30px rgba(51, 44, 34, 0.16);
+        margin-top: 0;
+        padding: 14px;
+        text-align: left;
+        font-weight: 400;
+        letter-spacing: normal;
+        text-transform: none;
+        color: var(--text-primary);
+        font-size: 13px;
+        cursor: default;
+        z-index: 10;
+      }
+      #context-link:hover #context-dialog {
+        display: block;
+      }
+      /* One scrollbar for the whole card (#context-dialog's own
+         overflow-y) rather than nested scroll areas per section — simpler
+         to use, and avoids the mouse-wheel-bubbling ambiguity of a
+         scrollable block inside a scrollable card. */
+      .context-dialog-label {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        margin: 14px 0 5px;
+      }
+      .context-dialog-label:first-child {
+        margin-top: 0;
+      }
+      #context-dialog-image {
+        width: 100%;
+        display: block;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--surface-border);
+      }
+      #context-dialog-title {
+        font-weight: 600;
+        word-break: break-word;
+      }
+      #context-dialog-selection,
+      #context-dialog-system-prompt {
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: var(--surface-bg);
+        border-radius: var(--radius-sm);
+        padding: 10px;
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+      }
+      #context-dialog-empty {
+        color: var(--text-secondary);
+        font-style: italic;
+      }
+
       /* FitAddon sizes rows/cols off the mount element's *direct parent*
        * clientHeight/Width without ever subtracting that parent's own
        * padding (a known xterm.js limitation) — so the padding lives here,
@@ -196,6 +282,19 @@
       <div id="toolbar">
         <span class="status-dot"></span>CLAUDE
         <div class="toolbar-spacer"></div>
+        <span id="context-link">
+          See context
+          <div id="context-dialog">
+            <div id="context-dialog-title" hidden></div>
+            <div id="context-dialog-image-label" class="context-dialog-label" hidden>Screenshot</div>
+            <img id="context-dialog-image" hidden alt="Screenshot at invocation" />
+            <div id="context-dialog-selection-label" class="context-dialog-label" hidden>Highlighted text</div>
+            <div id="context-dialog-selection" hidden></div>
+            <div id="context-dialog-system-prompt-label" class="context-dialog-label" hidden>System prompt</div>
+            <div id="context-dialog-system-prompt" hidden></div>
+            <div id="context-dialog-empty" hidden>No context was captured for this session.</div>
+          </div>
+        </span>
         <button id="open-in-app-btn" class="toolbar-btn" title="Open in App">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M19 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6" />

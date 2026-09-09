@@ -30,6 +30,13 @@ contextBridge.exposeInMainWorld("clance", {
     ipcRenderer.on("popup-shown", (_event, payload: PopupShownPayload) => callback(payload)),
 });
 
+type ContextPreview = {
+  windowTitle?: string;
+  screenshotPath?: string;
+  selectedText?: string;
+  systemPrompt: string;
+};
+
 type PopupShownPayload =
-  | { mode: "new"; args: string[] }
-  | { mode: "picker"; contextText: string };
+  | { mode: "new"; args: string[]; contextPreview?: ContextPreview }
+  | { mode: "picker"; contextText: string; contextPreview?: ContextPreview };

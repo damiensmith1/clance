@@ -211,6 +211,48 @@ as app-level mediation.
   the Agent SDK was removed, just moved one layer down (CLI's own tool-use
   loop instead of Clance's).
 
+## Highlighted-selection capture
+
+Lets a hotkey-opened popup session know what text, if any, was
+highlighted/selected in the frontmost app at invocation time, and steers the
+model to treat it as the focus of the request rather than requiring the
+user to re-describe or re-paste it. Wired into both hotkeys —
+`toggleClancePopup` (Option+Space) and `togglePopupPicker`
+(Option+Shift+Cmd+Space) — since both go through the same
+`captureContextText()`.
+
+- **Mechanism:** `captureSelectedText()` in `src/main/frontApp.ts` runs
+  alongside `captureFrontmostWindow()`/the screenshot capture, before the
+  popup steals focus. There's no generic cross-app "what's selected" OS API
+  short of the accessibility-tree read `docs/design.md` still defers, so
+  this simulates Cmd+C and reads the result back off the clipboard — the
+  same trick `insert_text` uses in reverse (Cmd+V), and the same
+  save/restore-the-user's-real-clipboard trade-off. The clipboard is
+  cleared to an empty sentinel *before* the simulated copy (rather than
+  diffed against whatever was already there), so a no-op copy — nothing was
+  selected — reads back empty rather than being confused with a selection
+  that happens to match old clipboard contents.
+- **Gated on Accessibility**, same permission (and same keystroke-simulation
+  mechanism) `insert_text` needs — `popupWindow.ts`'s `toggleClancePopup`
+  reuses the same `checkPermissions().accessibility` check for both rather
+  than checking twice.
+- **Both hotkeys, one delivery difference:** `captureContextText()`'s
+  `captureSelection` param is `true` for both `toggleClancePopup` and
+  `togglePopupPicker` (each gated on its own `checkPermissions().accessibility`
+  check). What differs is how the resulting text reaches the CLI — invisibly
+  via `--append-system-prompt` for a brand-new session, or typed into the
+  terminal as visible input for a resumed one (see "Context injection"
+  above) — not whether the selection gets captured at all. `insert_text`
+  itself is still new-session-only (no MCP server wiring for resumed
+  sessions), which is unrelated: capturing a selection is just a keystroke
+  simulation, same Accessibility gate, no MCP config needed.
+- **Prompting:** when a selection was captured, `buildContextText()` in
+  `popupWindow.ts` includes it verbatim (sanitized the same way the window
+  title is, and capped at `MAX_SELECTED_TEXT_CHARS` — 4000 — so one huge
+  selection can't blow out every invocation's context) plus an instruction
+  to treat it as the primary subject of the request unless the user's ask
+  is clearly about something else.
+
 ## Packaging & macOS permissions
 
 - **The problem:** running via the raw dev Electron binary (`electron .`)
@@ -304,6 +346,55 @@ Clance-specific is the window chrome and which session gets opened:
   sticks instead of being undone the next time the hotkey opens it. No
   "Hit Esc to dismiss" footer or extra bottom padding — the terminal fills
   essentially the whole card.
+- **"See context" hover card:** plain text in `#toolbar` (`#context-link`,
+  next to "Open in App"), not a button — no border, cursor stays default,
+  the only affordance is a color change on hover. Hovering reveals a card
+  (`#context-dialog`, 480×560px max, one `overflow-y: auto` scrollbar for
+  the whole thing — deliberately not nested per-section scroll areas, to
+  avoid mouse-wheel-bubbling ambiguity) showing everything that was
+  actually captured and handed to the CLI at invocation: the screenshot
+  (an `<img>` loaded via a `file://` URL, `encodeURI`'d since a home
+  directory path could contain spaces), the frontmost window title, any
+  highlighted-selection text, and — labeled "System prompt" — the full
+  text `buildContextText()` produced, verbatim. `captureContextText()`
+  returns these as a `contextPreview` object (`{ windowTitle,
+  screenshotPath, selectedText, systemPrompt }`, the last always present
+  since `buildContextText()` never returns empty) alongside the flattened
+  string used for the actual launch args, forwarded through `popup-shown`
+  unchanged so the renderer shows them directly rather than re-parsing
+  them back out of that string. `openPopupWithArgs` (pop-out-to-widget)
+  never captures fresh context, so `contextPreview` is `undefined` there
+  (not just empty fields) — the card shows an empty-state message instead.
+  `#context-dialog` sits flush against `#context-link` (`margin-top: 0`)
+  rather than with a gap — a gap is a dead zone the mouse has to cross in
+  a straight line to reach the card, and leaving either element mid-cross
+  (easy when aiming for the scrollbar) drops `:hover` and closes it before
+  the cursor arrives.
+  - **The 560px CSS `max-height` is just an upper cap, not the real
+    constraint.** `#app`'s own `overflow: hidden` (needed for the widget's
+    rounded corners) clips anything that overflows it — and since `#app`
+    always exactly matches the popup window's own size, that clip is
+    absolute, not something the dialog's own `overflow-y: auto` can work
+    around. In a widget resized shorter than toolbar-height + 560px, the
+    dialog's tail always rendered into the clipped-off dead zone no matter
+    how far you scrolled *within* the dialog — a fixed geometry problem
+    (that content permanently occupies the same page position), not a
+    scroll-position bug, so it looked like scrolling was broken. Fixed by
+    computing the real available height on every `mouseenter`
+    (`window.innerHeight - link.getBoundingClientRect().bottom - 10`) and
+    writing it as an inline `max-height` (wins over the CSS rule), capped
+    at 560px — the dialog now never renders taller than what's actually
+    visible, so its own scrolling genuinely reaches the end.
+  - **No per-item "clear this" affordance, on purpose.** Considered and
+    rejected: by the time this card is visible, the context has already
+    been irreversibly handed to the live `claude` process — for a
+    brand-new session, baked into its `--append-system-prompt` startup
+    flag — so there's no live channel to retroactively remove a piece from
+    a running process. The one flow where it's technically real (a
+    resumed/picker session's context is still sitting as *unsubmitted*
+    terminal input, genuinely editable) was rejected too, for consistency:
+    building it only there, silently no-op-ing everywhere else, would be a
+    control that lies about what it does.
 - **A real latent race condition, found while testing the picker:**
   `popup.webContents.send("popup-shown", ...)` silently drops the event if
   popup.js hasn't finished loading and attached its listener yet — there's
@@ -356,9 +447,20 @@ Clance-specific is the window chrome and which session gets opened:
   `chatHistory.ts`'s new `titleForSessionId()` reads the session's first
   user message the same way `listSessions()` does, but for one known id
   in Clance's single project bucket rather than scanning every project.
-  Falls back to "New Chat" when there's no id to resolve at all (a
-  freshly hotkey-launched widget session that was never given a
-  `--resume`/`attach` arg in the first place). The main window's
+  A freshly hotkey-launched widget session has no `--resume`/`attach` id to
+  recover at all — `resolveSessionId` returns null for it — so
+  `openSessionInMainWindow` falls back to `chatHistory.ts`'s
+  `findRecentClanceSessionId(spawnedAt)`: every `terminalId` embeds its
+  pty's own spawn time (`popup-${Date.now()}`, `term-${Date.now()}-<n>`),
+  extracted via a `/(\d{10,})/` match, and matched against the birthtime of
+  files in Clance's project bucket (the CLI creates the transcript file
+  moments after the process starts) to recover the session id without ever
+  having been told it. Only falls back to "New Chat" now when there's
+  truly no transcript yet — the user opened the popup and hit "Open in
+  App" before their first turn landed. Not airtight (two brand-new Clance
+  sessions starting within `SPAWN_MATCH_TOLERANCE_MS` of each other could
+  be mismatched), but there's no other id to key off before that. The main
+  window's
   `Shell.js` listens for that event, calls the new `terminal:reparent` IPC
   (resolves to `reparentPty` keyed off the *calling* window via
   `BrowserWindow.fromWebContents`) before opening the tab, so the handoff

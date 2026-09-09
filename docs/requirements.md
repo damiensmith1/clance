@@ -16,9 +16,9 @@ status: draft
 - Free-text goal input (open-ended, not fixed actions like "Rewrite"/"Explain")
 - Dictation — speak your goal instead of typing it (local speech-to-text)
 - Screen content capture at time of invocation (screenshot + frontmost
-  window title, handed to the CLI as text/file-path context — not sent as
-  an SDK image content block; see §"Screen context capture") as context
-  for the request
+  window title + any highlighted/selected text; handed to the CLI as
+  text/file-path context — not sent as an SDK image content block; see
+  §"Screen context capture") as context for the request
 - The real Claude Code CLI, embedded as a terminal (`node-pty` + `xterm.js`)
   and run as a real child process, handles all reasoning/looping/UI
   rendering — **supersedes the original Claude Agent SDK plan**, see
@@ -157,10 +157,19 @@ status: draft
   - The frontmost window's title (`@nut-tree-fork/nut-js`) — a lighter
     substitute for the originally-planned accessibility-tree read, not a
     full structured-content dump
+  - Whatever text was highlighted/selected in the frontmost app, if any
+    (simulated Cmd+C, read back off the clipboard — see `docs/design.md`
+    §"Highlighted-selection capture"), folded into the request context with
+    an instruction to treat it as the primary subject of the request.
+    Captured on both hotkeys (Option+Space and the "Continue a
+    Conversation" picker); delivered invisibly for a brand-new session,
+    typed visibly into the terminal for a resumed one — same split as the
+    rest of this section's context.
 - Read-only and on-demand — never persistent/background capture, unchanged
   from the original plan
 - Accessibility-tree / focused-element content read is still deferred —
-  window title has been sufficient so far; revisit if it proves
+  window title (and now selected text, via simulated copy rather than the
+  accessibility tree) has been sufficient so far; revisit if it proves
   insufficient for structured-app goals
 
 ### Claude Code CLI integration (supersedes "Claude Agent SDK integration")

@@ -6,6 +6,16 @@ const pickerSearchEl = document.getElementById("picker-search");
 const pickerListEl = document.getElementById("picker-list");
 const closeBtn = document.getElementById("close-btn");
 const openInAppBtn = document.getElementById("open-in-app-btn");
+const contextLinkEl = document.getElementById("context-link");
+const contextDialogEl = document.getElementById("context-dialog");
+const contextDialogTitleEl = document.getElementById("context-dialog-title");
+const contextDialogImageLabelEl = document.getElementById("context-dialog-image-label");
+const contextDialogImageEl = document.getElementById("context-dialog-image");
+const contextDialogSelectionLabelEl = document.getElementById("context-dialog-selection-label");
+const contextDialogSelectionEl = document.getElementById("context-dialog-selection");
+const contextDialogSystemPromptLabelEl = document.getElementById("context-dialog-system-prompt-label");
+const contextDialogSystemPromptEl = document.getElementById("context-dialog-system-prompt");
+const contextDialogEmptyEl = document.getElementById("context-dialog-empty");
 
 let allSessions = [];
 let pickerContextText = "";
@@ -246,6 +256,79 @@ termInnerEl.addEventListener("drop", async (event) => {
   term?.focus();
 });
 
+// Populates the "See context" hover card with what was actually captured
+// at invocation — the same pieces buildContextText() (popupWindow.ts) wove
+// into prose for the CLI, shown here as-is instead of re-parsed back out of
+// that prose. `openPopupWithArgs` (pop-out-to-widget) never captures fresh
+// context at all, so `preview` is undefined there — the empty state covers it.
+function renderContextPreview(preview) {
+  // preview is undefined for flows that never capture fresh context at all
+  // (openPopupWithArgs's pop-out-to-widget) — genuinely nothing to show,
+  // unlike a captured-but-empty field below. systemPrompt itself is never
+  // empty when preview exists (buildContextText always returns at least
+  // its boilerplate first line), so it's shown whenever preview is.
+  if (!preview) {
+    contextDialogTitleEl.hidden = true;
+    contextDialogImageLabelEl.hidden = true;
+    contextDialogImageEl.hidden = true;
+    contextDialogImageEl.removeAttribute("src");
+    contextDialogSelectionLabelEl.hidden = true;
+    contextDialogSelectionEl.hidden = true;
+    contextDialogSystemPromptLabelEl.hidden = true;
+    contextDialogSystemPromptEl.hidden = true;
+    contextDialogEmptyEl.hidden = false;
+    return;
+  }
+
+  const { windowTitle, screenshotPath, selectedText, systemPrompt } = preview;
+  contextDialogEmptyEl.hidden = true;
+
+  contextDialogTitleEl.hidden = !windowTitle;
+  contextDialogTitleEl.textContent = windowTitle ? `From: ${windowTitle}` : "";
+
+  if (screenshotPath) {
+    // encodeURI (not encodeURIComponent, which would also escape "/")
+    // guards against a home directory path containing spaces or other
+    // characters that aren't valid unescaped in a URL.
+    contextDialogImageEl.src = `file://${encodeURI(screenshotPath)}`;
+    contextDialogImageEl.hidden = false;
+    contextDialogImageLabelEl.hidden = false;
+  } else {
+    contextDialogImageEl.hidden = true;
+    contextDialogImageEl.removeAttribute("src");
+    contextDialogImageLabelEl.hidden = true;
+  }
+
+  contextDialogSelectionEl.hidden = !selectedText;
+  contextDialogSelectionEl.textContent = selectedText ?? "";
+  contextDialogSelectionLabelEl.hidden = !selectedText;
+
+  contextDialogSystemPromptEl.hidden = !systemPrompt;
+  contextDialogSystemPromptEl.textContent = systemPrompt ?? "";
+  contextDialogSystemPromptLabelEl.hidden = !systemPrompt;
+}
+
+// #context-dialog's CSS max-height (560px) is just an upper cap — it
+// doesn't know how much room is actually left below the toolbar in the
+// current (user-resizable) window. Left alone, a dialog taller than that
+// remaining space gets clipped by #app's own overflow: hidden (needed for
+// the widget's rounded corners), and since #app's edge *is* the window's
+// edge, that clip is absolute — no amount of scrolling the dialog's own
+// content can bring the clipped-off tail into view, because it's a fixed
+// geometry problem (that content always lands in the same dead zone at the
+// bottom of the dialog's box), not a scroll-position one. Recomputing the
+// real ceiling on every hover and writing it as an inline style (which
+// wins over the CSS rule) keeps the dialog's own scrolling honest — it
+// never renders taller than what's actually visible, so scrolling all the
+// way down always works.
+const CONTEXT_DIALOG_MAX_HEIGHT = 560;
+const CONTEXT_DIALOG_BOTTOM_MARGIN = 10;
+contextLinkEl.addEventListener("mouseenter", () => {
+  const available =
+    window.innerHeight - contextLinkEl.getBoundingClientRect().bottom - CONTEXT_DIALOG_BOTTOM_MARGIN;
+  contextDialogEl.style.maxHeight = `${Math.min(Math.max(available, 120), CONTEXT_DIALOG_MAX_HEIGHT)}px`;
+});
+
 closeBtn.addEventListener("click", () => window.clance.closeWidget());
 
 openInAppBtn.addEventListener("click", () => {
@@ -258,6 +341,7 @@ openInAppBtn.addEventListener("click", () => {
 
 window.clance.onShown((payload) => {
   appEl.classList.remove("has-messages", "picker-active");
+  renderContextPreview(payload.contextPreview);
 
   if (payload.mode === "picker") {
     pickerContextText = payload.contextText;
