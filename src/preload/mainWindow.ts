@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld("clanceApp", {
   listChatSessions: () => ipcRenderer.invoke("chatHistory:list-sessions"),
   resolveOpenArgs: (sessionId: string) =>
     ipcRenderer.invoke("chatHistory:resolve-open-args", sessionId),
+  setSessionArchived: (sessionId: string, archived: boolean) =>
+    ipcRenderer.invoke("chatHistory:set-archived", sessionId, archived),
   openInWidget: (args: string[]) => ipcRenderer.invoke("popup:open-with-args", args),
   createTerminal: (terminalId: string, command: string, args: string[], cols: number, rows: number) =>
     ipcRenderer.invoke("terminal:create", { terminalId, command, args, cols, rows }),

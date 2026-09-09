@@ -569,9 +569,9 @@
       /* ---- Conversation list rows (flat, newspaper-style listing) ---- */
       .session-row {
         display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 4px;
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
         width: 100%;
         box-sizing: border-box;
         text-align: left;
@@ -588,6 +588,14 @@
       .list-group:last-child .session-row:last-child {
         border-bottom: none;
       }
+      .session-row-main {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+        flex: 1 1 auto;
+        min-width: 0;
+      }
       .session-row:hover .session-headline {
         color: var(--accent);
       }
@@ -603,6 +611,29 @@
         letter-spacing: 0.05em;
         text-transform: uppercase;
         color: var(--text-secondary);
+      }
+      /* Hidden until the row is hovered, same pattern as .tab-close. */
+      .session-archive-btn {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+        visibility: hidden;
+        background: transparent;
+        border: none;
+        border-radius: var(--radius-sm);
+        padding: 5px 8px;
+        color: var(--text-secondary);
+        font-family: inherit;
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .session-archive-btn:hover {
+        background: var(--surface-hover);
+        color: var(--text-primary);
+      }
+      .session-row:hover .session-archive-btn {
+        visibility: visible;
       }
       .icon-button {
         display: flex;

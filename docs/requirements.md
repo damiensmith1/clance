@@ -255,6 +255,13 @@ status: draft
   — note that spec's UI section describes the since-superseded
   `ChatDetailSection`; its data-layer description (`chatHistory.ts`'s
   session listing) is still accurate.
+- **Archiving, not deleting.** An "Active"/"Archived" toggle plus a
+  per-row archive/restore action lets a session be hidden from the default
+  list — see `docs/design.md` §"Session archiving". No permanent-delete
+  action exists: the listed sessions include real Claude Code CLI history
+  from any project on the machine, not just Clance's own, so deleting the
+  underlying transcript file is out of scope for a "clean up my Clance
+  sessions" feature.
 
 ### Extensibility layer (plugins, skills, MCP, hooks)
 

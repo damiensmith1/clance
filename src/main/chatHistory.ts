@@ -4,6 +4,7 @@ import { createInterface } from "readline";
 import { homedir } from "os";
 import { basename, dirname, extname, join } from "path";
 import { SESSION_CWD } from "./paths";
+import { getArchivedSessionIds } from "./archivedSessions";
 
 // Where the Claude Code CLI (and Clance itself, via the Agent SDK) stores
 // every session's JSONL transcript, one subdirectory per project cwd.
@@ -22,6 +23,9 @@ export type SessionSummary = {
   projectLabel: string;
   title: string;
   lastModified: string;
+  // Clance-local bookkeeping (see archivedSessions.ts) — never reflects
+  // anything about the underlying transcript file itself.
+  archived: boolean;
 };
 
 export type ChatBlock =
@@ -184,6 +188,7 @@ export async function listSessions(): Promise<SessionSummary[]> {
   }
 
   const summaries: SessionSummary[] = [];
+  const archivedIds = getArchivedSessionIds();
 
   for (const dirName of projectDirs) {
     const projectPath = join(CLAUDE_PROJECTS_DIR, dirName);
@@ -200,12 +205,14 @@ export async function listSessions(): Promise<SessionSummary[]> {
       try {
         const fileStat = await stat(filePath);
         if (!fileStat.isFile()) continue;
+        const id = basename(entry, ".jsonl");
         summaries.push({
-          id: basename(entry, ".jsonl"),
+          id,
           filePath,
           projectLabel: projectLabelFor(dirName),
           title: await firstUserTitle(filePath),
           lastModified: fileStat.mtime.toISOString(),
+          archived: archivedIds.has(id),
         });
       } catch {
         continue;

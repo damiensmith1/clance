@@ -16,6 +16,7 @@ import {
 } from "./permissions";
 import { SHORTCUT_ACTIONS } from "./shortcuts";
 import { getSession, listSessions } from "./chatHistory";
+import { setSessionArchived } from "./archivedSessions";
 import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
 import { listSkills, setSkillEnabled } from "./skills";
 import { listMcpServers, setMcpServerEnabled } from "./mcpConfig";
@@ -127,6 +128,11 @@ ipcMain.handle("chatHistory:get-session", (_event, filePath: string) =>
 
 ipcMain.handle("chatHistory:resolve-open-args", (_event, sessionId: string) =>
   resolveOpenArgs(sessionId)
+);
+
+ipcMain.handle(
+  "chatHistory:set-archived",
+  (_event, sessionId: string, archived: boolean) => setSessionArchived(sessionId, archived)
 );
 
 ipcMain.handle("popup:open-with-args", (_event, args: string[]) => openPopupWithArgs(args));

@@ -23,12 +23,16 @@ function dayGroupLabel(iso) {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function SessionList({ sessions, loading, onOpen }) {
+// Archiving is Clance-local bookkeeping (see archivedSessions.ts) — it
+// never touches the actual transcript file, which is the real Claude Code
+// CLI's own storage and may belong to a project that has nothing to do
+// with Clance. That's also why there's no permanent-delete action here.
+function SessionList({ sessions, loading, showingArchived, onOpen, onSetArchived }) {
   if (loading) {
     return html`<p class="empty-note">Loading…</p>`;
   }
   if (sessions.length === 0) {
-    return html`<p class="empty-note">No past sessions found.</p>`;
+    return html`<p class="empty-note">${showingArchived ? "No archived sessions." : "No past sessions found."}</p>`;
   }
 
   const groups = [];
@@ -46,13 +50,25 @@ function SessionList({ sessions, loading, onOpen }) {
     ${groups.map(
       (group) => html`
         <div class="list-group">
-          <div class="list-group-label">${group.label}</div>
+          ${group.label !== "Recent" && html`<div class="list-group-label">${group.label}</div>`}
           ${group.items.map(
             (session) => html`
-              <button class="session-row" onClick=${() => onOpen(session)}>
-                <span class="session-headline">${session.title}</span>
-                <span class="session-byline">${session.projectLabel} · ${relativeTime(session.lastModified)}</span>
-              </button>
+              <div class="session-row" onClick=${() => onOpen(session)}>
+                <div class="session-row-main">
+                  <span class="session-headline">${session.title}</span>
+                  <span class="session-byline">${session.projectLabel} · ${relativeTime(session.lastModified)}</span>
+                </div>
+                <button
+                  class="session-archive-btn"
+                  title=${showingArchived ? "Restore" : "Archive"}
+                  onClick=${(e) => {
+                    e.stopPropagation();
+                    onSetArchived(session.id, !showingArchived);
+                  }}
+                >
+                  ${showingArchived ? "Restore" : Icon.archive(14)}
+                </button>
+              </div>
             `
           )}
         </div>
@@ -65,6 +81,7 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
 
   useEffect(() => {
     window.clanceApp.listChatSessions().then((result) => {
@@ -75,11 +92,19 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return sessions;
-    return sessions.filter(
-      (s) => s.title.toLowerCase().includes(q) || s.projectLabel.toLowerCase().includes(q)
-    );
-  }, [sessions, query]);
+    return sessions.filter((s) => {
+      if (Boolean(s.archived) !== showArchived) return false;
+      if (!q) return true;
+      return s.title.toLowerCase().includes(q) || s.projectLabel.toLowerCase().includes(q);
+    });
+  }, [sessions, query, showArchived]);
+
+  function handleSetArchived(sessionId, archived) {
+    // Optimistic — the row just needs to move out of the current view,
+    // not wait on a round trip to find out it's allowed to.
+    setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, archived } : s)));
+    window.clanceApp.setSessionArchived(sessionId, archived);
+  }
 
   return html`
     <div class="section-page">
@@ -99,7 +124,28 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
         <button class="btn-ghost" onClick=${onNewChat}>${Icon.addServer(12)} New Session</button>
       </div>
 
-      <${SessionList} sessions=${filtered} loading=${loading} onOpen=${onOpenChat} />
+      <div class="segmented">
+        <button
+          class="segmented-item ${!showArchived ? "segmented-item-active" : ""}"
+          onClick=${() => setShowArchived(false)}
+        >
+          Active
+        </button>
+        <button
+          class="segmented-item ${showArchived ? "segmented-item-active" : ""}"
+          onClick=${() => setShowArchived(true)}
+        >
+          Archived
+        </button>
+      </div>
+
+      <${SessionList}
+        sessions=${filtered}
+        loading=${loading}
+        showingArchived=${showArchived}
+        onOpen=${onOpenChat}
+        onSetArchived=${handleSetArchived}
+      />
     </div>
   `;
 }

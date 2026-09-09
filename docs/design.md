@@ -486,6 +486,42 @@ just opens a resumed/attached terminal tab; there is nothing left to render
 custom UI for, since the CLI renders its own history and live output
 directly in the embedded terminal.
 
+## Session archiving
+
+"Clean up sessions" in the Chats tab is archive-only — there is deliberately
+no permanent-delete action.
+
+- **Why:** `listSessions()`/the Chats tab reads from `~/.claude/projects/**`,
+  the real Claude Code CLI's own transcript storage, shared across every
+  project on the machine that's ever used Claude Code — not a Clance-owned
+  data store. Permanently deleting a `.jsonl` there could destroy a real
+  coding session's history from an unrelated project. Archiving sidesteps
+  that entirely by never touching the transcript file at all.
+- **Mechanism:** `src/main/archivedSessions.ts` keeps a flat JSON array of
+  archived session ids at `~/.clance/archived-sessions.json` (same
+  read/write-whole-file pattern as `config.ts`). `chatHistory.ts`'s
+  `SessionSummary` gained an `archived: boolean` field, populated by
+  `listSessions()` from this file; nothing about the id-lookup or
+  transcript-reading logic changed.
+- **UI:** `ChatsSection.js`'s session rows changed from a single `<button>`
+  (whole row navigates) to a `<div onClick>` wrapping a `.session-row-main`
+  content block plus a separate `.session-archive-btn` — a real nested
+  `<button>` inside a clickable `<button>` isn't valid HTML, and the archive
+  action needs its own click target with `stopPropagation()` so it doesn't
+  also trigger opening the session. The button is hidden until the row is
+  hovered (`.session-row:hover .session-archive-btn`, same pattern as the
+  tab bar's `.tab-close`). An "Active"/"Archived" toggle switches
+  `ChatsListSection`'s view between the two; archived rows show a
+  "Restore" action instead of the archive icon. Archiving is optimistic —
+  the row moves out of the current view immediately, without waiting on
+  the `chatHistory:set-archived` IPC round trip to resolve. The toggle
+  reuses the existing `.segmented`/`.segmented-item` control (Skills tab's
+  underline-tab style) rather than a one-off — an initial custom
+  `.link-toggle` pill design looked out of place next to it. The "Recent"
+  day-group label (`dayGroupLabel()` in `ChatsSection.js`) is suppressed
+  specifically — it read as redundant clutter sitting directly under the
+  new toggle — while older-day labels ("Yesterday", a date) still render.
+
 ## Main application window
 
 - There are now two windows/renderer surfaces: the popup (unchanged) and a
