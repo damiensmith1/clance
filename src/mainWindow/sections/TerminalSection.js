@@ -67,6 +67,27 @@ export function TerminalSection({ terminalId, args = [], isAttached = false, onP
       window.clanceApp.writeTerminal(terminalId, data);
     });
 
+    // xterm.js sends the same carriage return for Enter and Shift+Enter,
+    // since a raw pty has no way to tell them apart on its own. Claude
+    // Code's chat input already treats a bare linefeed (0x0A, the same
+    // byte ctrl+j sends) as "insert newline" rather than "submit", so
+    // intercept Shift+Enter here and send that byte instead of letting
+    // xterm forward its default carriage return. Returning false only
+    // stops xterm's own key handling — it doesn't stop the browser's
+    // default action, so without preventDefault() the Enter keypress
+    // still lands in xterm's hidden input textarea. That stray input
+    // silently accumulates there until xterm eventually flushes it,
+    // which is what caused shift+enter (and Enter generally) to behave
+    // correctly a few times and then break down.
+    term.attachCustomKeyEventHandler((event) => {
+      if (event.type === "keydown" && event.key === "Enter" && event.shiftKey) {
+        event.preventDefault();
+        window.clanceApp.writeTerminal(terminalId, "\n");
+        return false;
+      }
+      return true;
+    });
+
     // An "attach"ed session's pty is shared with every other client
     // currently attached to that same background agent (the CLI's own
     // `claude attach <id>`, not a Clance concept — it's the same mechanism
