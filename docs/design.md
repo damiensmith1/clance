@@ -44,12 +44,24 @@ first-party surface rather than a second implementation of it.
   auto-connects to a running VS Code/JetBrains session and shows whatever
   file that editor happens to have open in its status line, which has
   nothing to do with what Clance's terminal is for. Every `claude` launch
-  also gets `--settings '{"theme":"light"}'` appended to its args —
-  remapping xterm's own theme isn't enough on its own, since the CLI emits
-  several UI colors (diff add/remove, etc.) as hardcoded truecolor RGB tied
-  to its own light/dark theme setting rather than the basic ANSI palette;
-  left unset it defaults dark-tuned, which reads poorly against Clance's
-  light terminal background.
+  also gets a `--settings` JSON blob appended to its args, built fresh per
+  spawn from the current config rather than a fixed string: always
+  `theme: "light"` (remapping xterm's own theme isn't enough on its own,
+  since the CLI emits several UI colors — diff add/remove, etc. — as
+  hardcoded truecolor RGB tied to its own light/dark theme setting rather
+  than the basic ANSI palette; left unset it defaults dark-tuned, which
+  reads poorly against Clance's light terminal background), plus
+  `preferredNotifChannel: "notifications_disabled"` unless the
+  `desktopNotifications` config flag (`~/.clance/config.json`, default
+  `false`, opt-in via Settings' "Desktop Notifications" toggle — Clance's
+  own settings, not a macOS one) is explicitly turned on. That flag exists
+  because a Clance-launched pty has no `TERM_PROGRAM` — Clance is a GUI
+  app, not spawned from a shell — so the CLI's own turn-complete
+  notification can't tell it's in a recognized terminal and falls back to
+  shelling out to `osascript -e 'display notification'` directly, which
+  macOS attributes to "Script Editor" rather than Clance. Rather than fake
+  a terminal identity to fix the attribution, it defaults off and anyone
+  who wants it can opt in knowing what it'll look like.
 - **`src/mainWindow/sections/TerminalSection.js`** and **`src/popup/popup.js`**
   wrap `xterm.js` on the renderer side — theme matches the app's own
   editorial palette (background `#F7F3EB`, accent `#D97757`, full 16-color
@@ -75,6 +87,20 @@ first-party surface rather than a second implementation of it.
   channel on `dragenter`/`drop`) — starting the OS drag from Finder shifts
   key-window focus to Finder first, which would otherwise blur-hide the
   popup before the drag ever reached it.
+- **Known issue: switching tabs kills the session.** `PaneLeaf`
+  (`Shell.js`) only ever renders the *active* tab's `TerminalSection`, so
+  switching tabs unmounts the previous one — whose `useEffect` cleanup
+  calls `killTerminal()` unconditionally. That means switching away from a
+  Clance-launched CLI session kills it outright, mid-response if one was
+  running. Not yet fixed: a first attempt kept every tab's
+  `TerminalSection` mounted (hidden via CSS) instead, but broke tab
+  switching outright (two CSS rules of equal specificity fought over
+  `display`, so every terminal-type panel rendered on top of every other
+  one regardless of which tab was "active") and was reverted; a second
+  attempt (kill-on-close-only, moving the `killTerminal()` call out of
+  unmount and into the tab-close/pop-out/move-to-another-pane call sites)
+  worked but was also reverted at the user's request before being kept —
+  this needs a real design discussion, not another quick patch.
 - **Sessions are opened, not synced.** There is no more cross-window
   message-syncing IPC (`session:updated` broadcasts, file-watchers) — that
   entire mechanism existed only because two separate custom-UI surfaces
@@ -577,8 +603,12 @@ no permanent-delete action.
   (`"chats"`/`"skills"`/`"settings"` for the three launcher sections,
   `chat:<filePath>` for an opened conversation). Opening an id that's
   already open either activates the existing tab or opens a duplicate,
-  governed by the `reuseTabs` preference (`~/.clance/config.json`,
-  default `true`, editable from Settings' "Tab Behavior" toggle).
+  governed by `openTab()`'s `reuseTabs` option (`layoutStore.js`) — always
+  `true` in practice (no caller passes `false`). This was previously a
+  user-facing "Tab Behavior" Settings toggle backed by
+  `~/.clance/config.json`; removed as a configurable preference, so the
+  option now just documents intent at the call site rather than being
+  wired to anything a user can flip.
 - **Launcher lives in a floating top-right cluster, not a left sidebar**
   (supersedes the collapsible left-sidebar launcher above): with only
   three items (Sessions/Skills & Plugins/Settings), a full-height rail

@@ -1,6 +1,7 @@
 import * as pty from "node-pty";
 import { BrowserWindow } from "electron";
 import { execFileSync } from "child_process";
+import { readConfig } from "./config";
 
 // `win` is mutable per-session (not just captured at spawn time) so a
 // session can be reparented to a different window after the fact — see
@@ -47,7 +48,16 @@ export function createPtySession(
   // add/remove, etc.) as hardcoded truecolor RGB rather than the basic
   // ANSI palette — those can't be fixed by remapping xterm's theme, so the
   // CLI itself has to be told the background is light.
-  const ptyArgs = command === "claude" ? [...args, "--settings", '{"theme":"light"}'] : args;
+  const cliSettings: Record<string, unknown> = { theme: "light" };
+  // See the `desktopNotifications` comment in config.ts: without a
+  // recognized TERM_PROGRAM, the CLI's own turn-complete notification falls
+  // back to an `osascript` call that macOS shows as coming from "Script
+  // Editor." Rather than fake a terminal identity, this defaults the
+  // notification off entirely — opt-in via Settings, not on unless asked for.
+  if (!readConfig().desktopNotifications) {
+    cliSettings.preferredNotifChannel = "notifications_disabled";
+  }
+  const ptyArgs = command === "claude" ? [...args, "--settings", JSON.stringify(cliSettings)] : args;
 
   const ptyProcess = pty.spawn(command, ptyArgs, {
     name: "xterm-256color",

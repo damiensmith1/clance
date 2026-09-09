@@ -1,5 +1,9 @@
 import { html } from "../../shared/vendor/preact-htm-standalone.module.js";
-import { LaunchAtLoginRow, TabBehaviorRow, usePreferences } from "../settings/PreferencesStep.js";
+import {
+  LaunchAtLoginRow,
+  DesktopNotificationsRow,
+  usePreferences,
+} from "../settings/PreferencesStep.js";
 import { ConnectClaudeStep } from "../setup/ConnectClaudeStep.js";
 import { PermissionsStep } from "../setup/PermissionsStep.js";
 import { ShortcutsStep } from "../setup/ShortcutsStep.js";
@@ -22,7 +26,7 @@ export function SettingsSection() {
         <h2 class="group-title">Preferences</h2>
         <${LaunchAtLoginRow} prefs=${prefs} setPrefs=${setPrefs} />
         <${ShortcutsStep} />
-        <${TabBehaviorRow} prefs=${prefs} setPrefs=${setPrefs} />
+        <${DesktopNotificationsRow} prefs=${prefs} setPrefs=${setPrefs} />
       </section>
 
       <footer class="settings-footer">

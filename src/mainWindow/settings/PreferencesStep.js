@@ -26,19 +26,22 @@ export function LaunchAtLoginRow({ prefs, setPrefs }) {
   `;
 }
 
-export function TabBehaviorRow({ prefs, setPrefs }) {
+export function DesktopNotificationsRow({ prefs, setPrefs }) {
   if (!prefs) return html`<p class="empty-note">Loading…</p>`;
   function handleChange(enabled) {
-    setPrefs({ ...prefs, reuseTabs: enabled });
-    window.clanceApp.setReuseTabs(enabled);
+    setPrefs({ ...prefs, desktopNotifications: enabled });
+    window.clanceApp.setDesktopNotifications(enabled);
   }
   return html`
     <div class="preference-row">
       <div>
-        <div class="preference-title">Tab Behavior</div>
-        <div class="preference-description">Reuse existing tabs when opening the same resource.</div>
+        <div class="preference-title">Desktop Notifications</div>
+        <div class="preference-description">
+          Notify when a Clance session finishes responding. Shows as "Script Editor" — a macOS
+          quirk of how the CLI sends these, not something Clance can rename.
+        </div>
       </div>
-      <${Toggle} checked=${prefs.reuseTabs} onChange=${handleChange} />
+      <${Toggle} checked=${prefs.desktopNotifications} onChange=${handleChange} />
     </div>
   `;
 }

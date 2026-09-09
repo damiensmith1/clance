@@ -145,7 +145,7 @@ ipcMain.handle(
 
 ipcMain.handle("settings:get-preferences", () => ({
   launchOnLogin: getLaunchOnLogin(),
-  reuseTabs: readConfig().reuseTabs,
+  desktopNotifications: readConfig().desktopNotifications,
 }));
 
 ipcMain.handle("settings:set-launch-on-login", (_event, enabled: boolean) => {
@@ -153,11 +153,11 @@ ipcMain.handle("settings:set-launch-on-login", (_event, enabled: boolean) => {
   return getLaunchOnLogin();
 });
 
-ipcMain.handle("settings:set-reuse-tabs", (_event, enabled: boolean) => {
+ipcMain.handle("settings:set-desktop-notifications", (_event, enabled: boolean) => {
   const config = readConfig();
-  config.reuseTabs = enabled;
+  config.desktopNotifications = enabled;
   writeConfig(config);
-  return config.reuseTabs;
+  return config.desktopNotifications;
 });
 
 ipcMain.handle("layout:get", () => readWindowLayout());

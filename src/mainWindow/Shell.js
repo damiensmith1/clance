@@ -306,7 +306,6 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
 
 export function Shell() {
   const state = usePaneState();
-  const [reuseTabs, setReuseTabs] = useState(true);
   const [claudeConnected, setClaudeConnected] = useState(null);
   const [dragTab, setDragTab] = useState(null);
   const paneAreaRef = useRef(null);
@@ -468,7 +467,6 @@ export function Shell() {
   }
 
   useEffect(() => {
-    window.clanceApp.getPreferences().then((prefs) => setReuseTabs(prefs.reuseTabs));
     window.clanceApp.getSetupStatus().then((status) => setClaudeConnected(status.claude.loggedIn));
     hydrateFromDisk();
   }, []);
@@ -482,21 +480,21 @@ export function Shell() {
       await window.clanceApp.reparentTerminal(terminalId);
       openTab(
         { id: terminalId, type: "terminal", label: title ?? "New Chat", icon: "terminal", terminalId, args },
-        { paneId: getState().activePaneId, reuseTabs }
+        { paneId: getState().activePaneId }
       );
     });
-  }, [reuseTabs]);
+  }, []);
 
   function openSection(id) {
     const item = LAUNCHER_ITEMS.find((i) => i.id === id);
-    openTab({ id, type: id, label: item.label, icon: item.icon }, { paneId: state.activePaneId, reuseTabs });
+    openTab({ id, type: id, label: item.label, icon: item.icon }, { paneId: state.activePaneId });
   }
 
   function openNewChatTab() {
     const terminalId = nextTerminalId();
     openTab(
       { id: terminalId, type: "terminal", label: "New Chat", icon: "terminal", terminalId, args: [] },
-      { paneId: state.activePaneId, reuseTabs }
+      { paneId: state.activePaneId }
     );
   }
 
@@ -508,7 +506,7 @@ export function Shell() {
     const args = await window.clanceApp.resolveOpenArgs(session.id);
     openTab(
       { id: `chat:${session.filePath}`, type: "terminal", label: session.title, icon: "terminal", terminalId, args },
-      { paneId: state.activePaneId, reuseTabs }
+      { paneId: state.activePaneId }
     );
   }
 
