@@ -174,16 +174,29 @@ as app-level mediation.
 - **Mechanism:** `src/main/insertTextServer.ts` runs a local
   MCP-over-HTTP server (`@modelcontextprotocol/sdk`, stateless Streamable
   HTTP transport, `127.0.0.1` + a random port picked fresh per app launch)
-  inside Electron's main process, exposing one tool: `insert_text(text)`.
-  The handler calls `typeIntoCapturedWindow()` in `src/main/frontApp.ts`
-  (previously dead code, written in anticipation of exactly this), which
-  refocuses the window captured by `captureFrontmostWindow()` right before
-  the popup stole focus, then delivers the text via a clipboard paste
-  (write to clipboard, simulate Cmd+V via `@nut-tree-fork/nut-js`, restore
-  the previous clipboard contents ~500ms later) rather than simulating each
+  inside Electron's main process, exposing two tools: `insert_text(text,
+  app?)` and `list_open_windows()`. The handler calls
+  `typeIntoCapturedWindow()` in `src/main/frontApp.ts` (previously dead
+  code, written in anticipation of exactly this), which refocuses the
+  window captured by `captureFrontmostWindow()` right before the popup
+  stole focus, then delivers the text via a clipboard paste (write to
+  clipboard, simulate Cmd+V via `@nut-tree-fork/nut-js`, restore the
+  previous clipboard contents ~500ms later) rather than simulating each
   keystroke — `keyboard.type()` was tried first but is noticeably slow for
   anything longer than a sentence, since it sends one synthetic keypress
   per character.
+- **Redirecting to a different app than the one captured at invocation**
+  (e.g. "put this in Slack" while looking at something else — previously a
+  dead end, `insert_text` could only ever target the window captured at
+  hotkey-press): `insert_text` takes an optional `app` string, a
+  case-insensitive substring matched against open window titles via
+  `getWindows()` (`findWindowByTitleHint()` in `frontApp.ts`); when it
+  matches, that window is focused instead of the captured one. `list_open_
+  windows` exposes `getWindows()`'s titles as its own tool so the CLI can
+  see what's actually running (and what its title looks like) before
+  picking an `app` value, rather than guessing. Read-only, so it isn't
+  gated on Accessibility the way typing is — though in practice it's only
+  ever useful alongside `insert_text`, which already requires it.
 - **Auth:** the port is random but not secret, so every request is checked
   against a random per-launch bearer token (`crypto.randomBytes`, compared
   with `timingSafeEqual`) passed to the CLI via `--mcp-config`'s `headers`,

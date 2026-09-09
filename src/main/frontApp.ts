@@ -55,6 +55,42 @@ export async function captureSelectedText(): Promise<string | undefined> {
   }
 }
 
+// Lists every currently open window's title, so the CLI can see what's
+// running and ask to redirect insert_text there by name (e.g. "put this in
+// Slack" while the captured/frontmost window is something else entirely) —
+// otherwise insert_text can only ever type into whatever was frontmost the
+// moment the hotkey was pressed. Best-effort/no permission check of its own:
+// it's read-only (no keystroke injection), but in practice only ever called
+// alongside insert_text, which is already gated on Accessibility.
+export async function listOpenWindows(): Promise<string[]> {
+  try {
+    const { getWindows } = await import("@nut-tree-fork/nut-js");
+    const windows = await getWindows();
+    const titles = await Promise.all(windows.map((w) => w.title.catch(() => "")));
+    return titles.map((t) => t.trim()).filter((t) => t.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+// Finds the first open window whose title contains `hint` (case-insensitive
+// substring — window titles are things like "Slack | #general", so an exact
+// match would be brittle), for insert_text's optional app-redirect.
+async function findWindowByTitleHint(hint: string): Promise<Window | null> {
+  try {
+    const { getWindows } = await import("@nut-tree-fork/nut-js");
+    const windows = await getWindows();
+    const needle = hint.toLowerCase();
+    for (const w of windows) {
+      const title = await w.title.catch(() => "");
+      if (title.toLowerCase().includes(needle)) return w;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // Pastes rather than simulates individual keystrokes — `keyboard.type()`
 // sends one synthetic keypress per character with a fixed inter-key delay,
 // which is noticeably slow for anything longer than a sentence and gets
@@ -62,12 +98,19 @@ export async function captureSelectedText(): Promise<string | undefined> {
 // whole string in one OS-level event regardless of length, at the cost of
 // briefly overwriting the user's clipboard — restored a moment later, once
 // the paste has had time to land.
-export async function typeIntoCapturedWindow(text: string): Promise<void> {
+//
+// `appHint`, when given, retargets the paste at the first open window whose
+// title matches it instead of the window captured at hotkey-press — how a
+// session redirects output to an app other than the one it was invoked
+// over (see listOpenWindows above). Falls back to the captured window if no
+// match is found, same as if no hint were given at all.
+export async function typeIntoCapturedWindow(text: string, appHint?: string): Promise<void> {
   const { keyboard, Key } = await import("@nut-tree-fork/nut-js");
 
-  if (capturedWindow) {
+  const target = (appHint && (await findWindowByTitleHint(appHint))) || capturedWindow;
+  if (target) {
     try {
-      await capturedWindow.focus();
+      await target.focus();
       // OS-level focus changes aren't always instantaneous; give the
       // target app a moment to actually receive the focus before typing.
       await new Promise((resolve) => setTimeout(resolve, 150));

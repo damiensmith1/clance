@@ -4,7 +4,7 @@ import { randomBytes, timingSafeEqual } from "crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import * as z from "zod";
-import { typeIntoCapturedWindow } from "./frontApp";
+import { typeIntoCapturedWindow, listOpenWindows } from "./frontApp";
 
 // Gives a Clance-launched terminal session (the real `claude` CLI, not the
 // Agent SDK — see docs/design.md "Terminal-embedding architecture") a way to
@@ -41,16 +41,28 @@ function createMcpServer(): McpServer {
     "insert_text",
     {
       description:
-        "Types text into the app the user had focused right before they opened this Clance popup " +
-        "(e.g. an email compose window, a chat message box, a document). Delivers it at the OS level " +
-        "(a clipboard paste), so it lands wherever that app's cursor/focus currently is — it does not " +
-        "scroll to or click any particular field first. Use this when the user asks you to write, draft, " +
-        "or insert something into the app they were just using, rather than printing it in this terminal.",
-      inputSchema: { text: z.string().describe("The exact text to type, verbatim.") },
+        "Types text into an app running on the user's Mac. Delivers it at the OS level (a clipboard " +
+        "paste), so it lands wherever that app's cursor/focus currently is — it does not scroll to or " +
+        "click any particular field first. Use this when the user asks you to write, draft, or insert " +
+        "something into an app, rather than printing it in this terminal.\n\n" +
+        "By default this targets the app the user had focused right before they opened this Clance " +
+        "popup. To send it somewhere else instead (e.g. the user says 'put this in Slack' while looking " +
+        "at something else), pass `app` with a name/substring of the target window's title — call " +
+        "list_open_windows first if you need to see what's actually open and what its title looks like.",
+      inputSchema: {
+        text: z.string().describe("The exact text to type, verbatim."),
+        app: z
+          .string()
+          .optional()
+          .describe(
+            "Case-insensitive substring to match against open window titles, to redirect the text to a " +
+              "different app than the one focused when the popup opened. Omit to use that default app."
+          ),
+      },
     },
-    async ({ text }) => {
+    async ({ text, app }) => {
       try {
-        await typeIntoCapturedWindow(text);
+        await typeIntoCapturedWindow(text, app);
         return { content: [{ type: "text" as const, text: "Typed." }] };
       } catch (error) {
         return {
@@ -58,6 +70,28 @@ function createMcpServer(): McpServer {
           isError: true,
         };
       }
+    }
+  );
+
+  server.registerTool(
+    "list_open_windows",
+    {
+      description:
+        "Lists the titles of the user's currently open app windows. Use this to find the right value " +
+        "for insert_text's `app` parameter when the user wants text sent to an app other than the one " +
+        "that was focused when this Clance popup opened.",
+      inputSchema: {},
+    },
+    async () => {
+      const titles = await listOpenWindows();
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: titles.length > 0 ? titles.join("\n") : "No open windows found.",
+          },
+        ],
+      };
     }
   );
 
