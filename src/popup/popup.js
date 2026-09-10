@@ -339,14 +339,39 @@ openInAppBtn.addEventListener("click", () => {
   window.clance.openInApp(terminalId, args);
 });
 
+// Shown the instant the widget appears, before the real terminal args (or
+// picker context) are ready — see toggleClancePopup/togglePopupPicker in
+// popupWindow.ts, which send this first so the window is never just a blank
+// frame while that work is still in flight.
+function showLoading() {
+  teardownTerminal();
+  appEl.classList.add("has-messages");
+  const placeholder = document.createElement("div");
+  placeholder.className = "note";
+  placeholder.textContent = "Starting…";
+  termInnerEl.replaceChildren(placeholder);
+}
+
 window.clance.onShown((payload) => {
+  // togglePopupPicker sends an empty-context "picker" payload immediately,
+  // then a second one once the real context text/preview lands — that
+  // second arrival shouldn't reset the search box or refetch the list out
+  // from under someone who's already typing/browsing.
+  const alreadyBrowsingPicker = payload.mode === "picker" && appEl.classList.contains("picker-active");
+
   appEl.classList.remove("has-messages", "picker-active");
   renderContextPreview(payload.contextPreview);
 
-  if (payload.mode === "picker") {
+  if (payload.mode === "loading") {
+    showLoading();
+  } else if (payload.mode === "picker") {
     pickerContextText = payload.contextText;
-    teardownTerminal();
-    showPicker();
+    if (!alreadyBrowsingPicker) {
+      teardownTerminal();
+      showPicker();
+    } else {
+      appEl.classList.add("picker-active");
+    }
   } else {
     openTerminal(payload.args);
   }

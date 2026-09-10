@@ -23,6 +23,10 @@ type ContextPreview = {
 };
 
 type PopupShownPayload =
+  // Sent the instant the window appears, before any of the context-capture/
+  // agent-spawn work below has even started — so the widget is never just a
+  // blank frame while the user waits on that chain (see toggleClancePopup).
+  | { mode: "loading" }
   | { mode: "new"; args: string[]; contextPreview?: ContextPreview }
   | { mode: "picker"; contextText: string; contextPreview?: ContextPreview };
 
@@ -109,11 +113,12 @@ function positionNearCursor(win: BrowserWindow): void {
 
 ipcMain.on("popup:close", () => hidePopup());
 
-// windowTitle/screenshotPath are already resolved by the caller (they both
-// need the frontmost window captured before .show()/.focus() steal focus
-// onto the popup itself — the same capture also backs the insert_text MCP
-// tool, see insertTextMcpArgs below).
-async function showPopup(payload: PopupShownPayload): Promise<void> {
+// Shows the window itself with nothing more than that — no context capture,
+// no agent spawn — so the widget appears the instant the hotkey is pressed
+// instead of after however long that other work takes (see
+// toggleClancePopup, which sends a "loading" payload right after this
+// resolves, then fills in the real one once it's ready).
+async function ensurePopupWindow(): Promise<void> {
   if (!popup || popup.isDestroyed()) {
     popup = createPopup();
   }
@@ -123,7 +128,13 @@ async function showPopup(payload: PopupShownPayload): Promise<void> {
   if (!userHasRepositioned) positionNearCursor(popup);
   popup.show();
   popup.focus();
-  popup.webContents.send("popup-shown", payload);
+}
+
+// popup.webContents.send() silently drops the event if the window isn't
+// showing yet — always call ensurePopupWindow() (and await popupReady via
+// it) first.
+function sendToPopup(payload: PopupShownPayload): void {
+  popup?.webContents.send("popup-shown", payload);
   currentMode = payload.mode;
 }
 
@@ -222,11 +233,35 @@ async function insertTextMcpArgs(): Promise<string[]> {
   ];
 }
 
+// Set for the duration of the capture/spawn chain below — the widget now
+// appears (in a "loading" state) before that chain finishes, which invites
+// a second hotkey press while it's still in flight; without this, that
+// second press would race a second `claude --bg` spawn against the first.
+let opening = false;
+
 export async function toggleClancePopup(): Promise<void> {
   if (popup && !popup.isDestroyed() && popup.isVisible() && currentMode === "new") {
     hidePopup();
     return;
   }
+  if (opening) return;
+  opening = true;
+  try {
+    await toggleClancePopupInner();
+  } finally {
+    opening = false;
+  }
+}
+
+async function toggleClancePopupInner(): Promise<void> {
+  // Show the window (and a lightweight loading state) before doing any of
+  // the work below — permission checks, screenshot/selection capture, and
+  // spawning a whole new `claude --bg` process each take real time, and
+  // none of them should hold up the widget actually appearing on the
+  // hotkey press.
+  await ensurePopupWindow();
+  sendToPopup({ mode: "loading" });
+
   // insertTextMcpArgs first — buildContextText needs to know whether the
   // tool is available so it can only tell the model about it when it is.
   // Its own Accessibility check also gates whether to attempt a selection
@@ -250,7 +285,10 @@ export async function toggleClancePopup(): Promise<void> {
     "off",
     ...mcpArgs,
   ]);
-  showPopup({
+  // The user may have hit the hotkey again (hiding the widget) while all of
+  // the above was in flight — don't resurrect it out from under them.
+  if (currentMode !== "loading") return;
+  sendToPopup({
     mode: "new",
     args: ["attach", id],
     contextPreview: preview,
@@ -263,7 +301,8 @@ export async function toggleClancePopup(): Promise<void> {
 // (mid-conversation, possibly resumed/attached), so there's no "just
 // invoked via hotkey" moment to describe.
 export async function openPopupWithArgs(args: string[]): Promise<void> {
-  await showPopup({ mode: "new", args });
+  await ensurePopupWindow();
+  sendToPopup({ mode: "new", args });
 }
 
 export async function togglePopupPicker(): Promise<void> {
@@ -271,6 +310,14 @@ export async function togglePopupPicker(): Promise<void> {
     hidePopup();
     return;
   }
+  // Show the picker immediately with an empty context — the list itself
+  // (popup.js's showPicker) fetches independently and doesn't need this,
+  // and the user needs at least a moment to browse/search before clicking
+  // a row anyway, so the real context text below has time to land before
+  // it's actually needed.
+  await ensurePopupWindow();
+  sendToPopup({ mode: "picker", contextText: "" });
+
   // Resumed sessions can't reliably take a fresh --append-system-prompt:
   // the CLI only honors it if the session's *original* launch had
   // --system-prompt-snapshot off, which is true for sessions Clance itself
@@ -284,5 +331,6 @@ export async function togglePopupPicker(): Promise<void> {
   // Accessibility gate), so it rides along in the typed context same as
   // toggleClancePopup's.
   const { text: contextText, preview } = await captureContextText(false, checkPermissions().accessibility);
-  showPopup({ mode: "picker", contextText, contextPreview: preview });
+  if (currentMode !== "picker") return;
+  sendToPopup({ mode: "picker", contextText, contextPreview: preview });
 }

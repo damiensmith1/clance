@@ -372,6 +372,24 @@ Clance-specific is the window chrome and which session gets opened:
   preloaded a rendered transcript before showing a custom input) no longer
   applies — resuming just opens the terminal directly, the CLI renders its
   own history.
+- **The window itself always appears instantly, before any of the async
+  work behind either mode.** `toggleClancePopup`/`togglePopupPicker` used
+  to await the whole context-capture chain (permission check, screenshot,
+  simulated-Cmd+C selection capture) — and, for `"new"`, minting a real
+  `claude --bg` background agent on top of that — before ever calling
+  `popup.show()`, so the hotkey press produced no visible feedback at all
+  until that entire chain finished (occasionally a couple of seconds).
+  Fixed by splitting window-show (`ensurePopupWindow()`) from payload-send
+  (`sendToPopup()`): the window now shows immediately with a transient
+  `{ mode: "loading" }` payload (popup.js renders a plain "Starting…"
+  placeholder in the terminal area), and the real `"new"`/`"picker"`
+  payload — with the actual `attach`/`--resume` args and context preview —
+  follows once that async work resolves. A module-level `opening` flag on
+  `toggleClancePopup` guards against a second hotkey press mid-flight
+  spawning a second background agent; a `currentMode` check right before
+  each deferred `sendToPopup()` call skips it if the widget was explicitly
+  dismissed (or, for the picker, reused for the other mode) while the work
+  was still in flight, so it can't pop back up after the user closed it.
 - **Two hotkeys** (`src/main/shortcuts.ts`), unchanged in shape from the
   earlier design: "New Conversation" (`togglePopup`, `Option+Space`) opens
   mode `"new"`; "Continue a Conversation" (`togglePopupPicker`, default
@@ -465,8 +483,9 @@ Clance-specific is the window chrome and which session gets opened:
   not the tab bar, to avoid crowding the tab's close button) that closes
   the tab and reopens its session in the popup via a new
   `popup:open-with-args` IPC call → `openPopupWithArgs()`
-  (`src/main/popupWindow.ts`), a thin `showPopup({ mode: "new", args })`
-  with no screen-context capture (the session already exists — there's no
+  (`src/main/popupWindow.ts`), a thin `ensurePopupWindow()` +
+  `sendToPopup({ mode: "new", args })` with no screen-context capture (the
+  session already exists — there's no
   "just invoked via hotkey" moment to describe). Only shown once the tab
   has real resume/attach args; a brand-new, never-yet-run chat has no
   session id yet to hand the popup, so popping it out would silently

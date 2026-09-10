@@ -38,5 +38,6 @@ type ContextPreview = {
 };
 
 type PopupShownPayload =
+  | { mode: "loading" }
   | { mode: "new"; args: string[]; contextPreview?: ContextPreview }
   | { mode: "picker"; contextText: string; contextPreview?: ContextPreview };
