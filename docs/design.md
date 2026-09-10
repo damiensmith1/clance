@@ -39,7 +39,13 @@ first-party surface rather than a second implementation of it.
   resolved once via a literal, non-interpolated login-shell echo
   (`$SHELL -ilc "echo -n $PATH"`) and cached, since GUI-launched apps
   inherit launchd's minimal PATH and would otherwise fail to find `claude`
-  itself. Every spawned terminal also gets
+  itself. That resolution can itself be slow — an interactive login shell
+  sourcing `.zshrc`/`.zprofile`/nvm/etc. — so `warmLoginShellPath()` (the
+  same lookup via non-blocking `execFile` instead of `getLoginShellPath()`'s
+  blocking `execFileSync`) is fired once at app startup (`index.ts`'s
+  `app.whenReady()`) to get it cached well before anything's actually on the
+  hook waiting for it, e.g. the popup widget's hotkey path. Every spawned
+  terminal also gets
   `CLAUDE_CODE_AUTO_CONNECT_IDE: "false"` in its env — without it, the CLI
   auto-connects to a running VS Code/JetBrains session and shows whatever
   file that editor happens to have open in its status line, which has
@@ -390,6 +396,19 @@ Clance-specific is the window chrome and which session gets opened:
   each deferred `sendToPopup()` call skips it if the widget was explicitly
   dismissed (or, for the picker, reused for the other mode) while the work
   was still in flight, so it can't pop back up after the user closed it.
+  Within that async work, `insertTextMcpArgs()` (its slow part —
+  `ensureInsertTextServer()` — only matters for the CLI flags, not for the
+  accessibility boolean context capture needs, which `checkPermissions()`
+  itself answers synchronously) and `captureContextText()` now run
+  concurrently rather than the latter waiting on the former, since neither
+  actually depends on the other's result. `spawnBackgroundAgent()` still
+  has to wait for `captureContextText()`'s result specifically — the
+  captured context is baked into `--append-system-prompt` at spawn time, so
+  the CLI process can't be started before it's known without giving up the
+  invisible-injection design (see "Context injection" above) — that
+  remaining serialization is the next thing to look at if this isn't enough
+  (see `warmLoginShellPath()` below for one piece of it that *was*
+  removable).
 - **Two hotkeys** (`src/main/shortcuts.ts`), unchanged in shape from the
   earlier design: "New Conversation" (`togglePopup`, `Option+Space`) opens
   mode `"new"`; "Continue a Conversation" (`togglePopupPicker`, default

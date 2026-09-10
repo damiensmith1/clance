@@ -262,13 +262,19 @@ async function toggleClancePopupInner(): Promise<void> {
   await ensurePopupWindow();
   sendToPopup({ mode: "loading" });
 
-  // insertTextMcpArgs first — buildContextText needs to know whether the
-  // tool is available so it can only tell the model about it when it is.
-  // Its own Accessibility check also gates whether to attempt a selection
-  // capture (same underlying mechanism — see captureContextText).
-  const mcpArgs = await insertTextMcpArgs();
-  const accessibilityGranted = mcpArgs.length > 0;
-  const { text: contextText, preview } = await captureContextText(accessibilityGranted, accessibilityGranted);
+  // checkPermissions() itself is synchronous — only insertTextMcpArgs's own
+  // ensureInsertTextServer() call is actually async, and that async part
+  // doesn't affect this boolean, so it doesn't need to be awaited before
+  // context capture can start. Running insertTextMcpArgs() and
+  // captureContextText() concurrently (rather than the latter waiting on
+  // the former) shaves whatever ensureInsertTextServer takes — noticeable
+  // on the very first popup open, when it hasn't started its HTTP server
+  // yet — off the total wait.
+  const accessibilityGranted = checkPermissions().accessibility;
+  const [mcpArgs, { text: contextText, preview }] = await Promise.all([
+    insertTextMcpArgs(),
+    captureContextText(accessibilityGranted, accessibilityGranted),
+  ]);
   // A brand-new session has no prior recorded system-prompt snapshot, so
   // this rides in invisibly — --system-prompt-snapshot off makes sure that
   // stays true on any *future* resume of this exact session too (see

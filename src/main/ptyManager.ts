@@ -1,6 +1,6 @@
 import * as pty from "node-pty";
 import { BrowserWindow } from "electron";
-import { execFileSync } from "child_process";
+import { execFile, execFileSync } from "child_process";
 
 // `win` is mutable per-session (not just captured at spawn time) so a
 // session can be reparented to a different window after the fact — see
@@ -28,6 +28,23 @@ export function getLoginShellPath(): string {
     resolvedPath = process.env.PATH || "";
   }
   return resolvedPath;
+}
+
+// Fire-and-forget: resolves the same PATH as getLoginShellPath(), but via
+// the non-blocking execFile rather than execFileSync — call this once,
+// early, at app startup so the (potentially slow — an interactive login
+// shell can take a while to source .zshrc/.zprofile/nvm/etc.) shell spin-up
+// has already happened by the time anything actually needs the PATH, e.g.
+// the popup widget's hotkey-triggered `claude --bg` spawn. Harmless no-op
+// if getLoginShellPath() already resolved it (synchronously, on demand)
+// first — this only ever fills the same cache, never races it unsafely,
+// since the last write wins and both branches compute the same value.
+export function warmLoginShellPath(): void {
+  if (resolvedPath) return;
+  const shell = process.env.SHELL || "/bin/zsh";
+  execFile(shell, ["-ilc", "echo -n $PATH"], { encoding: "utf8" }, (err, stdout) => {
+    if (!err && stdout) resolvedPath = stdout.trim();
+  });
 }
 
 export function createPtySession(

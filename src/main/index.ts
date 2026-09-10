@@ -20,7 +20,7 @@ import { setSessionArchived } from "./archivedSessions";
 import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
 import { listSkills, setSkillEnabled } from "./skills";
 import { listMcpServers, setMcpServerEnabled } from "./mcpConfig";
-import { createPtySession, writeToPty, resizePty, killPty, reparentPty } from "./ptyManager";
+import { createPtySession, writeToPty, resizePty, killPty, reparentPty, warmLoginShellPath } from "./ptyManager";
 import { resolveOpenArgs, spawnBackgroundAgent, stopAgent, listAgents } from "./agentSessions";
 import { copyDroppedFile } from "./dropFiles";
 import { readWindowLayout, writeWindowLayout } from "./windowLayout";
@@ -44,6 +44,12 @@ function registerAllHotkeys(shortcuts: Record<string, string>): void {
 
 app.whenReady().then(async () => {
   ensureSessionCwd();
+  // Resolves and caches the login-shell PATH `claude --bg` needs (see
+  // ptyManager.ts) well before the popup widget's hotkey ever fires it on
+  // demand — that resolution can itself be slow (an interactive login
+  // shell sourcing .zshrc/.zprofile/nvm/etc.), and doing it now instead of
+  // on the widget's critical path is pure upside.
+  warmLoginShellPath();
 
   Menu.setApplicationMenu(createAppMenu());
   createTray(handleTrayPopupClick, openMainWindow);
