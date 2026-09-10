@@ -360,12 +360,6 @@ function showLoading() {
 }
 
 window.clance.onShown((payload) => {
-  // togglePopupPicker sends an empty-context "picker" payload immediately,
-  // then a second one once the real context text/preview lands — that
-  // second arrival shouldn't reset the search box or refetch the list out
-  // from under someone who's already typing/browsing.
-  const alreadyBrowsingPicker = payload.mode === "picker" && appEl.classList.contains("picker-active");
-
   appEl.classList.remove("has-messages", "picker-active");
   renderContextPreview(payload.contextPreview);
 
@@ -373,12 +367,8 @@ window.clance.onShown((payload) => {
     showLoading();
   } else if (payload.mode === "picker") {
     pickerContextText = payload.contextText;
-    if (!alreadyBrowsingPicker) {
-      teardownTerminal();
-      showPicker();
-    } else {
-      appEl.classList.add("picker-active");
-    }
+    teardownTerminal();
+    showPicker();
   } else {
     openTerminal(payload.args);
   }
