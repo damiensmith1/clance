@@ -17,7 +17,7 @@ export type ClanceConfig = {
 const CONFIG_PATH = join(SESSION_CWD, "config.json");
 
 const DEFAULT_CONFIG: ClanceConfig = {
-  shortcuts: { togglePopup: "Alt+Space", sessionPicker: "Alt+Shift+Command+Space" },
+  shortcuts: { togglePopup: "Alt+Space" },
   shortcutsConfigured: false,
   enabledSkills: [],
 };
@@ -30,8 +30,10 @@ export function readConfig(): ClanceConfig {
       ...DEFAULT_CONFIG,
       ...stored,
       // Shallow-merging the top level alone lets an on-disk config saved
-      // before a new shortcut was added (e.g. sessionPicker) wipe out that
-      // key entirely, since it replaces the whole shortcuts object.
+      // before a new shortcut was added wipe out that key entirely, since
+      // it replaces the whole shortcuts object. (An on-disk config from
+      // before a shortcut was *removed* — e.g. the old sessionPicker — just
+      // carries a harmless, no-longer-read extra key here.)
       shortcuts: { ...DEFAULT_CONFIG.shortcuts, ...stored.shortcuts },
     };
   } catch {

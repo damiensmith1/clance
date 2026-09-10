@@ -85,9 +85,9 @@ status: draft
 8. The CLI itself writes the session transcript (JSONL, its own native
    format) — Clance never writes session files
 9. The terminal session persists exactly as long as the user keeps it
-   open/running — reopening the popup's "new" hotkey always opens a fresh
-   terminal/session; the "continue a conversation" hotkey opens the picker
-   to resume or attach to an existing one
+   open/running — the popup's one hotkey always opens a fresh
+   terminal/session; its "Open in…" dropdown resumes or attaches to an
+   existing one instead, in place, without a separate hotkey
 10. User can reopen the app's Chats tab to browse any past session
     (Clance's own or any real Claude Code CLI session on the machine) and
     open it as a resumed terminal tab
@@ -161,10 +161,10 @@ status: draft
     (simulated Cmd+C, read back off the clipboard — see `docs/design.md`
     §"Highlighted-selection capture"), folded into the request context with
     an instruction to treat it as the primary subject of the request.
-    Captured on both hotkeys (Option+Space and the "Continue a
-    Conversation" picker); delivered invisibly for a brand-new session,
-    typed visibly into the terminal for a resumed one — same split as the
-    rest of this section's context.
+    Captured both when the hotkey opens a brand-new session and when the
+    widget's "Open in…" dropdown switches to an existing one; delivered
+    invisibly for the former, typed visibly into the terminal for the
+    latter — same split as the rest of this section's context.
 - Read-only and on-demand — never persistent/background capture, unchanged
   from the original plan
 - Accessibility-tree / focused-element content read is still deferred —
@@ -196,9 +196,10 @@ status: draft
   whatever app was frontmost when the popup opened — see
   `docs/design.md` §"Text-insertion tool (`insert_text`)". The model decides
   when to call it, the same way it decides to call any other tool; there's
-  no app-level accept/reject step. For every other flow (resumed/picker
-  sessions, or just talking in the terminal), Clance still doesn't mediate
-  text delivery — same as any terminal-based Claude Code session.
+  no app-level accept/reject step. For every other flow (a resumed session
+  opened via the widget's "Open in…" dropdown, or just talking in the
+  terminal), Clance still doesn't mediate text delivery — same as any
+  terminal-based Claude Code session.
 
 ### Multi-turn conversations
 
@@ -206,16 +207,18 @@ status: draft
   its underlying `claude` process/session, the same as any terminal-based
   Claude Code usage — there is no separate app-level "conversation state"
   to reason about anymore.
-- **The default hotkey opens a new session; a second hotkey resumes one.**
+- **One hotkey opens a new session; an in-widget dropdown resumes one.**
   `Option+Space` opens a fresh terminal running a brand-new `claude`
-  session (no `--resume`). `Option+Shift+Command+Space` ("Continue a
-  Conversation" in Settings) opens the popup in a searchable session-picker
-  mode instead — picking a session opens a terminal that resumes (or
-  attaches to, if it's a live background agent — see
-  `docs/design.md` §"Attach vs. resume") that session, with context typed
-  visibly into the terminal input rather than injected invisibly (see
-  `docs/design.md` §"Context injection" for why resumed sessions need a
-  different delivery path than new ones).
+  session (no `--resume`) — there is no separate hotkey for resuming
+  anymore (an earlier "Continue a Conversation" hotkey/searchable-picker
+  mode was removed in favor of this). Instead, the widget's toolbar has an
+  "Open in…" button that opens a small anchored dropdown (search + list,
+  not a full mode swap) over the current conversation; picking a session
+  from it opens a terminal that resumes (or attaches to, if it's a live
+  background agent — see `docs/design.md` §"Attach vs. resume") that
+  session in place, with context typed visibly into the terminal input
+  rather than injected invisibly (see `docs/design.md` §"Context injection"
+  for why resumed sessions need a different delivery path than new ones).
 - **A session can also be continued directly from the main window's Chats
   tab** — clicking a session row opens the same kind of resumed/attached
   terminal tab, just without the popup's screen-context capture (there's

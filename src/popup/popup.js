@@ -2,8 +2,11 @@ import { filePathsToPastePayload } from "../shared/dragDropPaste.js";
 
 const appEl = document.getElementById("app");
 const termInnerEl = document.getElementById("term-inner");
-const pickerSearchEl = document.getElementById("picker-search");
-const pickerListEl = document.getElementById("picker-list");
+const openInWrapEl = document.getElementById("open-in-wrap");
+const openInBtn = document.getElementById("open-in-btn");
+const openInDropdownEl = document.getElementById("open-in-dropdown");
+const openInSearchEl = document.getElementById("open-in-search");
+const openInListEl = document.getElementById("open-in-list");
 const closeBtn = document.getElementById("close-btn");
 const openInAppBtn = document.getElementById("open-in-app-btn");
 const contextLinkEl = document.getElementById("context-link");
@@ -17,8 +20,14 @@ const contextDialogSystemPromptLabelEl = document.getElementById("context-dialog
 const contextDialogSystemPromptEl = document.getElementById("context-dialog-system-prompt");
 const contextDialogEmptyEl = document.getElementById("context-dialog-empty");
 
-let allSessions = [];
-let pickerContextText = "";
+let openInSessions = [];
+// The flattened system-prompt text from whatever context was captured when
+// this widget was last opened/shown — reused as the visible typed context
+// for a session switched to via the "Open in…" dropdown (see openTerminal's
+// visibleContext param), rather than capturing fresh context for that,
+// which would need the widget to disappear again first (see
+// popupWindow.ts's capture-before-reveal ordering) just to switch tabs.
+let currentSystemPromptText = "";
 let term = null;
 let fitAddon = null;
 let activeTerminalId = null;
@@ -94,7 +103,6 @@ function openTerminal(args, visibleContext) {
   // clear here too, or it lingers alongside the real terminal once this
   // opens.
   termInnerEl.replaceChildren();
-  appEl.classList.remove("picker-active");
   appEl.classList.add("has-messages");
   activeArgs = args;
 
@@ -181,58 +189,82 @@ function openTerminal(args, visibleContext) {
   }
 }
 
-function renderPickerList(sessions) {
-  pickerListEl.replaceChildren();
+function renderOpenInList(sessions) {
+  openInListEl.replaceChildren();
   if (sessions.length === 0) {
     const empty = document.createElement("div");
     empty.className = "note";
     empty.textContent = "No matching conversations.";
-    pickerListEl.appendChild(empty);
+    openInListEl.appendChild(empty);
     return;
   }
   for (const session of sessions.slice(0, 30)) {
     const row = document.createElement("button");
-    row.className = "picker-row";
+    row.className = "open-in-row";
 
     const title = document.createElement("span");
-    title.className = "picker-row-title";
+    title.className = "open-in-row-title";
     title.textContent = session.title;
 
     const meta = document.createElement("span");
-    meta.className = "picker-row-meta";
+    meta.className = "open-in-row-meta";
     meta.textContent = `${session.projectLabel} · ${relativeTime(session.lastModified)}`;
 
     row.appendChild(title);
     row.appendChild(meta);
     row.addEventListener("click", async () => {
+      closeOpenInDropdown();
       const args = await window.clance.resolveOpenArgs(session.id, session.title);
-      openTerminal(args, pickerContextText);
+      openTerminal(args, currentSystemPromptText);
     });
-    pickerListEl.appendChild(row);
+    openInListEl.appendChild(row);
   }
 }
 
-function showPicker() {
-  appEl.classList.add("picker-active");
-  appEl.classList.remove("has-messages");
-  pickerSearchEl.value = "";
+function openOpenInDropdown() {
+  openInDropdownEl.classList.add("open");
+  openInSearchEl.value = "";
   window.clance.listChatSessions().then((sessions) => {
-    allSessions = sessions;
-    renderPickerList(sessions);
+    openInSessions = sessions;
+    renderOpenInList(sessions);
   });
-  pickerSearchEl.focus();
+  openInSearchEl.focus();
 }
 
-pickerSearchEl.addEventListener("input", () => {
-  const query = pickerSearchEl.value.trim().toLowerCase();
+function closeOpenInDropdown() {
+  openInDropdownEl.classList.remove("open");
+}
+
+openInBtn.addEventListener("click", () => {
+  if (openInDropdownEl.classList.contains("open")) {
+    closeOpenInDropdown();
+  } else {
+    openOpenInDropdown();
+  }
+});
+
+// Collapse on any click outside the button/dropdown — capture phase so this
+// runs before anything else might stop the event from bubbling.
+document.addEventListener(
+  "click",
+  (event) => {
+    if (!openInDropdownEl.classList.contains("open")) return;
+    if (openInWrapEl.contains(event.target)) return;
+    closeOpenInDropdown();
+  },
+  true
+);
+
+openInSearchEl.addEventListener("input", () => {
+  const query = openInSearchEl.value.trim().toLowerCase();
   const filtered = !query
-    ? allSessions
-    : allSessions.filter(
+    ? openInSessions
+    : openInSessions.filter(
         (s) =>
           s.title.toLowerCase().includes(query) ||
           s.projectLabel.toLowerCase().includes(query)
       );
-  renderPickerList(filtered);
+  renderOpenInList(filtered);
 });
 
 // Dropping a file (a screenshot, most commonly) onto the terminal pastes
@@ -346,10 +378,10 @@ openInAppBtn.addEventListener("click", () => {
   window.clance.openInApp(terminalId, args);
 });
 
-// Shown the instant the widget appears, before the real terminal args (or
-// picker context) are ready — see toggleClancePopup/togglePopupPicker in
-// popupWindow.ts, which send this first so the window is never just a blank
-// frame while that work is still in flight.
+// Shown the instant the widget appears, before the real terminal args are
+// ready — see toggleClancePopup in popupWindow.ts, which sends this first
+// so the window is never just a blank frame while that work is still in
+// flight.
 function showLoading() {
   teardownTerminal();
   appEl.classList.add("has-messages");
@@ -360,16 +392,14 @@ function showLoading() {
 }
 
 window.clance.onShown((payload) => {
-  appEl.classList.remove("has-messages", "picker-active");
+  appEl.classList.remove("has-messages");
+  closeOpenInDropdown();
   renderContextPreview(payload.contextPreview);
 
   if (payload.mode === "loading") {
     showLoading();
-  } else if (payload.mode === "picker") {
-    pickerContextText = payload.contextText;
-    teardownTerminal();
-    showPicker();
   } else {
+    currentSystemPromptText = payload.contextPreview?.systemPrompt ?? "";
     openTerminal(payload.args);
   }
 });

@@ -103,6 +103,112 @@
         display: flex;
       }
 
+      /* "Open in…" — a plain toolbar button (unlike #context-link, this one
+         actually does something on click) that opens an anchored dropdown
+         (not a full mode swap, the way the old full-screen session picker
+         worked). Sits near the CLAUDE label on the left, with extra
+         breathing room (margin-left, beyond #toolbar's own flex gap)
+         between the two so it doesn't read as part of the label. */
+      #open-in-wrap {
+        position: relative;
+        margin-left: 4px;
+        -webkit-app-region: no-drag;
+      }
+      .toolbar-text-btn {
+        background: transparent;
+        border: none;
+        padding: 0;
+        margin: 0;
+        font: inherit;
+        font-size: 9px;
+        color: inherit;
+        cursor: pointer;
+      }
+      .toolbar-text-btn:hover {
+        color: var(--text-primary);
+      }
+      #open-in-dropdown {
+        display: none;
+        position: absolute;
+        top: 100%;
+        /* Anchored from the left edge — it sits near the left side of the
+           toolbar now, so extending rightward from the button is what
+           keeps it clear of the window's edges (the opposite reasoning
+           from #context-dialog, which sits on the right and anchors from
+           its own right edge instead). */
+        left: 0;
+        margin-top: 6px;
+        width: 460px;
+        max-height: 340px;
+        flex-direction: column;
+        gap: 6px;
+        box-sizing: border-box;
+        background: var(--surface-card);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-md);
+        box-shadow: 0 8px 30px rgba(51, 44, 34, 0.16);
+        padding: 8px;
+        text-align: left;
+        font-weight: 400;
+        letter-spacing: normal;
+        text-transform: none;
+        color: var(--text-primary);
+        font-size: 13px;
+        cursor: default;
+        z-index: 10;
+      }
+      #open-in-dropdown.open {
+        display: flex;
+      }
+      #open-in-search {
+        width: 100%;
+        box-sizing: border-box;
+        background: var(--surface-bg);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-sm);
+        color: var(--text-primary);
+        font-family: inherit;
+        font-size: 13px;
+        padding: 7px 9px;
+        outline: none;
+        flex-shrink: 0;
+      }
+      #open-in-list {
+        flex: 1 1 auto;
+        min-height: 0;
+        max-height: 280px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .open-in-row {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+        width: 100%;
+        box-sizing: border-box;
+        text-align: left;
+        background: transparent;
+        border: none;
+        border-radius: var(--radius-sm);
+        padding: 6px 8px;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .open-in-row:hover {
+        background: var(--surface-hover);
+      }
+      .open-in-row-title {
+        font-size: 13px;
+        color: var(--text-primary);
+      }
+      .open-in-row-meta {
+        font-size: 11px;
+        color: var(--text-secondary);
+      }
+
       /* Plain text, not a button — hovering reveals what was actually
          captured and handed to the CLI at invocation, so the wording
          doesn't imply a click does anything. */
@@ -207,68 +313,6 @@
         height: 100%;
       }
 
-      /* ---- Session picker mode ---- */
-      #picker {
-        display: none;
-        order: 2;
-        flex: 1 1 auto;
-        min-height: 0;
-        flex-direction: column;
-        gap: 8px;
-      }
-      #app.picker-active #picker {
-        display: flex;
-      }
-      #app.picker-active #session {
-        display: none;
-      }
-      #picker-search {
-        width: 100%;
-        box-sizing: border-box;
-        background: var(--surface-bg);
-        border: 1px solid var(--surface-border);
-        border-radius: var(--radius-md);
-        color: var(--text-primary);
-        font-family: inherit;
-        font-size: 13px;
-        padding: 8px 10px;
-        outline: none;
-        flex-shrink: 0;
-      }
-      #picker-list {
-        flex: 1 1 auto;
-        min-height: 0;
-        overflow-y: auto;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .picker-row {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 2px;
-        width: 100%;
-        box-sizing: border-box;
-        text-align: left;
-        background: transparent;
-        border: none;
-        border-radius: var(--radius-md);
-        padding: 7px 8px;
-        cursor: pointer;
-        font-family: inherit;
-      }
-      .picker-row:hover {
-        background: var(--surface-hover);
-      }
-      .picker-row-title {
-        font-size: 13px;
-        color: var(--text-primary);
-      }
-      .picker-row-meta {
-        font-size: 11px;
-        color: var(--text-secondary);
-      }
       .note {
         font-size: 12px;
         font-style: italic;
@@ -281,6 +325,15 @@
     <div id="app">
       <div id="toolbar">
         <span class="status-dot"></span>CLAUDE
+        <span id="open-in-wrap">
+          <button id="open-in-btn" class="toolbar-text-btn" title="Open a past conversation">
+            Open in…
+          </button>
+          <div id="open-in-dropdown">
+            <input id="open-in-search" type="text" placeholder="Search conversations…" />
+            <div id="open-in-list"></div>
+          </div>
+        </span>
         <div class="toolbar-spacer"></div>
         <span id="context-link">
           See context
@@ -309,10 +362,6 @@
       </div>
       <div id="session">
         <div id="term-mount"><div id="term-inner"></div></div>
-      </div>
-      <div id="picker">
-        <input id="picker-search" type="text" placeholder="Search conversations…" />
-        <div id="picker-list"></div>
       </div>
     </div>
     <script src="../shared/vendor/xterm/xterm.js"></script>

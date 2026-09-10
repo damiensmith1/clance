@@ -368,51 +368,75 @@ around an embedded `xterm.js` terminal running the real CLI, per the
 "Terminal-embedding architecture" section above. What remains
 Clance-specific is the window chrome and which session gets opened:
 
-- **Two modes**, chosen by the `popup-shown` IPC payload's `mode` field
-  (`src/preload/popup.ts`, `src/main/popupWindow.ts`): `"new"` (opens a
-  fresh `claude` terminal, screen context injected invisibly — see
-  "Context injection" above) and `"picker"` (a searchable session list;
-  picking a row opens a terminal that resumes or attaches to that session,
-  with context typed visibly into the terminal input instead). The earlier
-  three-mode design (`"new"`/`"picker"`/`"resume"`, where `"resume"`
-  preloaded a rendered transcript before showing a custom input) no longer
-  applies — resuming just opens the terminal directly, the CLI renders its
-  own history.
+- **One hotkey, one mode.** There used to be a second hotkey ("Continue a
+  Conversation", `togglePopupPicker`/`sessionPicker`) that opened the popup
+  into a full-screen searchable session-picker mode instead of a fresh
+  conversation. That's gone — `SHORTCUT_ACTIONS` (`src/main/shortcuts.ts`)
+  now lists only `togglePopup` ("New Conversation", default `Option+Space`),
+  and `PopupShownPayload` (`src/preload/popup.ts`, `src/main/popupWindow.ts`)
+  only has `"loading"` and `"new"`. Reaching a past conversation from the
+  widget is now an in-widget action instead of a separate way of opening it
+  — see "Open in… dropdown" below. The earlier three-mode design
+  (`"new"`/`"picker"`/`"resume"`, where `"resume"` preloaded a rendered
+  transcript before showing a custom input) no longer applies either way —
+  resuming just opens the terminal directly, the CLI renders its own
+  history.
+- **Open in… dropdown** (`#open-in-btn`/`#open-in-dropdown` in
+  `popup.html`, wired up in `popup.js`): a small (220px-wide,
+  260px-max-height) anchored dropdown — not a mode swap — toggled by a
+  plain toolbar button next to the CLAUDE label. Deliberately modeled on
+  `#context-dialog`'s look (same card styling) but click-toggled rather
+  than hover-shown, since it needs to stay open while the user types into
+  its own search input. Closes on any click outside `#open-in-wrap`
+  (a capture-phase `document` click listener), on Escape via nothing
+  special — just re-clicking the button or picking a row — and whenever a
+  fresh `"loading"`/`"new"` payload arrives (a new hotkey press shouldn't
+  leave a stale dropdown open over a different conversation). Picking a
+  row calls the same `resolveOpenArgs()` → `openTerminal()` path the old
+  picker mode used, reusing `currentSystemPromptText` (the flattened
+  context captured when the widget itself was last opened/shown) as the
+  visible typed context, rather than capturing fresh context for the
+  switch — capturing fresh context would need the widget to disappear
+  again first (see the capture-before-reveal ordering above), just to
+  switch which session is showing.
 - **The window itself always appears instantly, before any of the async
-  work behind either mode.** `toggleClancePopup`/`togglePopupPicker` used
-  to await the whole context-capture chain (permission check, screenshot,
-  simulated-Cmd+C selection capture) — and, for `"new"`, minting a real
-  `claude --bg` background agent on top of that — before ever calling
-  `popup.show()`, so the hotkey press produced no visible feedback at all
-  until that entire chain finished (occasionally a couple of seconds).
-  Fixed by splitting window-show (`ensurePopupWindow()`) from payload-send
-  (`sendToPopup()`): the window now shows immediately with a transient
+  work behind opening it.** `toggleClancePopup` used to await the whole
+  context-capture chain (permission check, screenshot, simulated-Cmd+C
+  selection capture) — and minting a real `claude --bg` background agent on
+  top of that — before ever calling `popup.show()`, so the hotkey press
+  produced no visible feedback at all until that entire chain finished
+  (occasionally a couple of seconds). Fixed by splitting window-prep
+  (`preparePopupWindow()` — create/position only, no visible effect) from
+  reveal (`revealPopupWindow()` — the actual `show()`/`focus()`) and
+  payload-send (`sendToPopup()`): `preparePopupWindow()` runs concurrently
+  with context capture (safe, since it has no visible effect), but
+  `revealPopupWindow()` waits until capture is done — revealing any earlier
+  would put the widget itself in its own screenshot (a full-screen capture
+  doesn't care about focus, only what's on screen) and would steal
+  keyboard focus away from whatever app the simulated-Cmd+C selection
+  capture needs it on. Once revealed, the window shows a transient
   `{ mode: "loading" }` payload (popup.js renders a plain "Starting…"
-  placeholder in the terminal area), and the real `"new"`/`"picker"`
-  payload — with the actual `attach`/`--resume` args and context preview —
-  follows once that async work resolves. A module-level `opening` flag on
+  placeholder in the terminal area), and the real `"new"` payload — with
+  the actual `attach` args and context preview — follows once
+  `spawnBackgroundAgent()` resolves. A module-level `opening` flag on
   `toggleClancePopup` guards against a second hotkey press mid-flight
   spawning a second background agent; a `currentMode` check right before
-  each deferred `sendToPopup()` call skips it if the widget was explicitly
-  dismissed (or, for the picker, reused for the other mode) while the work
-  was still in flight, so it can't pop back up after the user closed it.
-  Within that async work, `insertTextMcpArgs()` (its slow part —
-  `ensureInsertTextServer()` — only matters for the CLI flags, not for the
-  accessibility boolean context capture needs, which `checkPermissions()`
-  itself answers synchronously) and `captureContextText()` now run
-  concurrently rather than the latter waiting on the former, since neither
-  actually depends on the other's result. `spawnBackgroundAgent()` still
-  has to wait for `captureContextText()`'s result specifically — the
-  captured context is baked into `--append-system-prompt` at spawn time, so
-  the CLI process can't be started before it's known without giving up the
+  the deferred `sendToPopup()` call skips it if the widget was explicitly
+  dismissed while the work was still in flight, so it can't pop back up
+  after the user closed it. Within that async work, `insertTextMcpArgs()`
+  (its slow part — `ensureInsertTextServer()` — only matters for the CLI
+  flags, not for the accessibility boolean context capture needs, which
+  `checkPermissions()` itself answers synchronously) and
+  `captureContextText()` now run concurrently rather than the latter
+  waiting on the former, since neither actually depends on the other's
+  result. `spawnBackgroundAgent()` still has to wait for
+  `captureContextText()`'s result specifically — the captured context is
+  baked into `--append-system-prompt` at spawn time, so the CLI process
+  can't be started before it's known without giving up the
   invisible-injection design (see "Context injection" above) — that
   remaining serialization is the next thing to look at if this isn't enough
   (see `warmLoginShellPath()` below for one piece of it that *was*
   removable).
-- **Two hotkeys** (`src/main/shortcuts.ts`), unchanged in shape from the
-  earlier design: "New Conversation" (`togglePopup`, `Option+Space`) opens
-  mode `"new"`; "Continue a Conversation" (`togglePopupPicker`, default
-  `Alt+Shift+Command+Space`) opens mode `"picker"`.
 - **Visual style:** flat, warm, editorial (`#F7F3EB` background,
   `#D97757` accent) — matches the main window's terminal theme (see
   "Terminal-embedding architecture" above) rather than a default dark

@@ -1,7 +1,7 @@
 import { app, ipcMain, Menu, BrowserWindow } from "electron";
 import { createTray } from "./tray";
 import { registerHotkey, unregisterAllHotkeys, isValidAccelerator } from "./hotkey";
-import { toggleClancePopup, togglePopupPicker, openPopupWithArgs } from "./popupWindow";
+import { toggleClancePopup, openPopupWithArgs } from "./popupWindow";
 import { openMainWindow, openSessionInMainWindow } from "./mainWindow";
 import { createAppMenu } from "./appMenu";
 import { ensureSessionCwd, SESSION_CWD } from "./paths";
@@ -39,7 +39,6 @@ async function handleTrayPopupClick(): Promise<void> {
 function registerAllHotkeys(shortcuts: Record<string, string>): void {
   unregisterAllHotkeys();
   registerHotkey(toggleClancePopup, shortcuts.togglePopup);
-  registerHotkey(togglePopupPicker, shortcuts.sessionPicker);
 }
 
 app.whenReady().then(async () => {

@@ -27,8 +27,7 @@ type PopupShownPayload =
   // agent-spawn work below has even started — so the widget is never just a
   // blank frame while the user waits on that chain (see toggleClancePopup).
   | { mode: "loading" }
-  | { mode: "new"; args: string[]; contextPreview?: ContextPreview }
-  | { mode: "picker"; contextText: string; contextPreview?: ContextPreview };
+  | { mode: "new"; args: string[]; contextPreview?: ContextPreview };
 
 let popup: BrowserWindow | null = null;
 let popupReady: Promise<void> | null = null;
@@ -288,8 +287,14 @@ async function toggleClancePopupInner(): Promise<void> {
 
   // A brand-new session has no prior recorded system-prompt snapshot, so
   // this rides in invisibly — --system-prompt-snapshot off makes sure that
-  // stays true on any *future* resume of this exact session too (see
-  // togglePopupPicker below for why that flag matters).
+  // stays true on any *future* resume of this exact session too: a resumed
+  // session can't reliably take a fresh --append-system-prompt otherwise
+  // (the CLI only honors it if the session's *original* launch had this
+  // off), and there'd be no way to tell from here whether a given resumed
+  // session was Clance's own or something else entirely (a bare-terminal
+  // session, say) that never had this flag at all. That's also why the
+  // popup's "Open in..." dropdown (popup.js) types context visibly into a
+  // resumed session's input instead of relying on this invisible path.
   //
   // Minted as a background agent immediately, same as every other
   // Clance-launched session (see docs/background-agent-architecture.md) —
@@ -321,34 +326,4 @@ export async function openPopupWithArgs(args: string[]): Promise<void> {
   await preparePopupWindow();
   revealPopupWindow();
   sendToPopup({ mode: "new", args });
-}
-
-export async function togglePopupPicker(): Promise<void> {
-  if (popup && !popup.isDestroyed() && popup.isVisible() && currentMode === "picker") {
-    hidePopup();
-    return;
-  }
-  // Same constraint as toggleClancePopup: captureContextText's screenshot
-  // and selection capture both need the widget to still be
-  // invisible/unfocused, so preparing the window (no visible effect) runs
-  // alongside capture, and it's only revealed once that's done.
-  //
-  // Resumed sessions can't reliably take a fresh --append-system-prompt:
-  // the CLI only honors it if the session's *original* launch had
-  // --system-prompt-snapshot off, which is true for sessions Clance itself
-  // created (see toggleClancePopup) but not for anything else (a session
-  // started from a bare terminal, or any pre-existing session) — and
-  // there's no way to tell which from here. So this is instead typed into
-  // the terminal as visible, unsubmitted input once the session opens.
-  // No insert_text tool here (see insertTextMcpArgs) — that needs the MCP
-  // server wired in at launch, which resumed sessions never get. Selection
-  // capture has no such requirement (it's just a simulated Cmd+C, same
-  // Accessibility gate), so it rides along in the typed context same as
-  // toggleClancePopup's.
-  const [, { text: contextText, preview }] = await Promise.all([
-    preparePopupWindow(),
-    captureContextText(false, checkPermissions().accessibility),
-  ]);
-  revealPopupWindow();
-  sendToPopup({ mode: "picker", contextText, contextPreview: preview });
 }
