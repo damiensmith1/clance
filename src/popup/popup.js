@@ -87,6 +87,13 @@ function detachTerminal() {
 // Enter themselves.
 function openTerminal(args, visibleContext) {
   teardownTerminal();
+  // teardownTerminal() only clears term-inner as a side effect of tearing
+  // down a *previous* terminal (it early-returns with none active) — but
+  // the loading placeholder (see showLoading()) leaves term-inner non-empty
+  // without ever setting activeTerminalId, so it needs its own explicit
+  // clear here too, or it lingers alongside the real terminal once this
+  // opens.
+  termInnerEl.replaceChildren();
   appEl.classList.remove("picker-active");
   appEl.classList.add("has-messages");
   activeArgs = args;
