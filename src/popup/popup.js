@@ -95,8 +95,13 @@ function detachTerminal() {
 // bracketed paste so the CLI's multi-line input treats it as one pasted
 // block (embedded newlines included) instead of submitting partway
 // through, and left unsubmitted so the user can add to it before hitting
-// Enter themselves.
-function openTerminal(args, visibleContext) {
+// Enter themselves. `screenshotPath`, if given, is pasted in first as a
+// real image (clipboard + Ctrl+V byte, see ptyManager.ts's
+// pasteImageIntoPty) so the model gets an actual image content block
+// without needing to Read() a path — `visibleContext`'s text then lands
+// shortly after so it reads in the input like a normal "paste screenshot,
+// type question" turn.
+function openTerminal(args, visibleContext, screenshotPath) {
   teardownTerminal();
   // teardownTerminal() only clears term-inner as a side effect of tearing
   // down a *previous* terminal (it early-returns with none active) — but
@@ -169,12 +174,10 @@ function openTerminal(args, visibleContext) {
     window.clance.writeTerminal(activeTerminalId, data);
   });
 
-  if (visibleContext) {
+  if (screenshotPath || visibleContext) {
     const terminalId = activeTerminalId;
-    // Resuming replays the session's prior history first, so this needs
-    // longer to land than a fresh session's near-instant prompt.
-    setTimeout(() => {
-      if (activeTerminalId !== terminalId) return;
+    const sendVisibleContext = () => {
+      if (!visibleContext || activeTerminalId !== terminalId) return;
       // Defense in depth: the main process already strips control chars
       // (including ESC) from window-title-derived text before it gets
       // here, but sanitize again so this path is safe even if
@@ -187,6 +190,20 @@ function openTerminal(args, visibleContext) {
       // eslint-disable-next-line no-control-regex
       const sanitized = visibleContext.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, "");
       window.clance.writeTerminal(terminalId, `\x1b[200~${sanitized}\n\n\x1b[201~`);
+    };
+    // Resuming replays the session's prior history first, so this needs
+    // longer to land than a fresh session's near-instant prompt.
+    setTimeout(() => {
+      if (activeTerminalId !== terminalId) return;
+      if (screenshotPath) {
+        window.clance.pasteImageToTerminal(terminalId, screenshotPath);
+        // Give the CLI a moment to register the pasted image as its own
+        // pending attachment before typing text after it, rather than
+        // racing the two into the input at once.
+        if (visibleContext) setTimeout(sendVisibleContext, 400);
+      } else {
+        sendVisibleContext();
+      }
     }, 1200);
   }
 }
@@ -442,6 +459,6 @@ window.clance.onShown((payload) => {
     showLoading();
   } else {
     currentSystemPromptText = payload.contextPreview?.systemPrompt ?? "";
-    openTerminal(payload.args, payload.visibleContext);
+    openTerminal(payload.args, payload.visibleContext, payload.contextPreview?.screenshotPath);
   }
 });

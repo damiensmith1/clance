@@ -1,5 +1,5 @@
 import * as pty from "node-pty";
-import { BrowserWindow } from "electron";
+import { BrowserWindow, clipboard, nativeImage, ClipboardItem } from "electron";
 import { execFile, execFileSync } from "child_process";
 
 // `win` is mutable per-session (not just captured at spawn time) so a
@@ -92,6 +92,48 @@ export function createPtySession(
 
 export function writeToPty(terminalId: string, data: string): void {
   sessions.get(terminalId)?.proc.write(data);
+}
+
+// Delivers a screenshot into a pty-hosted CLI session as a real image
+// content block, instead of a path the model has to Read() itself: writes
+// the PNG to the OS clipboard, then injects a single Ctrl+V byte (0x16)
+// directly into the pty. The CLI polls the clipboard for image data on
+// Ctrl+V the same way it would for a human pasting a screenshot — confirmed
+// by a live spike (see docs/sep10talks.md) that only that one byte crosses
+// the pty, nowhere near enough to carry inlined image bytes itself; the CLI
+// reads the clipboard out-of-band. No keystroke simulation or window focus
+// needed, unlike insert_text — the terminal already holds focus.
+// Best-effort clipboard restore afterwards, same trade-off insertTextServer's
+// clipboard paste already accepts (see frontApp.ts's typeIntoCapturedWindow).
+export async function pasteImageIntoPty(terminalId: string, imagePath: string): Promise<void> {
+  if (!sessions.has(terminalId)) return;
+  const image = nativeImage.createFromPath(imagePath);
+  if (image.isEmpty()) return;
+
+  // Snapshot whatever's on the clipboard now (as ClipboardItems, the only
+  // shape this Electron version's async clipboard API deals in) so it can
+  // be put back afterwards, same best-effort restore trade-off
+  // insertTextServer's clipboard paste already accepts.
+  const previousItems = await clipboard.read();
+  await clipboard.write([
+    new ClipboardItem({
+      "image/png": new Blob([new Uint8Array(image.toPNG())], { type: "image/png" }),
+    }),
+  ]);
+  writeToPty(terminalId, "\x16");
+  setTimeout(() => {
+    if (previousItems.length === 0) return;
+    // The bookmark MIME type resolves to a ClipboardBookmark, not a Blob —
+    // dropped from the restore since it's an edge case not worth the extra
+    // branching for a best-effort put-it-back.
+    const restored = previousItems.map((item) => {
+      const entries: [string, Promise<Blob>][] = item.types
+        .filter((type) => type !== "electron application/bookmark")
+        .map((type) => [type, item.getType(type) as Promise<Blob>]);
+      return new ClipboardItem(Object.fromEntries(entries));
+    });
+    void clipboard.write(restored);
+  }, 800);
 }
 
 export function resizePty(terminalId: string, cols: number, rows: number): void {

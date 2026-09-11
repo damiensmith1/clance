@@ -243,7 +243,8 @@ function buildContextText(
   }
   if (screenshotPath) {
     lines.push(
-      `A screenshot of their screen at that moment was saved to: ${screenshotPath}. Read it if it's relevant to what they ask.`
+      "A screenshot of their screen at that moment is attached to this conversation as an image " +
+        "— look at it directly if it's relevant to what they ask, no need to read a file for it."
     );
   }
   if (selectedText) {

@@ -245,9 +245,13 @@ build from scratch for the highest-stakes actions in the whole app.
   streaming at all today — unverified, don't assume yes
 - [ ] Local speech-to-text engine for dictation (pre-existing open question,
   unrelated to the duplex-streaming tangent above — don't conflate them)
-- [ ] `design.md` needs a correction pass: the separate picker-popup hotkey
-  is deprecated/merged into the main widget, and the multimodal
-  context-injection section needs updating with the Ctrl+V finding above
+- [x] Multimodal image input implemented: `ptyManager.ts`'s
+  `pasteImageIntoPty()` delivers the screenshot as a real image content
+  block (clipboard + `Ctrl+V` byte), and `design.md`'s "Context injection"
+  section + the screenshot-delivery open question are updated accordingly.
+- [ ] `design.md` still needs a correction pass for the separate
+  picker-popup hotkey being deprecated/merged into the main widget
+  (unrelated to the multimodal item above)
 - [ ] Pre-existing open questions from `design.md` untouched by this
   conversation: exact CLI JSONL schema, folder/config conventions for
   skills/tools/MCP, how much of the settings UI ships in v1,
@@ -255,8 +259,9 @@ build from scratch for the highest-stakes actions in the whole app.
 
 ## Next steps (as of this conversation)
 
-1. Update `design.md`: picker-popup deprecation correction, multimodal
-   Ctrl+V mechanism replacing the path-text approach.
+1. ~~Update `design.md`: multimodal Ctrl+V mechanism replacing the
+   path-text approach.~~ Done — see "Context injection" in `design.md`.
+   The picker-popup deprecation correction there is still outstanding.
 2. Spec the escalation trigger for Quick Ask → real session (explicit
    button only, or does the SDK path also detect "this wants tool use" and
    prompt to escalate?).

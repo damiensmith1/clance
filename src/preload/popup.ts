@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld("clance", {
     ipcRenderer.invoke("terminal:create", { terminalId, command, args, cols, rows }),
   writeTerminal: (terminalId: string, data: string) =>
     ipcRenderer.send("terminal:input", { terminalId, data }),
+  pasteImageToTerminal: (terminalId: string, imagePath: string) =>
+    ipcRenderer.invoke("terminal:paste-image", { terminalId, imagePath }),
   resizeTerminal: (terminalId: string, cols: number, rows: number) =>
     ipcRenderer.send("terminal:resize", { terminalId, cols, rows }),
   killTerminal: (terminalId: string) =>

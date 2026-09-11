@@ -80,6 +80,20 @@ function truncate(text: string, maxLength: number): string {
 export const CLANCE_CONTEXT_PREFIX =
   "The user just invoked Clance via its global screen-overlay shortcut — a quick-access popup, not a full coding session.";
 
+// The CLI represents a pasted image as a literal "[Image #<n>]" placeholder
+// inline in the typed input — every widget session, fresh-mint or resumed,
+// now gets the screenshot pasted this way ahead of whatever text follows
+// (see ptyManager.ts's pasteImageIntoPty), so this placeholder is the very
+// first thing in every widget session's first turn, even a fresh-mint one
+// whose context text otherwise rides in invisibly via --append-system-prompt
+// and never reaches here. Stripped before stripClanceContextPrefix below,
+// whose startsWith check would otherwise never match — the paste lands with
+// no separator ahead of whatever's typed after it.
+const LEADING_IMAGE_PLACEHOLDER = /^(?:\[Image #\d+\]\s*)+/;
+function stripLeadingImagePlaceholder(text: string): string {
+  return text.replace(LEADING_IMAGE_PLACEHOLDER, "");
+}
+
 // Strips a leading Clance-injected context block, if present. The
 // injection always appends "\n\n" after the block before the user's own
 // typed text begins (see popup.js) — that blank line is the boundary; if
@@ -132,7 +146,7 @@ async function firstUserTitle(filePath: string): Promise<string> {
       // left after stripping — the user submitted just the pasted context
       // with nothing added — fall back to the raw text rather than
       // treating a real, submitted turn as if it didn't happen.
-      const stripped = stripClanceContextPrefix(text).trim();
+      const stripped = stripClanceContextPrefix(stripLeadingImagePlaceholder(text)).trim();
       return truncate(stripped || text, TITLE_MAX_LENGTH);
     }
   } finally {

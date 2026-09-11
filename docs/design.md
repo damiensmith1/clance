@@ -12,7 +12,7 @@ status: draft
 |---|---|---|
 | Shell | Electron | per requirement — Node.js, macOS-first |
 | Hotkey | Electron `globalShortcut` | |
-| Screenshot capture | Electron `desktopCapturer` | resized to Claude's recommended max edge (1568px), saved to a PNG under `~/.clance/screenshots/`, path handed to the CLI as context — never sent as raw bytes to the app itself |
+| Screenshot capture | Electron `desktopCapturer` | resized to Claude's recommended max edge (1568px), saved to a PNG under `~/.clance/screenshots/`, then delivered to the CLI as a real image content block via clipboard + a `Ctrl+V` byte written into the pty — see "Context injection" below, not sent as a path for the model to `Read()` |
 | Terminal embedding | `node-pty` (real pty process) + `xterm.js` + `@xterm/addon-fit` | vendored (not CDN-loaded) under `src/shared/vendor/xterm/`; `node-pty` is a native addon, requires `electron-rebuild`/`@electron/rebuild` against Electron's Node ABI |
 | AI / reasoning / session UI | The real `claude` CLI binary, run as a child pty process | superseded the Claude Agent SDK — see "Terminal-embedding architecture" below |
 | Frontmost-app read (window title, keystroke injection) | `@nut-tree-fork/nut-js` | captures the frontmost window's title as context and backs `insert_text` (see "Text-insertion tool" below) — the SDK-era `proposeText` accept/reject *UI* is gone with the custom chat UI, but the underlying keystroke-injection capability is back, now surfaced as an MCP tool the CLI decides to call itself |
@@ -172,11 +172,32 @@ first-party surface rather than a second implementation of it.
 
 ## Context injection
 
-Screen context (frontmost window title + a saved screenshot path) is built
-fresh on every popup invocation (`popupWindow.ts`'s `buildContextText()`),
-but **how** it reaches the CLI differs by whether the session is new or
-resumed — this split exists because of a real CLI limitation, confirmed by
-direct testing outside Electron:
+Screen context (frontmost window title + a saved screenshot) is built fresh
+on every popup invocation (`popupWindow.ts`'s `buildContextText()`), but
+**how** the text portion reaches the CLI differs by whether the session is
+new or resumed — this split exists because of a real CLI limitation,
+confirmed by direct testing outside Electron:
+
+**The screenshot itself is not part of that text split at all.** It rides in
+as a real image content block, identically for new and resumed sessions,
+via a mechanism confirmed by a live spike (`docs/sep10talks.md`): the CLI
+reads image data directly off the OS clipboard when it sees a paste
+keystroke — it isn't parsing image bytes out of the pty stream. So
+`ptyManager.ts`'s `pasteImageIntoPty()` writes the screenshot PNG to the
+clipboard (`clipboard.write([new ClipboardItem(...)])`), then writes a
+single `Ctrl+V` byte (`0x16`) directly into the pty — no keystroke
+simulation, no `nut-js`, no bracketed-paste wrapper. `popup.js`'s
+`openTerminal()` fires this once the CLI is ready (~1.2s after the terminal
+opens, the same mark used for typed context below), landing the image as a
+pending attachment in the input box; any visible typed context then follows
+~400ms after, so it reads like a normal "paste screenshot, type question"
+turn once the user hits Enter. `buildContextText()` only adds a short note
+that a screenshot is attached — it no longer names a path or says "read it,"
+since there's no file for the model to `Read()` any more.
+**Caveat, unverified:** a first-run/never-configured `claude` install may
+have interstitial prompts (a "Teach auto mode about your environment?"
+dialog was hit mid-spike) that could block this path on a fresh machine —
+not yet checked.
 
 - **New sessions:** context rides in invisibly via
   `--append-system-prompt <text> --system-prompt-snapshot off`. The
@@ -939,16 +960,19 @@ see `docs/background-agent-architecture.md`.
 - [x] Screenshot vs. accessibility-tree read vs. both, by default —
       screenshots are simpler and more universal; accessibility tree is
       more precise for structured apps (forms, code editors) but harder to
-      build. **Resolved (v1), superseded once by delivery mechanism:**
+      build. **Resolved (v1), delivery mechanism revisited twice:**
       screenshot only, of the full display nearest the cursor, captured
-      fresh on every popup invocation (`src/main/screenCapture.ts`). Was
-      originally sent to Claude as an image content block via the Agent
-      SDK (`src/main/agent.ts`, now deleted); now saved to a PNG under
-      `~/.clance/screenshots/` and its **path** is handed to the CLI as
-      text context (invisibly via `--append-system-prompt` for new
-      sessions, or typed into the terminal for resumed ones — see "Context
-      injection" above), which then `Read`s it as a normal tool call if
-      relevant. Accessibility-tree read is still deferred.
+      fresh on every popup invocation (`src/main/screenCapture.ts`). Sent
+      to Claude as a real image content block via the Agent SDK originally
+      (`src/main/agent.ts`, now deleted); after the terminal-embedding
+      pivot it was saved to a PNG under `~/.clance/screenshots/` with its
+      **path** handed to the CLI as text context, which the model then
+      `Read()`s as a normal tool call if relevant; now (`docs/sep10talks.md`'s
+      spike) it's a real image content block again, without the SDK —
+      clipboard + a `Ctrl+V` byte written into the pty (`ptyManager.ts`'s
+      `pasteImageIntoPty()`), landing as a pasted attachment the model sees
+      directly, no tool call needed. See "Context injection" above.
+      Accessibility-tree read is still deferred.
 - [x] How does the app decide "talk back" vs. "type it out" — **superseded,
       question no longer applies.** The model-decided `proposeText`
       accept/reject tool-call flow was removed along with the entire

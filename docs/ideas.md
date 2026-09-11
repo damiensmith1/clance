@@ -19,10 +19,14 @@ requirements, just candidates to pull from when picking what's next.
   widget track what the user is actually doing instead of photographing
   the moment the hotkey was pressed. Reuses existing capture machinery;
   the new part is injecting into a live session rather than only at launch.
-- Screenshot-as-a-path forces the model to spend a tool call just to look,
-  even for text-heavy contexts (a terminal, an editor, a browser) where an
-  accessibility-tree/OCR text read would be cheaper and let it reason
-  immediately.
+- ~~Screenshot-as-a-path forces the model to spend a tool call just to
+  look.~~ Done — the screenshot now rides in as a real image content block
+  (clipboard + `Ctrl+V` byte into the pty, see `docs/design.md`'s "Context
+  injection"), no tool call needed. An accessibility-tree/OCR text read for
+  text-heavy contexts (terminal, editor, browser) is still a separate,
+  unimplemented idea — text read vs. image read is a different trade-off
+  (cheaper reasoning vs. losing genuine visual layout), not one this
+  supersedes.
 - Only the one frontmost window is captured. No way to grab clipboard
   history or a couple of recently-used app titles for "compare X and Y"
   style asks.

@@ -27,7 +27,15 @@ import { setSessionArchived } from "./archivedSessions";
 import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
 import { listSkills, setSkillEnabled } from "./skills";
 import { listMcpServers, setMcpServerEnabled } from "./mcpConfig";
-import { createPtySession, writeToPty, resizePty, killPty, reparentPty, warmLoginShellPath } from "./ptyManager";
+import {
+  createPtySession,
+  writeToPty,
+  resizePty,
+  killPty,
+  reparentPty,
+  warmLoginShellPath,
+  pasteImageIntoPty,
+} from "./ptyManager";
 import { resolveOpenArgs, spawnBackgroundAgent, stopAgent, listAgents } from "./agentSessions";
 import { isPoolSpareId } from "./agentPool";
 import { copyDroppedFile } from "./dropFiles";
@@ -281,6 +289,12 @@ ipcMain.handle(
 ipcMain.on("terminal:input", (_event, payload: { terminalId: string; data: string }) => {
   writeToPty(payload.terminalId, payload.data);
 });
+
+ipcMain.handle(
+  "terminal:paste-image",
+  (_event, payload: { terminalId: string; imagePath: string }) =>
+    pasteImageIntoPty(payload.terminalId, payload.imagePath)
+);
 
 ipcMain.on(
   "terminal:resize",
