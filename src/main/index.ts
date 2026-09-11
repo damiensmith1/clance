@@ -7,6 +7,7 @@ import {
   warmAgentPool,
   openNewSessionInDirectory,
   isPopupSessionName,
+  refreshContext,
 } from "./popupWindow";
 import { openMainWindow, openSessionInMainWindow } from "./mainWindow";
 import { createAppMenu } from "./appMenu";
@@ -206,6 +207,8 @@ ipcMain.handle("agents:list", async (_event, opts: { all?: boolean }) => {
 });
 
 ipcMain.handle("popup:open-with-args", (_event, args: string[]) => openPopupWithArgs(args));
+
+ipcMain.handle("popup:refresh-context", () => refreshContext());
 
 ipcMain.handle(
   "popup:open-in-app",

@@ -80,6 +80,16 @@ function truncate(text: string, maxLength: number): string {
 export const CLANCE_CONTEXT_PREFIX =
   "The user just invoked Clance via its global screen-overlay shortcut — a quick-access popup, not a full coding session.";
 
+// The opening line of a mid-conversation "refresh context" injection (see
+// popupWindow.ts's refreshContext) — always typed as *visible* input into
+// the already-live session, the same way a resumed session's initial
+// context is, so it can land as the start of any later "user" turn, not
+// just the first. Handled by the same stripping logic as
+// CLANCE_CONTEXT_PREFIX below so a refresh triggered before the user's
+// first real submitted message doesn't corrupt that session's title.
+export const REFRESH_CONTEXT_PREFIX =
+  "The user asked Clance to refresh its view of their screen mid-conversation.";
+
 // The CLI represents a pasted image as a literal "[Image #<n>]" placeholder
 // inline in the typed input — every widget session, fresh-mint or resumed,
 // now gets the screenshot pasted this way ahead of whatever text follows
@@ -94,12 +104,15 @@ function stripLeadingImagePlaceholder(text: string): string {
   return text.replace(LEADING_IMAGE_PLACEHOLDER, "");
 }
 
+const CLANCE_INJECTED_PREFIXES = [CLANCE_CONTEXT_PREFIX, REFRESH_CONTEXT_PREFIX];
+
 // Strips a leading Clance-injected context block, if present. The
 // injection always appends "\n\n" after the block before the user's own
 // typed text begins (see popup.js) — that blank line is the boundary; if
 // it's never found, this is left untouched rather than guessing.
 function stripClanceContextPrefix(text: string): string {
-  if (!text.startsWith(CLANCE_CONTEXT_PREFIX)) return text;
+  const prefix = CLANCE_INJECTED_PREFIXES.find((p) => text.startsWith(p));
+  if (!prefix) return text;
   const boundary = text.indexOf("\n\n");
   return boundary === -1 ? text : text.slice(boundary + 2);
 }

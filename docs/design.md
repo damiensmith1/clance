@@ -199,6 +199,29 @@ have interstitial prompts (a "Teach auto mode about your environment?"
 dialog was hit mid-spike) that could block this path on a fresh machine —
 not yet checked.
 
+**Refreshing context mid-conversation.** Every capture above only ever
+happens once, at invocation — context is otherwise frozen for the life of
+the session (`docs/ideas.md`'s "Context capture is one-shot and frozen").
+`Cmd+Shift+R` while the popup terminal has focus (`popup.js`'s
+`triggerContextRefresh()`, reserved from the CLI via xterm's
+`attachCustomKeyEventHandler` — plain `Cmd+R` is already Electron's default
+"reload" accelerator and would blow away the renderer) re-captures screen
+context for the *live* session instead of spawning anything new:
+`popupWindow.ts`'s `refreshContext()` briefly sets the popup's opacity to 0
+(so the screenshot doesn't just capture the widget itself, without hiding
+it — hiding hands focus to whatever's "next," which can be Clance's own
+main window), re-runs the same capture chain as initial invocation, restores
+opacity, and the result rides into the pty exactly like a resumed session's
+initial context does — image pasted via `pasteImageIntoPty`, text typed as
+visible unsubmitted bracketed-paste input (`popup.js`'s
+`injectContextIntoTerminal()`, factored out so both paths share one
+delivery mechanism). The opening line differs
+from a fresh invocation's (`REFRESH_CONTEXT_PREFIX` vs.
+`CLANCE_CONTEXT_PREFIX`, both in `chatHistory.ts`) since "the user just
+invoked Clance" would be wrong mid-conversation; both are stripped by the
+same title-derivation logic so a refresh triggered before the user's first
+real submitted message can't corrupt that session's title.
+
 - **New sessions:** context rides in invisibly via
   `--append-system-prompt <text> --system-prompt-snapshot off`. The
   `--system-prompt-snapshot off` flag matters for more than this one

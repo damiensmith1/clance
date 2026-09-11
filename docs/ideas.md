@@ -11,14 +11,13 @@ requirements, just candidates to pull from when picking what's next.
 
 ## Context capture is one-shot and frozen
 
-- Context (screenshot, window title, selection) is captured once at
-  invocation and baked into the first prompt. If the user switches apps or
-  the screen changes mid-conversation, the session never sees it. A
-  "refresh context" action — re-run `captureContextText()` and inject the
-  result as a new turn into the *same* running session — would make the
-  widget track what the user is actually doing instead of photographing
-  the moment the hotkey was pressed. Reuses existing capture machinery;
-  the new part is injecting into a live session rather than only at launch.
+- ~~Context (screenshot, window title, selection) is captured once at
+  invocation and baked into the first prompt, never seeing a later app
+  switch or screen change.~~ Done — `Cmd+Shift+R` while the popup terminal
+  has focus re-runs the capture chain and injects the result into the
+  *same* running session (`popupWindow.ts`'s `refreshContext()`,
+  `popup.js`'s `triggerContextRefresh()`; see `docs/design.md`'s "Context
+  injection" § "Refreshing context mid-conversation").
 - ~~Screenshot-as-a-path forces the model to spend a tool call just to
   look.~~ Done — the screenshot now rides in as a real image content block
   (clipboard + `Ctrl+V` byte into the pty, see `docs/design.md`'s "Context
@@ -47,9 +46,14 @@ requirements, just candidates to pull from when picking what's next.
 
 ## Attachments beyond drag-and-drop
 
-- The only way to hand it a file is dragging it onto the terminal. No
-  fetch-a-URL path, and no way to paste a clipboard image directly (only
-  a screenshot Clance itself took).
+- ~~No way to paste a clipboard image directly (only a screenshot Clance
+  itself took).~~ Already works as-is — confirmed 2026-09-11: pasting an
+  image copied from elsewhere (a browser, Preview, Slack) into the popup
+  terminal reaches the CLI as a real image, same as Clance's own
+  screenshot paste, with no extra Clance-side wiring needed.
+- Fetch-a-URL: deliberately not building Clance-side handling for this —
+  the CLI's own web-fetch tool already covers it, no need for Clance to
+  duplicate that capability.
 
 ## Session continuity is invisible
 
@@ -60,7 +64,6 @@ requirements, just candidates to pull from when picking what's next.
 
 ## Highest-value next step
 
-Refresh context on demand — turns the widget from "screenshot at time of
-invocation" into something that tracks what the user is actually doing,
-and it's the one idea here that reuses existing capture machinery
-end-to-end rather than needing new capability.
+~~Refresh context on demand~~ — done, see "Context capture is one-shot and
+frozen" above. Remaining candidates, no particular ranking yet: watch mode,
+structured output primitives, or the in-popup session quick-switcher.

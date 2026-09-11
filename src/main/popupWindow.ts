@@ -6,7 +6,7 @@ import { checkPermissions } from "./permissions";
 import { ensureInsertTextServer } from "./insertTextServer";
 import { spawnBackgroundAgent, resolveSessionId, stopAgent, rmAgent } from "./agentSessions";
 import { claimPoolSpare, refillPool } from "./agentPool";
-import { hasRealUserMessage, CLANCE_CONTEXT_PREFIX } from "./chatHistory";
+import { hasRealUserMessage, CLANCE_CONTEXT_PREFIX, REFRESH_CONTEXT_PREFIX } from "./chatHistory";
 import { getDefaultDirectory, addRecentDirectory } from "./config";
 
 const DEFAULT_WIDTH = 560;
@@ -235,16 +235,20 @@ function buildContextText(
   windowTitle: string | undefined,
   screenshotPath: string | undefined,
   selectedText: string | undefined,
-  insertTextAvailable: boolean
+  insertTextAvailable: boolean,
+  isRefresh: boolean
 ): string {
-  const lines = [CLANCE_CONTEXT_PREFIX];
+  const lines = [isRefresh ? REFRESH_CONTEXT_PREFIX : CLANCE_CONTEXT_PREFIX];
   if (windowTitle) {
-    lines.push(`The frontmost window at the time was: "${sanitizeForTerminal(windowTitle)}".`);
+    lines.push(
+      `The frontmost window ${isRefresh ? "now" : "at the time"} is: "${sanitizeForTerminal(windowTitle)}".`
+    );
   }
   if (screenshotPath) {
     lines.push(
-      "A screenshot of their screen at that moment is attached to this conversation as an image " +
-        "— look at it directly if it's relevant to what they ask, no need to read a file for it."
+      `An ${isRefresh ? "updated screenshot of their screen, just captured" : "screenshot of their screen at that moment"} ` +
+        "is attached to this conversation as an image — look at it directly if it's relevant to what they ask, " +
+        "no need to read a file for it."
     );
   }
   if (selectedText) {
@@ -253,7 +257,9 @@ function buildContextText(
         "Treat this selection as the primary subject of their request — focus on it unless they clearly ask about something unrelated to it."
     );
   }
-  if (insertTextAvailable) {
+  // Only worth repeating on the initial invocation — a refresh happens
+  // mid-conversation, so the model's already been told this once.
+  if (insertTextAvailable && !isRefresh) {
     lines.push(
       "You have an insert_text tool that types text directly into that frontmost app. If the user's request is " +
         "naturally about producing content for that app — writing, drafting, replying, filling in something — use " +
@@ -270,18 +276,56 @@ function buildContextText(
 // here Cmd+C instead of Cmd+V) — see captureSelectedText in frontApp.ts.
 async function captureContextText(
   insertTextAvailable: boolean,
-  captureSelection: boolean
+  captureSelection: boolean,
+  isRefresh = false
 ): Promise<{ text: string; preview: ContextPreview }> {
   const [windowTitle, screenshotPath, selectedText] = await Promise.all([
     captureFrontmostWindow(),
     captureAndSaveActiveDisplay().catch(() => undefined),
     captureSelection ? captureSelectedText() : Promise.resolve(undefined),
   ]);
-  const text = buildContextText(windowTitle, screenshotPath, selectedText, insertTextAvailable);
+  const text = buildContextText(windowTitle, screenshotPath, selectedText, insertTextAvailable, isRefresh);
   return {
     text,
     preview: { windowTitle, screenshotPath, selectedText, systemPrompt: text },
   };
+}
+
+// Re-captures screen context for the *live* session already showing in the
+// popup, instead of only ever photographing the moment the hotkey was
+// pressed (see docs/ideas.md's "Context capture is one-shot and frozen").
+// Triggered from the popup's own Cmd+Shift+R handler (popup.js) rather than
+// a hotkey, since Cmd+Space-style global shortcuts are already spoken for by
+// togglePopup. The result rides into the pty exactly like a resumed
+// session's initial context does (popup.js's injectContextIntoTerminal) —
+// there's no flag equivalent to --append-system-prompt for a process
+// that's already running.
+//
+// Deliberately doesn't reuse hidePopup() — that also nulls currentMode,
+// which every other check in this module treats as "no live conversation
+// showing." A refresh needs the popup invisible just long enough for an
+// accurate screenshot (the same reason preparePopupWindow/revealPopupWindow
+// are split at initial open), not a real close.
+export async function refreshContext(): Promise<{ text: string; preview: ContextPreview } | null> {
+  if (!popup || popup.isDestroyed() || currentMode !== "new") return null;
+  const accessibilityGranted = checkPermissions().accessibility;
+  // setOpacity(0), not hide(): hiding this window hands focus to whatever
+  // macOS considers "next" (its own main window, if one happens to be
+  // open), dragging in a pile of window-activation side effects. Opacity
+  // keeps the window fully present at the OS level — still focused, still
+  // "visible" — just fully transparent, which is enough to keep it out of
+  // desktopCapturer's screenshot without touching anything else.
+  popup.setOpacity(0);
+  try {
+    // The opacity change needs a beat to actually land before the
+    // screenshot reads the display back — same wait-for-the-window-server-
+    // to-catch-up value used elsewhere for this class of problem (see
+    // frontApp.ts's captureSelectedText).
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    return await captureContextText(accessibilityGranted, accessibilityGranted, true);
+  } finally {
+    if (popup && !popup.isDestroyed()) popup.setOpacity(1);
+  }
 }
 
 // Gives the launched CLI session an `insert_text` tool that types into

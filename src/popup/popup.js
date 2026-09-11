@@ -88,19 +88,72 @@ function detachTerminal() {
   termInnerEl.replaceChildren();
 }
 
+// Pastes `screenshotPath` (if given) into `terminalId` as a real image
+// (clipboard + Ctrl+V byte, see ptyManager.ts's pasteImageIntoPty) so the
+// model gets an actual image content block without needing to Read() a
+// path, then types `text` (if given) as *visible*, unsubmitted bracketed-
+// paste input shortly after — so it reads like a normal "paste screenshot,
+// type question" turn. `text` is wrapped in bracketed paste so the CLI's
+// multi-line input treats it as one pasted block (embedded newlines
+// included) instead of submitting partway through, and left unsubmitted so
+// the user can add to it before hitting Enter themselves. Shared by the
+// initial context injection (openTerminal, below) and a mid-conversation
+// refresh (triggerContextRefresh) — the delivery mechanism is identical
+// either way, only the trigger differs.
+function injectContextIntoTerminal(terminalId, text, screenshotPath) {
+  const sendText = () => {
+    if (!text || activeTerminalId !== terminalId) return;
+    // Defense in depth: the main process already strips control chars
+    // (including ESC) from window-title-derived text before it gets here,
+    // but sanitize again so this path is safe even if `text` ever carries
+    // untrusted text some other way — in particular, stripping ESC means
+    // it can't contain a fake `\x1b[201~` that would let content escape
+    // the paste block early. Trailing newlines stay inside the paste
+    // brackets (bracketed paste treats embedded \n as literal text, not
+    // Enter) so the input stays unsubmitted for the user to add to.
+    // eslint-disable-next-line no-control-regex
+    const sanitized = text.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, "");
+    window.clance.writeTerminal(terminalId, `\x1b[200~${sanitized}\n\n\x1b[201~`);
+  };
+  if (screenshotPath) {
+    window.clance.pasteImageToTerminal(terminalId, screenshotPath);
+    // Give the CLI a moment to register the pasted image as its own
+    // pending attachment before typing text after it, rather than racing
+    // the two into the input at once.
+    if (text) setTimeout(sendText, 400);
+  } else {
+    sendText();
+  }
+}
+
+// Cmd+Shift+R while the popup terminal has focus — re-captures screen
+// context for the *already-running* session instead of only ever
+// photographing the moment the hotkey was pressed (see docs/ideas.md's
+// "Context capture is one-shot and frozen"). Cmd+R alone is already
+// Electron's default "reload" accelerator (see appMenu.ts), which would
+// blow away this whole renderer, so this needs a different combo.
+let refreshingContext = false;
+async function triggerContextRefresh() {
+  if (refreshingContext || !activeTerminalId) return;
+  const terminalId = activeTerminalId;
+  refreshingContext = true;
+  try {
+    const result = await window.clance.refreshContext();
+    if (!result || activeTerminalId !== terminalId) return;
+    renderContextPreview(result.preview);
+    currentSystemPromptText = result.preview.systemPrompt;
+    injectContextIntoTerminal(terminalId, result.text, result.preview.screenshotPath);
+  } finally {
+    refreshingContext = false;
+  }
+}
+
 // Opens a fresh Claude CLI terminal in the popup. `visibleContext`, if
 // given, is typed into the input once the session is ready — used for
 // resumed sessions, which can't reliably take context injected invisibly
-// via a system-prompt flag (see popupWindow.ts). It's wrapped as a
-// bracketed paste so the CLI's multi-line input treats it as one pasted
-// block (embedded newlines included) instead of submitting partway
-// through, and left unsubmitted so the user can add to it before hitting
-// Enter themselves. `screenshotPath`, if given, is pasted in first as a
-// real image (clipboard + Ctrl+V byte, see ptyManager.ts's
-// pasteImageIntoPty) so the model gets an actual image content block
-// without needing to Read() a path — `visibleContext`'s text then lands
-// shortly after so it reads in the input like a normal "paste screenshot,
-// type question" turn.
+// via a system-prompt flag (see popupWindow.ts). `screenshotPath`, if
+// given, is pasted in first as a real image — see injectContextIntoTerminal
+// above for how both are delivered.
 function openTerminal(args, visibleContext, screenshotPath) {
   teardownTerminal();
   // teardownTerminal() only clears term-inner as a side effect of tearing
@@ -148,6 +201,19 @@ function openTerminal(args, visibleContext, screenshotPath) {
   fitAddon.fit();
   term.focus();
 
+  // Reserves Cmd+Shift+R for triggerContextRefresh instead of letting it
+  // reach the CLI as ordinary input — xterm's documented mechanism for
+  // carving out app-level shortcuts (returning false skips xterm's own
+  // handling of the event entirely).
+  term.attachCustomKeyEventHandler((event) => {
+    if (event.type === "keydown" && event.metaKey && event.shiftKey && event.key.toLowerCase() === "r") {
+      event.preventDefault();
+      triggerContextRefresh();
+      return false;
+    }
+    return true;
+  });
+
   const terminalId = (activeTerminalId = `popup-${Date.now()}`);
   window.clance
     .createTerminal(activeTerminalId, "claude", args, term.cols, term.rows)
@@ -176,34 +242,11 @@ function openTerminal(args, visibleContext, screenshotPath) {
 
   if (screenshotPath || visibleContext) {
     const terminalId = activeTerminalId;
-    const sendVisibleContext = () => {
-      if (!visibleContext || activeTerminalId !== terminalId) return;
-      // Defense in depth: the main process already strips control chars
-      // (including ESC) from window-title-derived text before it gets
-      // here, but sanitize again so this path is safe even if
-      // `visibleContext` ever carries untrusted text some other way — in
-      // particular, stripping ESC means it can't contain a fake `\x1b[201~`
-      // that would let content escape the paste block early. Trailing
-      // newlines stay inside the paste brackets (bracketed paste treats
-      // embedded \n as literal text, not Enter) so the input stays
-      // unsubmitted for the user to add to.
-      // eslint-disable-next-line no-control-regex
-      const sanitized = visibleContext.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, "");
-      window.clance.writeTerminal(terminalId, `\x1b[200~${sanitized}\n\n\x1b[201~`);
-    };
     // Resuming replays the session's prior history first, so this needs
     // longer to land than a fresh session's near-instant prompt.
     setTimeout(() => {
       if (activeTerminalId !== terminalId) return;
-      if (screenshotPath) {
-        window.clance.pasteImageToTerminal(terminalId, screenshotPath);
-        // Give the CLI a moment to register the pasted image as its own
-        // pending attachment before typing text after it, rather than
-        // racing the two into the input at once.
-        if (visibleContext) setTimeout(sendVisibleContext, 400);
-      } else {
-        sendVisibleContext();
-      }
+      injectContextIntoTerminal(terminalId, visibleContext, screenshotPath);
     }, 1200);
   }
 }
