@@ -34,11 +34,10 @@
       /* Lives inline at the trailing end of whichever tab bar sits in the
          window's top-right corner — normal flow content, not an overlay,
          so it never fights the tab bar's own drag region or gets covered
-         by it. See topRightLeafId in Shell.js. */
-      .tab-bar-spacer {
-        flex: 1;
-        min-width: 12px;
-      }
+         by it. See topRightLeafId in Shell.js. Stays flush at the true
+         trailing edge because .tab-list (not this) is the flex: 1 space-
+         filler now — a spacer here too would just split the remaining
+         space between the two instead of ceding all of it to the tabs. */
       .launcher-cluster {
         -webkit-app-region: no-drag;
         display: flex;
@@ -101,12 +100,47 @@
         flex-shrink: 0;
         -webkit-app-region: drag;
       }
+      /* The scrollable region for tabs, separate from .tab-bar itself —
+         .tab-bar also carries the launcher-cluster (top-right corner
+         buttons) as a sibling flex item. Without this wrapper, tabs and
+         the launcher-cluster competed for the same row with no overflow
+         boundary: past a certain tab count the whole row just grew wider
+         than the window, dragging the corner buttons along with it instead
+         of leaving them fixed in place. flex: 1 1 auto lets this absorb
+         all the space the launcher-cluster doesn't need; min-width: 0
+         overrides the flex-item default of min-width: auto, which would
+         otherwise refuse to shrink below the tabs' natural total width and
+         silently defeat overflow-x here. */
+      .tab-list {
+        display: flex;
+        align-items: flex-end;
+        gap: 2px;
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+      }
+      /* A near-invisible scroll affordance rather than a fully hidden one
+         — thin enough to stay out of the way, present enough that an
+         overflowing tab row doesn't look like it's just silently clipping
+         content. */
+      .tab-list::-webkit-scrollbar {
+        height: 3px;
+      }
+      .tab-list::-webkit-scrollbar-thumb {
+        background: var(--surface-border);
+        border-radius: 2px;
+      }
+      .tab-list::-webkit-scrollbar-track {
+        background: transparent;
+      }
       .tab {
         -webkit-app-region: no-drag;
         display: flex;
         align-items: center;
         gap: 6px;
         max-width: 220px;
+        flex-shrink: 0;
         padding: 7px 10px;
         border: 1px solid transparent;
         border-bottom: none;

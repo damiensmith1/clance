@@ -214,31 +214,32 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
   return html`
     <div class="pane-leaf" onMouseDown=${() => activatePane(node.id)}>
       <div class="tab-bar ${node.id === topLeftPaneId ? "tab-bar-inset" : ""}" data-pane-id=${node.id}>
-        ${node.tabs.map(
-          (tab, i) => html`
-            <button
-              key=${tab.id}
-              class="tab ${tab.id === node.activeTabId ? "tab-active" : ""}"
-              onPointerDown=${(e) => startDrag(e, tab, node.id)}
-            >
-              <span class="tab-icon">${tabIcon(tab)}</span>
-              <span class="tab-label">${tab.label}</span>
-              <span
-                class="tab-close"
-                onPointerDown=${(e) => e.stopPropagation()}
-                onClick=${(e) => {
-                  e.stopPropagation();
-                  closeTab(node.id, tab.id);
-                }}
+        <div class="tab-list">
+          ${node.tabs.map(
+            (tab, i) => html`
+              <button
+                key=${tab.id}
+                class="tab ${tab.id === node.activeTabId ? "tab-active" : ""}"
+                onPointerDown=${(e) => startDrag(e, tab, node.id)}
               >
-                ${Icon.close(12)}
-              </span>
-            </button>
-          `
-        )}
+                <span class="tab-icon">${tabIcon(tab)}</span>
+                <span class="tab-label">${tab.label}</span>
+                <span
+                  class="tab-close"
+                  onPointerDown=${(e) => e.stopPropagation()}
+                  onClick=${(e) => {
+                    e.stopPropagation();
+                    closeTab(node.id, tab.id);
+                  }}
+                >
+                  ${Icon.close(12)}
+                </span>
+              </button>
+            `
+          )}
+        </div>
         ${showLauncher &&
         html`
-          <div class="tab-bar-spacer"></div>
           <div class="launcher-cluster">
             <span
               class="status-dot ${launcher.claudeConnected ? "status-dot-ok" : "status-dot-off"}"
@@ -521,8 +522,16 @@ export function Shell() {
       // `claude agents --json` since that's the source of truth for what's
       // running.
       const args = await window.clanceApp.resolveOpenArgs(session.id, session.title);
+      // Keyed by session.id, not session.filePath: an Active row
+      // (ChatsSection.js's handleOpenAgent) only has the bare session id to
+      // pass as filePath (there's no transcript file path in a live
+      // `claude agents --json` entry), while a Closed row passes the real
+      // one — same underlying session, two different id shapes, so
+      // OPEN_TAB's dedup (findTabAnywhere) never matched across them and
+      // the same conversation could end up open in two tabs at once.
+      // session.id is the actual session UUID either way.
       openTab(
-        { id: `chat:${session.filePath}`, type: "terminal", label: session.title, icon: "terminal", terminalId, args },
+        { id: `chat:${session.id}`, type: "terminal", label: session.title, icon: "terminal", terminalId, args },
         { paneId: state.activePaneId }
       );
     } finally {
