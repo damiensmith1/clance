@@ -488,6 +488,69 @@
         gap: 10px;
         margin-bottom: 32px;
       }
+      /* "New Session" dropdown — same shape as the popup's "Open in..."
+         one (default first, then recent directories, then Browse...), own
+         CSS since this window and the popup are entirely separate
+         documents with their own stylesheets. */
+      .new-session-wrap {
+        position: relative;
+      }
+      .new-session-dropdown {
+        position: absolute;
+        top: 100%;
+        right: 0;
+        margin-top: 6px;
+        width: 320px;
+        max-height: 340px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        box-sizing: border-box;
+        background: var(--surface-card);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-md);
+        box-shadow: 0 8px 30px rgba(51, 44, 34, 0.16);
+        padding: 8px;
+        z-index: 10;
+      }
+      .dir-pick-row {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+        width: 100%;
+        box-sizing: border-box;
+        text-align: left;
+        background: transparent;
+        border: none;
+        border-radius: var(--radius-sm);
+        padding: 6px 8px;
+        cursor: pointer;
+        font-family: inherit;
+        flex-shrink: 0;
+      }
+      .dir-pick-row:hover {
+        background: var(--surface-hover);
+      }
+      .dir-pick-row-title {
+        font-size: 13px;
+        color: var(--text-primary);
+      }
+      .dir-pick-row-meta {
+        font-size: 11px;
+        color: var(--text-secondary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 100%;
+      }
+      .dir-pick-divider {
+        height: 1px;
+        background: var(--surface-border);
+        margin: 2px 0;
+        flex-shrink: 0;
+      }
       .search-input {
         flex: 1;
         display: flex;

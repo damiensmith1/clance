@@ -12,7 +12,7 @@ import { openMainWindow, openSessionInMainWindow } from "./mainWindow";
 import { createAppMenu } from "./appMenu";
 import { ensureSessionCwd, SESSION_CWD } from "./paths";
 import { getSetupStatus } from "./setupStatus";
-import { readConfig, writeConfig, getDefaultDirectory } from "./config";
+import { readConfig, writeConfig, getDefaultDirectory, addRecentDirectory } from "./config";
 import { pickDirectory } from "./directoryPicker";
 import { connectClaude, disconnectClaude, openInstallDocs } from "./claudeAuth";
 import {
@@ -153,10 +153,15 @@ ipcMain.handle(
   (_event, sessionId: string, archived: boolean) => setSessionArchived(sessionId, archived)
 );
 
-ipcMain.handle(
-  "agents:spawn-new",
-  (_event, name: string, claudeArgs: string[]) => spawnBackgroundAgent(name, claudeArgs, getDefaultDirectory())
-);
+// cwd is explicit only when the caller picked one (the main window's "New
+// Session" dropdown) rather than the default row — tracked as a recent
+// directory in exactly that case, same invariant popupWindow.ts's
+// openNewSessionInDirectory keeps for the popup's equivalent flow (picking
+// "Default" should never itself become a "recent" entry).
+ipcMain.handle("agents:spawn-new", (_event, name: string, claudeArgs: string[], cwd?: string | null) => {
+  if (cwd) addRecentDirectory(cwd);
+  return spawnBackgroundAgent(name, claudeArgs, cwd || getDefaultDirectory());
+});
 
 // Guards against shelling out `claude stop` with no real id (seen live:
 // the renderer invoked this with `undefined`, which the CLI happily

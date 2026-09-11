@@ -1,5 +1,92 @@
-import { html, useEffect, useMemo, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { html, useEffect, useMemo, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
 import { Icon } from "../../shared/icons.js";
+
+// No Node `path` module in the renderer (contextIsolation) — a directory
+// picked via the native folder dialog is always a plain forward-slash
+// absolute path on macOS, so a simple split covers it. Same helper as
+// popup.js's dirBasename — small enough that duplicating it here beats
+// introducing a shared util module for one three-line function.
+function dirBasename(dir) {
+  const segments = dir.split("/").filter(Boolean);
+  return segments[segments.length - 1] || dir;
+}
+
+// The Sessions page's "New Session" button — a dropdown rather than a
+// single click, so a fresh session can open somewhere other than the
+// configured default without a separate flow. Same shape as the popup's
+// "Open in..." dropdown (default first, then recent directories, then
+// Browse...) rather than a split-button that keeps the single click
+// instant — deliberate: this page is already a multi-step, considered
+// surface (open app, go to Sessions, click), so the extra click to
+// confirm/pick isn't the same cost it would be on the hotkey path.
+function NewSessionButton({ onNewChat }) {
+  const [open, setOpen] = useState(false);
+  const [recentDirs, setRecentDirs] = useState([]);
+  const [defaultDirectory, setDefaultDirectory] = useState(null);
+  const wrapRef = useRef(null);
+
+  function openDropdown() {
+    Promise.all([window.clanceApp.getRecentDirectories(), window.clanceApp.getPreferences()]).then(
+      ([dirs, prefs]) => {
+        setRecentDirs(dirs);
+        setDefaultDirectory(prefs.defaultDirectory);
+      }
+    );
+    setOpen(true);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function handleOutsideClick(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    // Capture phase so this runs before anything else might stop the
+    // event from bubbling — same pattern as popup.js's dropdown.
+    document.addEventListener("click", handleOutsideClick, true);
+    return () => document.removeEventListener("click", handleOutsideClick, true);
+  }, [open]);
+
+  function pick(dir) {
+    setOpen(false);
+    onNewChat(dir);
+  }
+
+  async function handleBrowse() {
+    const dir = await window.clanceApp.pickDirectory();
+    setOpen(false);
+    if (dir) onNewChat(dir);
+  }
+
+  return html`
+    <div class="new-session-wrap" ref=${wrapRef}>
+      <button class="btn-ghost" onClick=${() => (open ? setOpen(false) : openDropdown())}>
+        ${Icon.addServer(12)} New Session
+      </button>
+      ${open &&
+      html`
+        <div class="new-session-dropdown">
+          <button class="dir-pick-row" onClick=${() => pick(null)}>
+            <span class="dir-pick-row-title">Default</span>
+            <span class="dir-pick-row-meta">${defaultDirectory || "Clance's own directory"}</span>
+          </button>
+          ${recentDirs.length > 0 && html`<div class="dir-pick-divider"></div>`}
+          ${recentDirs.map(
+            (dir) => html`
+              <button key=${dir} class="dir-pick-row" onClick=${() => pick(dir)}>
+                <span class="dir-pick-row-title">${dirBasename(dir)}</span>
+                <span class="dir-pick-row-meta">${dir}</span>
+              </button>
+            `
+          )}
+          <div class="dir-pick-divider"></div>
+          <button class="dir-pick-row" onClick=${handleBrowse}>
+            <span class="dir-pick-row-title">Browse…</span>
+          </button>
+        </div>
+      `}
+    </div>
+  `;
+}
 
 // How often the Active list re-polls `claude agents --json` while this
 // section is mounted — live status (busy/idle) can change between visits,
@@ -227,7 +314,7 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
             onInput=${(e) => setQuery(e.target.value)}
           />
         </div>
-        <button class="btn-ghost" onClick=${onNewChat}>${Icon.addServer(12)} New Session</button>
+        <${NewSessionButton} onNewChat=${onNewChat} />
       </div>
 
       <div class="segmented">

@@ -492,7 +492,11 @@ export function Shell() {
   // same one.
   const openingRef = useRef(new Set());
 
-  async function openNewChatTab() {
+  // `dir` is only passed when the Sessions page's "New Session" dropdown
+  // picked something other than "Default" (a recent directory, or a fresh
+  // Browse… pick) — omitted, spawnNewAgent falls back to the configured
+  // default the normal way (see index.ts's "agents:spawn-new" handler).
+  async function openNewChatTab(dir) {
     const key = "__new__";
     if (openingRef.current.has(key)) return;
     openingRef.current.add(key);
@@ -502,7 +506,7 @@ export function Shell() {
       // (see docs/background-agent-architecture.md) — mint one first, then
       // this tab is purely an `attach` viewport onto it, so tab-switch/
       // close can never kill the underlying process.
-      const id = await window.clanceApp.spawnNewAgent("New Chat");
+      const id = await window.clanceApp.spawnNewAgent("New Chat", [], dir);
       openTab(
         { id: terminalId, type: "terminal", label: "New Chat", icon: "terminal", terminalId, args: ["attach", id] },
         { paneId: state.activePaneId }

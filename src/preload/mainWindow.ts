@@ -26,8 +26,9 @@ contextBridge.exposeInMainWorld("clanceApp", {
     ipcRenderer.invoke("chatHistory:resolve-open-args", sessionId, name),
   setSessionArchived: (sessionId: string, archived: boolean) =>
     ipcRenderer.invoke("chatHistory:set-archived", sessionId, archived),
-  spawnNewAgent: (name: string, claudeArgs: string[] = []) =>
-    ipcRenderer.invoke("agents:spawn-new", name, claudeArgs),
+  spawnNewAgent: (name: string, claudeArgs: string[] = [], cwd: string | null = null) =>
+    ipcRenderer.invoke("agents:spawn-new", name, claudeArgs, cwd),
+  getRecentDirectories: () => ipcRenderer.invoke("config:get-recent-directories"),
   stopAgent: (id: string) => ipcRenderer.invoke("agents:stop", id),
   listAgents: (opts: { all?: boolean } = {}) => ipcRenderer.invoke("agents:list", opts),
   openInWidget: (args: string[]) => ipcRenderer.invoke("popup:open-with-args", args),
