@@ -276,6 +276,16 @@
         border-radius: var(--radius-sm);
         border: 1px solid var(--surface-border);
       }
+      /* This ID selector's own `display: block` above outranks the
+         browser default `[hidden] { display: none }` rule (attribute
+         selector loses to ID selector), so renderContextPreview's
+         `.hidden = true` for the no-context-captured case (popup.js)
+         silently did nothing — the broken-image icon and "Screenshot at
+         invocation" alt text rendered anyway, right next to the "No
+         context was captured" message it was supposed to replace. */
+      #context-dialog-image[hidden] {
+        display: none;
+      }
       #context-dialog-title {
         font-weight: 600;
         word-break: break-word;
