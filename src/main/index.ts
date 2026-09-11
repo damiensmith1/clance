@@ -6,7 +6,7 @@ import {
   openPopupWithArgs,
   warmAgentPool,
   openNewSessionInDirectory,
-  isTrackedPopupSessionId,
+  isPopupSessionName,
 } from "./popupWindow";
 import { openMainWindow, openSessionInMainWindow } from "./mainWindow";
 import { createAppMenu } from "./appMenu";
@@ -158,7 +158,12 @@ ipcMain.handle(
   (_event, name: string, claudeArgs: string[]) => spawnBackgroundAgent(name, claudeArgs, getDefaultDirectory())
 );
 
-ipcMain.handle("agents:stop", (_event, id: string) => stopAgent(id));
+// Guards against shelling out `claude stop` with no real id (seen live:
+// the renderer invoked this with `undefined`, which the CLI happily
+// stringifies into "No job matching 'undefined'" rather than failing
+// cleanly) — belt-and-suspenders alongside ChatsSection.js's own
+// same-shaped guard, since this handler has no other caller to trust.
+ipcMain.handle("agents:stop", (_event, id: string) => (id ? stopAgent(id) : undefined));
 
 // Filters out pool spares (see agentPool.ts) — they're real running
 // background agents from the CLI's point of view, but not conversations
@@ -167,17 +172,20 @@ ipcMain.handle("agents:stop", (_event, id: string) => stopAgent(id));
 // empty widget sessions — a popup conversation that was just opened and
 // hasn't had a real message typed into it yet shouldn't show up as
 // "created" either (see popupWindow.ts's cleanupIfAbandoned for the
-// complementary on-close cleanup). isTrackedPopupSessionId narrows this to
-// ids the popup itself actually minted — a session can now open in any
-// directory (see docs/working-directory-design.md), so there's no cheap
-// directory-based way left to tell "is this Clance's" the way there used
-// to be; membership-by-construction replaces that instead of guessing.
+// complementary on-close cleanup). isPopupSessionName catches this by the
+// name every popup-originated session (mint or spare) is given, rather
+// than an id explicitly tracked somewhere — an id set missed spares minted
+// directly by agentPool.ts and reset on every app restart, so a spare
+// orphaned by a rare two-refill race (isPoolSpareId's own pool.json
+// out-of-sync with what's actually running) was invisible to both checks
+// at once; the name check has no such gap, and isPoolSpareId stays as the
+// more specific, unambiguous signal for the common case.
 ipcMain.handle("agents:list", async (_event, opts: { all?: boolean }) => {
   const agents = await listAgents(opts);
   const kept = await Promise.all(
     agents.map(async (agent) => {
       if (isPoolSpareId(agent.id)) return null;
-      if (isTrackedPopupSessionId(agent.id) && !(await hasRealUserMessage(agent.sessionId))) return null;
+      if (isPopupSessionName(agent.name) && !(await hasRealUserMessage(agent.sessionId))) return null;
       return agent;
     })
   );

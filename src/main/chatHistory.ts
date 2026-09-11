@@ -327,9 +327,9 @@ export async function listSessions(): Promise<SessionSummary[]> {
         // signal for "is this actually Clance's" any more now that a
         // session can be minted in any directory (see
         // docs/working-directory-design.md) — the Active-list equivalent
-        // of this check uses an explicit id-tracking set instead (see
-        // popupWindow.ts's isTrackedPopupSessionId) precisely because
-        // directory-scoping stopped being reliable. This is only ever a
+        // of this check uses a name check instead (see popupWindow.ts's
+        // isPopupSessionName) precisely because directory-scoping stopped
+        // being reliable. This is only ever a
         // backstop for the default-directory case, not the general one:
         // Clance sessions should rarely reach here empty at all
         // (popupWindow.ts's cleanupIfAbandoned rm's them on close); this

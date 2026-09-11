@@ -196,6 +196,15 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
   }
 
   async function handleCloseAgent(agent) {
+    if (!agent?.id) {
+      // Seen live: `claude stop` invoked with an undefined id, meaning
+      // this row's agent object had no id at click time — a stale
+      // reference from a poll tick that already rotated it out, most
+      // likely. Nothing sensible to close; don't shell out a garbage
+      // command for it.
+      console.warn("handleCloseAgent: agent has no id, skipping", agent);
+      return;
+    }
     // Optimistic — this is exactly what moves the row from Active to
     // Closed (see docs/background-agent-architecture.md req. 6); the next
     // poll would confirm it, but there's no reason to wait on that.

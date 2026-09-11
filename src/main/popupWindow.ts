@@ -45,27 +45,25 @@ let currentMode: PopupShownPayload["mode"] | null = null;
 // null is exactly the right (safe) behavior for it.
 let currentAgentId: string | null = null;
 
-// Every agent id minted/claimed by the popup, ever (this app run) — used
-// by index.ts's "agents:list" handler, alongside a *live* content check
-// (chatHistory.ts's hasRealUserMessage), to hide a widget session from the
-// Active list while it's still genuinely empty. Membership alone doesn't
-// hide anything — it only narrows which ids are worth a content check at
-// all, the same safety role directory-scoping used to play back when every
-// Clance session lived in one fixed bucket (see the now-deleted
-// clanceSessionIsEmpty and docs/working-directory-design.md) — a false
-// positive here would wrongly hide someone's real, unrelated session,
-// which membership-by-construction rules out entirely (an id only ever
-// gets added when *this* popup minted it). Never removed once a session
-// turns out real — once hasRealUserMessage is true the `&&` below always
-// short-circuits to "don't hide" regardless, so a lingering id here past
-// that point is inert, not a bug — just a small in-memory set that grows
-// with usage and resets on app restart, not worth cross-module bookkeeping
-// to trim (e.g. when "Open in App" moves a still-tracked session to a
-// main-window tab).
-const trackedIds = new Set<string>();
+// Every popup-originated session — a fresh mint, a claimed spare, or a
+// still-unclaimed spare sitting in the pool — is named via this prefix
+// (see popupSessionName below). Used by index.ts's "agents:list" handler,
+// alongside a *live* content check (chatHistory.ts's hasRealUserMessage),
+// to hide a widget session from the Active list while it's still
+// genuinely empty. A name check rather than an id set tracked in memory:
+// an earlier version tracked ids explicitly, but that missed spares
+// minted directly by agentPool.ts (never routed through here at all) and
+// reset on every app restart — a spare orphaned by a rare two-refill race
+// (two app instances/restarts close together each minting one, only the
+// last write to pool.json surviving) was invisible to both gaps at once,
+// showing up in Active forever with no way to reach it. The name prefix
+// is stateless and can't be orphaned the same way: no other mechanism
+// mints a background agent named "Clance popup ..." by coincidence, so
+// checking by name is both more complete and doesn't need bookkeeping.
+const POPUP_SESSION_NAME_PREFIX = "Clance popup";
 
-export function isTrackedPopupSessionId(id: string): boolean {
-  return trackedIds.has(id);
+export function isPopupSessionName(name: string | undefined): boolean {
+  return !!name && name.startsWith(POPUP_SESSION_NAME_PREFIX);
 }
 
 // positionNearCursor's own win.setPosition() call fires a "move" event
@@ -311,7 +309,7 @@ export async function insertTextMcpArgs(): Promise<string[]> {
 // window. A cheap time-qualified name fixes that without needing to wait
 // on the real title.
 export function popupSessionName(): string {
-  return `Clance popup ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  return `${POPUP_SESSION_NAME_PREFIX} ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 
 // Fills the pool spare(s) with the same insert_text MCP wiring a fresh mint
@@ -427,12 +425,10 @@ async function toggleClancePopupInner(): Promise<void> {
     // — without this it'd leak exactly the way cleanupIfAbandoned exists to
     // prevent, just via a path that never reaches an explicit close at all.
     currentAgentId = id;
-    trackedIds.add(id);
     cleanupIfAbandoned();
     return;
   }
   currentAgentId = id;
-  trackedIds.add(id);
   sendToPopup({
     mode: "new",
     args: ["attach", id],
@@ -483,12 +479,10 @@ export async function openNewSessionInDirectory(dir: string): Promise<void> {
     // the session that was minted for a widget nobody's looking at anymore.
     if (currentMode !== "loading") {
       currentAgentId = id;
-    trackedIds.add(id);
       cleanupIfAbandoned();
       return;
     }
     currentAgentId = id;
-    trackedIds.add(id);
     sendToPopup({ mode: "new", args: ["attach", id] });
   } finally {
     openingNewInDirectory = false;
