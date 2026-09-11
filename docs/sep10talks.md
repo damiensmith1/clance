@@ -45,8 +45,8 @@ right ones for this bigger vision too, not obstacles to it.
   underlying process.
 - **The separate "Continue a Conversation" picker popup is deprecated** —
   folded into the regular widget (the "Open in…" dropdown now covers
-  resuming an existing session). `design.md` still describes this as two
-  separate hotkeys/modes in a couple of places and needs a correction pass.
+  resuming an existing session). `design.md`'s remaining two-hotkey
+  references were corrected 2026-09-11.
 
 ## Resolved today: multimodal image input, without the SDK
 
@@ -249,9 +249,8 @@ build from scratch for the highest-stakes actions in the whole app.
   `pasteImageIntoPty()` delivers the screenshot as a real image content
   block (clipboard + `Ctrl+V` byte), and `design.md`'s "Context injection"
   section + the screenshot-delivery open question are updated accordingly.
-- [ ] `design.md` still needs a correction pass for the separate
-  picker-popup hotkey being deprecated/merged into the main widget
-  (unrelated to the multimodal item above)
+- [x] `design.md`'s remaining two-hotkey/picker-popup references corrected
+  2026-09-11 (unrelated to the multimodal item above)
 - [ ] Pre-existing open questions from `design.md` untouched by this
   conversation: exact CLI JSONL schema, folder/config conventions for
   skills/tools/MCP, how much of the settings UI ships in v1,
@@ -260,8 +259,9 @@ build from scratch for the highest-stakes actions in the whole app.
 ## Next steps (as of this conversation)
 
 1. ~~Update `design.md`: multimodal Ctrl+V mechanism replacing the
-   path-text approach.~~ Done — see "Context injection" in `design.md`.
-   The picker-popup deprecation correction there is still outstanding.
+   path-text approach; picker-popup deprecation correction.~~ Both done —
+   see "Context injection" and "Highlighted-selection capture" in
+   `design.md`.
 2. Spec the escalation trigger for Quick Ask → real session (explicit
    button only, or does the SDK path also detect "this wants tool use" and
    prompt to escalate?).

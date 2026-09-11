@@ -1,7 +1,7 @@
 ---
 title: Session working directory design
 tags: [clance, design]
-status: draft
+status: implemented
 ---
 
 # Session working directory design
@@ -111,25 +111,27 @@ by construction, not as a missed optimization.
   any of this — still applies exactly as before, regardless of which
   directory the spare or fresh mint uses.
 
-## Implementation punch list
+## Implementation punch list — all done
 
-- [ ] Settings: default-directory field (persisted in `config.json`
-      alongside `shortcuts`/`enabledSkills`)
-- [ ] Thread `cwd` through as a real parameter everywhere `SESSION_CWD` is
-      currently hardcoded for session *creation* (`agentSessions.ts`'s
-      `claudeExecOptions`, `popupWindow.ts`'s mint calls) — `SESSION_CWD`
-      itself stays as the pseudo-project bucket for pure-default/no-project
-      sessions, just stops being unconditional
-- [ ] Resume/attach path: read `cwd` off the target session's transcript
-      (new small helper in `chatHistory.ts`, same shape as
-      `firstUserTitle`) and pass it through instead of `SESSION_CWD`
-- [ ] `agentPool.ts`: extend `pool.json` entries to `{ id, cwd }`; discard +
+- [x] Settings: default-directory field (persisted in `config.json`
+      alongside `shortcuts`/`enabledSkills` — `config.ts`'s
+      `getDefaultDirectory`)
+- [x] `cwd` threaded through as a real parameter everywhere `SESSION_CWD`
+      was hardcoded for session *creation* — `SESSION_CWD` itself stays as
+      the pseudo-project bucket for pure-default/no-project sessions, just
+      isn't unconditional anymore
+- [x] Resume/attach path reads `cwd` off the target session's transcript
+      (`chatHistory.ts`'s `cwdForSessionId`, same shape as `firstUserTitle`)
+      instead of `SESSION_CWD`
+- [x] `agentPool.ts`'s `pool.json` entries are `{ id, cwd }`; discard +
       refill on Settings default-directory change; claim-time cwd check as
-      the safety net
-- [ ] "Open in…" dropdown: add the "new session in…" directory picker
+      the safety net (`PoolSpare` type, `claimPoolSpare`)
+- [x] "Open in…" dropdown has the "new session in…" directory picker
       (recent dirs + browse) alongside the existing resume-an-existing-
       session list
-- [ ] No changes needed to `listSessions()`/the Chats tab history browser —
-      it already scans every project bucket under `~/.claude/projects/**`
-      and shows the real project label per session; only session
-      *creation* was ever scoped to one fixed bucket
+- [x] No changes needed to `listSessions()`/the Chats tab history browser,
+      as predicted — only session *creation* was ever scoped to one fixed
+      bucket
+- [x] Went further than originally scoped here: the main window's own
+      "New Session" button (Sessions page) got the same directory-picker
+      dropdown as the widget's "Open in…", not just the popup path.

@@ -16,9 +16,12 @@ status: draft
 - Free-text goal input (open-ended, not fixed actions like "Rewrite"/"Explain")
 - Dictation — speak your goal instead of typing it (local speech-to-text)
 - Screen content capture at time of invocation (screenshot + frontmost
-  window title + any highlighted/selected text; handed to the CLI as
-  text/file-path context — not sent as an SDK image content block; see
-  §"Screen context capture") as context for the request
+  window title + any highlighted/selected text; the screenshot reaches the
+  CLI as a real image content block via clipboard + pty injection, not an
+  SDK call and not a path it has to `Read()`; window title/selection reach
+  it as text — see §"Screen context capture") as context for the request,
+  re-capturable mid-conversation via `Cmd+Shift+R` (see
+  `docs/design.md` §"Context injection")
 - The real Claude Code CLI, embedded as a terminal (`node-pty` + `xterm.js`)
   and run as a real child process, handles all reasoning/looping/UI
   rendering — **supersedes the original Claude Agent SDK plan**, see
@@ -149,11 +152,13 @@ status: draft
 
 ### Screen context capture
 
-- On invocation, capture:
+- On invocation, and again on-demand via `Cmd+Shift+R` mid-conversation
+  (see `docs/design.md` §"Context injection", "Refreshing context
+  mid-conversation"), capture:
   - A screenshot of the active display nearest the cursor, saved to
-    `~/.clance/screenshots/` — the CLI is told the file **path**, not
-    handed raw image bytes directly, and reads it itself via a normal tool
-    call if relevant to what the user asks
+    `~/.clance/screenshots/` and delivered to the CLI as a real image
+    content block (clipboard + a `Ctrl+V` byte written into the pty) — not
+    a path it has to `Read()` itself
   - The frontmost window's title (`@nut-tree-fork/nut-js`) — a lighter
     substitute for the originally-planned accessibility-tree read, not a
     full structured-content dump
@@ -161,10 +166,11 @@ status: draft
     (simulated Cmd+C, read back off the clipboard — see `docs/design.md`
     §"Highlighted-selection capture"), folded into the request context with
     an instruction to treat it as the primary subject of the request.
-    Captured both when the hotkey opens a brand-new session and when the
-    widget's "Open in…" dropdown switches to an existing one; delivered
-    invisibly for the former, typed visibly into the terminal for the
-    latter — same split as the rest of this section's context.
+    Delivered invisibly for a brand-new session, typed visibly into the
+    terminal for a resumed session or a refresh — see `docs/design.md`
+    §"Context injection". The widget's "Open in…" dropdown, by contrast,
+    reuses whatever was last captured rather than capturing fresh context
+    for the switch — see `docs/design.md`'s "Open in… dropdown" section.
 - Read-only and on-demand — never persistent/background capture, unchanged
   from the original plan
 - Accessibility-tree / focused-element content read is still deferred —
@@ -182,9 +188,9 @@ status: draft
 - All reasoning, tool use, streaming, and rendering is the CLI's own —
   Clance no longer parses SDK message events or renders any response UI of
   its own.
-- Screen context (screenshot path + frontmost window title) is handed to
-  the CLI as text, not as an SDK image content block — see
-  `docs/design.md` §"Context injection".
+- Screen context reaches the CLI without the SDK: the screenshot as a real
+  image content block (clipboard + pty injection), window title/selection
+  as text — see `docs/design.md` §"Context injection".
 
 ### Response modes (removed — superseded by the terminal pivot)
 
@@ -232,11 +238,16 @@ status: draft
   transcript in its own native format, in its own location
   (`~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl`). Compatibility
   is structural, not a format Clance has to keep in sync by hand.
-- Clance-launched sessions run with a fixed pseudo-`cwd`
-  (`~/.clance/`, see `src/main/paths.ts`), so they land under one stable
-  `~/.claude/projects/<encoded ~/.clance>/` bucket — this was decided
-  before the terminal pivot and still holds, since the CLI process itself
-  (not Clance) is what determines the storage path from its `cwd`.
+- A Clance-launched session's `cwd` is no longer unconditionally
+  `~/.clance/` — see `docs/working-directory-design.md` (implemented): a
+  configurable default directory (Settings), a directory picker in the
+  widget's "Open in…" dropdown for minting a session elsewhere, and a
+  resumed/attached session always inherits its own recorded `cwd` off its
+  transcript rather than any Clance-side default. `~/.clance/` remains the
+  pseudo-project bucket only for sessions that never had a real project
+  directory to use — the fallback, not the rule. The storage path itself
+  is still purely a function of the CLI process's own `cwd`, not something
+  Clance writes.
 - Sessions started in a bare terminal (any real `claude` invocation
   anywhere on the machine) are already visible in Clance's own chat
   history browser — full compatibility, not "in principle."
@@ -391,9 +402,11 @@ the toggle-managed path above) no Clance-specific wiring needed at all.
 - Hotkey reliably opens the popup (an embedded terminal) from any app, any
   time
 - Screen context (screenshot + frontmost window title) is captured and
-  reaches the CLI correctly for both new and resumed sessions — for new
-  sessions, invisibly; for resumed sessions, as visible typed terminal
-  input (see `docs/design.md` §"Context injection")
+  reaches the CLI correctly for both new and resumed sessions, and again
+  on-demand mid-conversation via `Cmd+Shift+R` — the screenshot as a real
+  image the same way regardless of session type; window title/selection
+  text invisibly for new sessions, visibly typed for resumed sessions and
+  refreshes (see `docs/design.md` §"Context injection")
 - ~~Text injection works in at least one real target app~~ — **removed**,
   no longer an app-owned feature to validate
 - ❌ Dictation not yet implemented — still an open item, not yet a met
@@ -402,10 +415,10 @@ the toggle-managed path above) no Clance-specific wiring needed at all.
   terminal, and vice versa — structurally guaranteed now (every session
   is a real CLI process), not just "in a format that could support this"
 - ✅ Both new-session and resume/attach flows work reliably: `Option+Space`
-  opens a clean new session every time; the picker resumes or attaches to
-  an existing one without surfacing the CLI's "already running as
-  background agent" error to the user (see `docs/design.md` §"Attach vs.
-  resume")
+  opens a clean new session every time; the widget's "Open in…" dropdown
+  resumes or attaches to an existing one without surfacing the CLI's
+  "already running as background agent" error to the user (see
+  `docs/design.md` §"Attach vs. resume")
 - Chat history view accurately shows all past sessions (Clance's own and
   any real CLI session on the machine), opening each as a resumed terminal
   tab

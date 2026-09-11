@@ -228,15 +228,16 @@ real submitted message can't corrupt that session's title.
   launch — a session's *first* launch permanently decides whether any
   *future* `--resume` of it can ever take a fresh `--append-system-prompt`.
   With the flag off from birth, a later resume of that same session (e.g.
-  via the picker) can still receive new context; without it (the CLI's
-  default, and the state of every session that predates this feature —
-  including ones started from a bare terminal), the CLI silently ignores
-  any `--append-system-prompt` on resume, and even flags it as a
-  suspicious injection attempt in its own reasoning. This is not
-  fixable via CLI flags on the resume side — it's decided permanently at
-  a session's original launch.
-- **Resumed/attached sessions** (the picker widget): since most existing
-  sessions were never launched with the snapshot flag off, invisible
+  via the widget's "Open in…" dropdown) can still receive new context;
+  without it (the CLI's default, and the state of every session that
+  predates this feature — including ones started from a bare terminal),
+  the CLI silently ignores any `--append-system-prompt` on resume, and
+  even flags it as a suspicious injection attempt in its own reasoning.
+  This is not fixable via CLI flags on the resume side — it's decided
+  permanently at a session's original launch.
+- **Resumed/attached sessions** (opened via the widget's "Open in…"
+  dropdown): since most existing sessions were never launched with the
+  snapshot flag off, invisible
   injection can't be relied on for them. Instead, context is **typed into
   the terminal as visible, unsubmitted input** once the session is ready —
   wrapped in a bracketed-paste escape sequence (`\x1b[200~...\x1b[201~`)
@@ -310,8 +311,8 @@ as app-level mediation.
   (`popupWindow.ts`'s `insertTextMcpArgs()`), and only when
   `checkPermissions().accessibility` is already true; otherwise the flag is
   omitted entirely so the CLI never offers a tool that would just fail.
-  Resumed/attached/picker sessions don't get it — there's no freshly
-  captured frontmost window for those to type back into.
+  Resumed/attached sessions (opened via "Open in…") don't get it — there's
+  no freshly captured frontmost window for those to type back into.
 - **Model-decided, no app-level accept/reject:** the CLI calls the tool
   like any other tool when it judges the user wants text written into the
   app they were just using, rather than printed in the terminal. There is
@@ -324,10 +325,10 @@ as app-level mediation.
 Lets a hotkey-opened popup session know what text, if any, was
 highlighted/selected in the frontmost app at invocation time, and steers the
 model to treat it as the focus of the request rather than requiring the
-user to re-describe or re-paste it. Wired into both hotkeys —
-`toggleClancePopup` (Option+Space) and `togglePopupPicker`
-(Option+Shift+Cmd+Space) — since both go through the same
-`captureContextText()`.
+user to re-describe or re-paste it. Wired into both `toggleClancePopup`
+(Option+Space, the initial capture) and `refreshContext` (Cmd+Shift+R,
+mid-conversation — see "Context injection" above) since both go through
+the same `captureContextText()`.
 
 - **Mechanism:** `captureSelectedText()` in `src/main/frontApp.ts` runs
   alongside `captureFrontmostWindow()`/the screenshot capture, before the
@@ -341,19 +342,18 @@ user to re-describe or re-paste it. Wired into both hotkeys —
   selected — reads back empty rather than being confused with a selection
   that happens to match old clipboard contents.
 - **Gated on Accessibility**, same permission (and same keystroke-simulation
-  mechanism) `insert_text` needs — `popupWindow.ts`'s `toggleClancePopup`
-  reuses the same `checkPermissions().accessibility` check for both rather
-  than checking twice.
-- **Both hotkeys, one delivery difference:** `captureContextText()`'s
-  `captureSelection` param is `true` for both `toggleClancePopup` and
-  `togglePopupPicker` (each gated on its own `checkPermissions().accessibility`
-  check). What differs is how the resulting text reaches the CLI — invisibly
-  via `--append-system-prompt` for a brand-new session, or typed into the
-  terminal as visible input for a resumed one (see "Context injection"
-  above) — not whether the selection gets captured at all. `insert_text`
-  itself is still new-session-only (no MCP server wiring for resumed
-  sessions), which is unrelated: capturing a selection is just a keystroke
-  simulation, same Accessibility gate, no MCP config needed.
+  mechanism) `insert_text` needs — both `toggleClancePopup` and
+  `refreshContext` reuse the same `checkPermissions().accessibility` check.
+- **Same capture, different delivery depending on when it fires:**
+  `captureContextText()`'s `captureSelection` param is `true` from both
+  call sites. What differs is how the resulting text reaches the CLI —
+  invisibly via `--append-system-prompt` for a brand-new session, or typed
+  into the terminal as visible input for a resumed session or a refresh
+  (see "Context injection" above) — not whether the selection gets
+  captured at all. `insert_text` itself is still new-session-only (no MCP
+  server wiring for resumed sessions), which is unrelated: capturing a
+  selection is just a keystroke simulation, same Accessibility gate, no
+  MCP config needed.
 - **Prompting:** when a selection was captured, `buildContextText()` in
   `popupWindow.ts` includes it verbatim (sanitized the same way the window
   title is, and capped at `MAX_SELECTED_TEXT_CHARS` — 4000 — so one huge
@@ -1013,12 +1013,12 @@ see `docs/background-agent-architecture.md`.
       dependency; see the Setup Wizard note above.
 - [x] Does the popup stay open for multi-turn follow-up in the same
       invocation, or is each hotkey-press a fresh single-turn request?
-      **Resolved, mechanism changed:** every hotkey-open is a new terminal
-      session (`Option+Space`) or a resumed/attached one
-      (`Alt+Shift+Command+Space` → picker) — multi-turn "staying open" is
-      now just however long the user keeps that terminal's `claude`
-      process running, the same as any terminal-based CLI session, not an
-      app-managed conversation state.
+      **Resolved, mechanism changed:** `Option+Space` always opens a new
+      terminal session; the widget's "Open in…" dropdown resumes or
+      attaches to an existing one in place, no separate hotkey — multi-turn
+      "staying open" is now just however long the user keeps that
+      terminal's `claude` process running, the same as any terminal-based
+      CLI session, not an app-managed conversation state.
 - [ ] Which local speech-to-text engine for dictation — **not yet
       implemented at all**, terminal pivot didn't address this; still an
       open requirements-level question (see `docs/requirements.md`
