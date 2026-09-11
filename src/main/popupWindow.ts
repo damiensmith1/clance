@@ -6,7 +6,7 @@ import { checkPermissions } from "./permissions";
 import { ensureInsertTextServer } from "./insertTextServer";
 import { spawnBackgroundAgent, resolveSessionId, stopAgent, rmAgent } from "./agentSessions";
 import { claimPoolSpare, refillPool } from "./agentPool";
-import { hasRealUserMessage } from "./chatHistory";
+import { hasRealUserMessage, CLANCE_CONTEXT_PREFIX } from "./chatHistory";
 
 const DEFAULT_WIDTH = 560;
 const DEFAULT_HEIGHT = 480;
@@ -215,9 +215,7 @@ function buildContextText(
   selectedText: string | undefined,
   insertTextAvailable: boolean
 ): string {
-  const lines = [
-    "The user just invoked Clance via its global screen-overlay shortcut — a quick-access popup, not a full coding session.",
-  ];
+  const lines = [CLANCE_CONTEXT_PREFIX];
   if (windowTitle) {
     lines.push(`The frontmost window at the time was: "${sanitizeForTerminal(windowTitle)}".`);
   }

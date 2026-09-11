@@ -68,6 +68,28 @@ function truncate(text: string, maxLength: number): string {
   return trimmed.length > maxLength ? `${trimmed.slice(0, maxLength)}…` : trimmed;
 }
 
+// The fixed opening line of every Clance-injected screen-context block (see
+// popupWindow.ts's buildContextText, which imports this rather than
+// hardcoding it, so the two can't drift apart). A brand-new session gets
+// this invisibly via --append-system-prompt — never a "user" turn at all,
+// so it never reaches here. A resumed/claimed-spare session gets it typed
+// as *visible* unsubmitted input ahead of whatever the user adds
+// themselves (see popup.js's openTerminal), so the two end up glued into
+// one submitted "user" turn — without stripping this back out, every such
+// session's title was this preamble instead of the user's actual request.
+export const CLANCE_CONTEXT_PREFIX =
+  "The user just invoked Clance via its global screen-overlay shortcut — a quick-access popup, not a full coding session.";
+
+// Strips a leading Clance-injected context block, if present. The
+// injection always appends "\n\n" after the block before the user's own
+// typed text begins (see popup.js) — that blank line is the boundary; if
+// it's never found, this is left untouched rather than guessing.
+function stripClanceContextPrefix(text: string): string {
+  if (!text.startsWith(CLANCE_CONTEXT_PREFIX)) return text;
+  const boundary = text.indexOf("\n\n");
+  return boundary === -1 ? text : text.slice(boundary + 2);
+}
+
 // `content` is either a plain string (older sessions) or an array of
 // Anthropic Messages API content blocks — this pulls the first text block
 // out of either shape.
@@ -101,9 +123,17 @@ async function firstUserTitle(filePath: string): Promise<string> {
       if (entry.type !== "user") continue;
       const message = entry.message as Record<string, unknown> | undefined;
       const text = extractText(message?.content);
-      if (text && text.trim() && !isSyntheticLocalCommandText(text)) {
-        return truncate(text, TITLE_MAX_LENGTH);
-      }
+      if (!text || !text.trim() || isSyntheticLocalCommandText(text)) continue;
+      // A real turn — this is what makes the session non-empty for
+      // hasRealUserMessage/clanceSessionIsEmpty purposes too, so that
+      // determination is intentionally based on the raw text above, before
+      // any stripping. The *displayed* title prefers the user's own words
+      // (stripping the Clance context preamble when present); if nothing's
+      // left after stripping — the user submitted just the pasted context
+      // with nothing added — fall back to the raw text rather than
+      // treating a real, submitted turn as if it didn't happen.
+      const stripped = stripClanceContextPrefix(text).trim();
+      return truncate(stripped || text, TITLE_MAX_LENGTH);
     }
   } finally {
     rl.close();
