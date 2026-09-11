@@ -4,7 +4,9 @@ import { captureFrontmostWindow, captureSelectedText } from "./frontApp";
 import { captureAndSaveActiveDisplay } from "./screenCapture";
 import { checkPermissions } from "./permissions";
 import { ensureInsertTextServer } from "./insertTextServer";
-import { spawnBackgroundAgent } from "./agentSessions";
+import { spawnBackgroundAgent, resolveSessionId, stopAgent, rmAgent } from "./agentSessions";
+import { claimPoolSpare, refillPool } from "./agentPool";
+import { hasRealUserMessage } from "./chatHistory";
 
 const DEFAULT_WIDTH = 560;
 const DEFAULT_HEIGHT = 480;
@@ -27,11 +29,20 @@ type PopupShownPayload =
   // agent-spawn work below has even started — so the widget is never just a
   // blank frame while the user waits on that chain (see toggleClancePopup).
   | { mode: "loading" }
-  | { mode: "new"; args: string[]; contextPreview?: ContextPreview };
+  | { mode: "new"; args: string[]; contextPreview?: ContextPreview; visibleContext?: string };
 
 let popup: BrowserWindow | null = null;
 let popupReady: Promise<void> | null = null;
 let currentMode: PopupShownPayload["mode"] | null = null;
+
+// The agent id of whatever session toggleClancePopupInner most recently
+// minted or claimed — tracked here (not just in the renderer) so an
+// explicit close can decide whether to clean it up. Deliberately NOT set
+// by openPopupWithArgs (the main window's "pop out to widget" button): that
+// path is always a pre-existing, already-real conversation, so there's
+// nothing here for it to opt into — cleanupIfAbandoned below finding this
+// null is exactly the right (safe) behavior for it.
+let currentAgentId: string | null = null;
 
 // positionNearCursor's own win.setPosition() call fires a "move" event
 // just like a user drag does — this tells the "move" listener below to
@@ -51,6 +62,33 @@ let userHasRepositioned = false;
 export function hidePopup(): void {
   if (popup && !popup.isDestroyed()) popup.hide();
   currentMode = null;
+}
+
+// If the session that's about to close was minted/claimed by this popup
+// and never got a single real user turn, there's no reason to keep it
+// running — or even keep it around as a stopped-but-resumable session,
+// which would just be silent clutter in the Closed list forever (its
+// transcript title would fall back to "New conversation" indefinitely,
+// since it never had any real content to derive one from). Deliberately
+// NOT wired into hidePopup() itself — "Open in App" also calls hidePopup()
+// but is the opposite of abandonment (the conversation is being kept, just
+// moved to a tab), so this is only called from the two truly-explicit-close
+// call sites below. Best-effort: any failure here is silently swallowed —
+// worst case is a harmless stopped/empty session sitting around, exactly
+// the pre-existing behavior this is improving on, not a regression.
+async function cleanupIfAbandoned(): Promise<void> {
+  const id = currentAgentId;
+  currentAgentId = null;
+  if (!id) return;
+  try {
+    const sessionId = await resolveSessionId(["attach", id]);
+    if (!sessionId) return;
+    if (await hasRealUserMessage(sessionId)) return;
+    await stopAgent(id);
+    await rmAgent(id);
+  } catch {
+    // Best-effort — see comment above.
+  }
 }
 
 function createPopup(): BrowserWindow {
@@ -110,7 +148,10 @@ function positionNearCursor(win: BrowserWindow): void {
   win.setPosition(Math.max(x, display.workArea.x), Math.max(y, display.workArea.y));
 }
 
-ipcMain.on("popup:close", () => hidePopup());
+ipcMain.on("popup:close", () => {
+  hidePopup();
+  cleanupIfAbandoned();
+});
 
 // Creates/positions the window but never shows it — safe to run concurrently
 // with screen-context capture (captureContextText below), since it has no
@@ -229,7 +270,7 @@ async function captureContextText(
 // since that's what the underlying keystroke injection needs; when it's not
 // granted, the CLI just doesn't see the tool rather than seeing one that
 // silently fails.
-async function insertTextMcpArgs(): Promise<string[]> {
+export async function insertTextMcpArgs(): Promise<string[]> {
   if (!checkPermissions().accessibility) return [];
   const { url, token } = await ensureInsertTextServer();
   return [
@@ -238,6 +279,28 @@ async function insertTextMcpArgs(): Promise<string[]> {
       mcpServers: { clance: { type: "http", url, headers: { Authorization: `Bearer ${token}` } } },
     }),
   ];
+}
+
+// Every popup conversation used to be minted with the exact same literal
+// name ("Clance popup") — harmless for the CLI itself, but the Chats tab's
+// Active list falls back to this name (ChatsSection.js) whenever a
+// session's real transcript-derived title hasn't loaded yet, so two
+// recently-opened widget conversations were indistinguishable in that
+// window. A cheap time-qualified name fixes that without needing to wait
+// on the real title.
+export function popupSessionName(): string {
+  return `Clance popup ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+}
+
+// Fills the pool spare(s) with the same insert_text MCP wiring a fresh mint
+// would get — that wiring doesn't depend on any per-invocation capture
+// (it's just the already-running local server's URL/token), so there's no
+// reason a spare should be missing it. Called once at app startup
+// (index.ts), after every claim (toggleClancePopupInner below), and safe to
+// call repeatedly — refillPool collapses concurrent calls into one fill.
+export async function warmAgentPool(): Promise<void> {
+  const mcpArgs = await insertTextMcpArgs();
+  await refillPool(mcpArgs, popupSessionName);
 }
 
 // Set for the duration of the capture/spawn chain below — the widget now
@@ -249,6 +312,7 @@ let opening = false;
 export async function toggleClancePopup(): Promise<void> {
   if (popup && !popup.isDestroyed() && popup.isVisible() && currentMode === "new") {
     hidePopup();
+    cleanupIfAbandoned();
     return;
   }
   if (opening) return;
@@ -285,35 +349,63 @@ async function toggleClancePopupInner(): Promise<void> {
   revealPopupWindow();
   sendToPopup({ mode: "loading" });
 
-  // A brand-new session has no prior recorded system-prompt snapshot, so
-  // this rides in invisibly — --system-prompt-snapshot off makes sure that
-  // stays true on any *future* resume of this exact session too: a resumed
-  // session can't reliably take a fresh --append-system-prompt otherwise
-  // (the CLI only honors it if the session's *original* launch had this
-  // off), and there'd be no way to tell from here whether a given resumed
-  // session was Clance's own or something else entirely (a bare-terminal
-  // session, say) that never had this flag at all. That's also why the
-  // popup's "Open in..." dropdown (popup.js) types context visibly into a
-  // resumed session's input instead of relying on this invisible path.
-  //
-  // Minted as a background agent immediately, same as every other
-  // Clance-launched session (see docs/background-agent-architecture.md) —
-  // the popup terminal that opens below is just an `attach` viewport onto
-  // it, so closing the widget or the app never ends the conversation.
-  const id = await spawnBackgroundAgent("Clance popup", [
-    "--append-system-prompt",
-    contextText,
-    "--system-prompt-snapshot",
-    "off",
-    ...mcpArgs,
-  ]);
+  // Try the pool first — a pre-warmed spare skips the mint latency
+  // entirely, but it was minted before this invocation's context existed,
+  // so it can't have received --append-system-prompt. Its context has to
+  // ride in the same visible-typed way a resumed session's does (see
+  // popup.js's openTerminal) instead of invisibly. Accepted trade-off,
+  // decided 2026-09-10: every "New Conversation" open now prefers speed
+  // over invisible context when a spare is available, rather than only
+  // pooling for cases where invisibility doesn't matter.
+  const claimedId = claimPoolSpare();
+  let id: string;
+  let visibleContext: string | undefined;
+  if (claimedId) {
+    id = claimedId;
+    visibleContext = contextText;
+    // Fire-and-forget — don't make this open wait on minting the next
+    // spare, just make sure one's on the way for next time.
+    warmAgentPool().catch(() => {});
+  } else {
+    // A brand-new session has no prior recorded system-prompt snapshot, so
+    // this rides in invisibly — --system-prompt-snapshot off makes sure that
+    // stays true on any *future* resume of this exact session too: a resumed
+    // session can't reliably take a fresh --append-system-prompt otherwise
+    // (the CLI only honors it if the session's *original* launch had this
+    // off), and there'd be no way to tell from here whether a given resumed
+    // session was Clance's own or something else entirely (a bare-terminal
+    // session, say) that never had this flag at all. That's also why the
+    // popup's "Open in..." dropdown (popup.js) types context visibly into a
+    // resumed session's input instead of relying on this invisible path.
+    //
+    // Minted as a background agent immediately, same as every other
+    // Clance-launched session (see docs/background-agent-architecture.md) —
+    // the popup terminal that opens below is just an `attach` viewport onto
+    // it, so closing the widget or the app never ends the conversation.
+    id = await spawnBackgroundAgent(popupSessionName(), [
+      "--append-system-prompt",
+      contextText,
+      "--system-prompt-snapshot",
+      "off",
+      ...mcpArgs,
+    ]);
+  }
   // The user may have hit the hotkey again (hiding the widget) while all of
   // the above was in flight — don't resurrect it out from under them.
-  if (currentMode !== "loading") return;
+  if (currentMode !== "loading") {
+    // The session still got minted/claimed even though nobody ever saw it
+    // — without this it'd leak exactly the way cleanupIfAbandoned exists to
+    // prevent, just via a path that never reaches an explicit close at all.
+    currentAgentId = id;
+    cleanupIfAbandoned();
+    return;
+  }
+  currentAgentId = id;
   sendToPopup({
     mode: "new",
     args: ["attach", id],
     contextPreview: preview,
+    visibleContext,
   });
 }
 

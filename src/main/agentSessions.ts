@@ -111,6 +111,14 @@ export async function stopAgent(id: string): Promise<void> {
   await execFileAsync("claude", ["stop", id], claudeExecOptions());
 }
 
+// Permanently removes a session — unlike stopAgent, there's no `claude
+// attach`/`--resume` coming back from this. Used only for popup sessions
+// confirmed to have zero real user turns (see popupWindow.ts's
+// cleanupIfAbandoned) — a real conversation is never a candidate for this.
+export async function rmAgent(id: string): Promise<void> {
+  await execFileAsync("claude", ["rm", id], claudeExecOptions());
+}
+
 // Guards resolveOpenArgs against a double-click (or two windows/panes)
 // racing to open the same session before the first mint has registered —
 // `claude --bg --resume` isn't idempotent against itself: two concurrent

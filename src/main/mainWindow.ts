@@ -74,15 +74,28 @@ function spawnTimestampFromTerminalId(terminalId: string): number | null {
 // triggered by the renderer once it's ready to receive this session's
 // output), so an in-flight response isn't lost.
 export async function openSessionInMainWindow(terminalId: string, args: string[]): Promise<void> {
-  let sessionId = await resolveSessionId(args);
-  if (!sessionId) {
-    // A brand-new (never --resume'd) session has no id in its launch args
-    // at all — fall back to finding it by spawn time so the tab still gets
-    // labeled with the real session title instead of a generic placeholder.
-    const spawnedAt = spawnTimestampFromTerminalId(terminalId);
-    if (spawnedAt) sessionId = await findRecentClanceSessionId(spawnedAt);
+  // Title resolution is best-effort — it reaches into ~/.claude/projects/
+  // (readdir/stat/readline over files Clance doesn't own) purely to label
+  // the tab nicely. A failure here used to take down the whole handoff with
+  // it: since this ran un-guarded before openMainWindow()/hidePopup(), any
+  // throw meant the button did nothing at all — popup stays open, no tab
+  // appears, no error surfaced anywhere a user would see it. The actual
+  // handoff (open a tab, even a plain "New Chat" one, and close the widget)
+  // should never be held hostage by a nice-to-have label.
+  let title: string | null = null;
+  try {
+    let sessionId = await resolveSessionId(args);
+    if (!sessionId) {
+      // A brand-new (never --resume'd) session has no id in its launch args
+      // at all — fall back to finding it by spawn time so the tab still gets
+      // labeled with the real session title instead of a generic placeholder.
+      const spawnedAt = spawnTimestampFromTerminalId(terminalId);
+      if (spawnedAt) sessionId = await findRecentClanceSessionId(spawnedAt);
+    }
+    title = sessionId ? await titleForSessionId(sessionId) : null;
+  } catch (err) {
+    console.error("openSessionInMainWindow: title resolution failed, opening as New Chat", err);
   }
-  const title = sessionId ? await titleForSessionId(sessionId) : null;
 
   openMainWindow();
   await mainWindowReady;

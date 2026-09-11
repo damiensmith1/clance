@@ -108,8 +108,14 @@ async function firstUserTitle(filePath: string): Promise<string> {
   } finally {
     rl.close();
   }
-  return "New conversation";
+  return EMPTY_CONVERSATION_TITLE;
 }
+
+// firstUserTitle's fallback when a transcript has no real (non-synthetic)
+// user turn yet — named as a constant rather than repeating the literal, so
+// hasRealUserMessage below can share the exact same definition of "empty"
+// instead of re-scanning the file with separate logic that could disagree.
+const EMPTY_CONVERSATION_TITLE = "New conversation";
 
 // Used to label a main-window tab opened from the popup widget's "Open in
 // App" button, which only has a session id (from the terminal's --resume
@@ -138,6 +144,39 @@ export async function titleForSessionId(sessionId: string): Promise<string | nul
     }
   }
   return null;
+}
+
+// Used to decide whether a just-closed popup session was ever actually used
+// or was opened and abandoned with nothing typed (see popupWindow.ts's
+// cleanupIfAbandoned) — content-based, not session-instance-based, so a
+// real pre-existing conversation (opened via "Open in…", say) always comes
+// back true even if this particular viewing added nothing new to it.
+export async function hasRealUserMessage(sessionId: string): Promise<boolean> {
+  const title = await titleForSessionId(sessionId);
+  return title !== null && title !== EMPTY_CONVERSATION_TITLE;
+}
+
+// Like hasRealUserMessage, but scoped to Clance's own project bucket only
+// (CLANCE_PROJECT_DIR) instead of searching every project on the machine —
+// used to hide a *live* Clance-managed agent from the Active list (see
+// index.ts's "agents:list" handler) while it still has no real content.
+// Deliberately narrower than hasRealUserMessage: `claude agents --json` is
+// unscoped by cwd (see agentSessions.ts), so it can list a real background
+// agent from a completely unrelated project — a false positive here would
+// wrongly hide someone's real, unrelated session, which is a much worse
+// mistake than in the already-closed case hasRealUserMessage handles. A
+// missing file (not a Clance session at all, or its transcript hasn't been
+// created yet — a small window right after minting) always reads as "don't
+// hide" rather than "empty", so this only ever hides sessions confirmed to
+// be both Clance's own and genuinely empty.
+export async function clanceSessionIsEmpty(sessionId: string): Promise<boolean> {
+  const filePath = join(CLAUDE_PROJECTS_DIR, CLANCE_PROJECT_DIR, `${sessionId}.jsonl`);
+  try {
+    await stat(filePath);
+  } catch {
+    return false;
+  }
+  return (await firstUserTitle(filePath)) === EMPTY_CONVERSATION_TITLE;
 }
 
 // Finds the session id for a brand-new (never `--resume`'d) Clance popup
@@ -206,11 +245,18 @@ export async function listSessions(): Promise<SessionSummary[]> {
         const fileStat = await stat(filePath);
         if (!fileStat.isFile()) continue;
         const id = basename(entry, ".jsonl");
+        const title = await firstUserTitle(filePath);
+        // Scoped to Clance's own bucket only — a real, unrelated project's
+        // session with no messages yet is none of Clance's business to
+        // hide. Clance sessions should rarely reach here empty at all
+        // (popupWindow.ts's cleanupIfAbandoned rm's them on close); this is
+        // just a backstop for when that best-effort cleanup itself failed.
+        if (dirName === CLANCE_PROJECT_DIR && title === EMPTY_CONVERSATION_TITLE) continue;
         summaries.push({
           id,
           filePath,
           projectLabel: projectLabelFor(dirName),
-          title: await firstUserTitle(filePath),
+          title,
           lastModified: fileStat.mtime.toISOString(),
           archived: archivedIds.has(id),
         });

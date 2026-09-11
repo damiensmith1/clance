@@ -1,7 +1,7 @@
 import { app, ipcMain, Menu, BrowserWindow } from "electron";
 import { createTray } from "./tray";
 import { registerHotkey, unregisterAllHotkeys, isValidAccelerator } from "./hotkey";
-import { toggleClancePopup, openPopupWithArgs } from "./popupWindow";
+import { toggleClancePopup, openPopupWithArgs, warmAgentPool } from "./popupWindow";
 import { openMainWindow, openSessionInMainWindow } from "./mainWindow";
 import { createAppMenu } from "./appMenu";
 import { ensureSessionCwd, SESSION_CWD } from "./paths";
@@ -15,13 +15,14 @@ import {
   openAccessibilitySettings,
 } from "./permissions";
 import { SHORTCUT_ACTIONS } from "./shortcuts";
-import { getSession, listSessions } from "./chatHistory";
+import { getSession, listSessions, clanceSessionIsEmpty } from "./chatHistory";
 import { setSessionArchived } from "./archivedSessions";
 import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
 import { listSkills, setSkillEnabled } from "./skills";
 import { listMcpServers, setMcpServerEnabled } from "./mcpConfig";
 import { createPtySession, writeToPty, resizePty, killPty, reparentPty, warmLoginShellPath } from "./ptyManager";
 import { resolveOpenArgs, spawnBackgroundAgent, stopAgent, listAgents } from "./agentSessions";
+import { isPoolSpareId } from "./agentPool";
 import { copyDroppedFile } from "./dropFiles";
 import { readWindowLayout, writeWindowLayout } from "./windowLayout";
 
@@ -56,6 +57,11 @@ app.whenReady().then(async () => {
   const status = await getSetupStatus();
   if (status.isComplete) {
     registerAllHotkeys(readConfig().shortcuts);
+    // Pre-warms the popup's spare background agent so the first hotkey
+    // press of the session doesn't have to wait on a cold mint — see
+    // agentPool.ts. Only meaningful once setup's done (minting needs a
+    // working `claude auth`), same gating as the hotkeys themselves.
+    warmAgentPool();
   } else {
     openMainWindow();
   }
@@ -147,7 +153,25 @@ ipcMain.handle(
 
 ipcMain.handle("agents:stop", (_event, id: string) => stopAgent(id));
 
-ipcMain.handle("agents:list", (_event, opts: { all?: boolean }) => listAgents(opts));
+// Filters out pool spares (see agentPool.ts) — they're real running
+// background agents from the CLI's point of view, but not conversations
+// yet from the user's, so the Chats tab's Active list shouldn't show them
+// until they've actually been claimed. Also filters out claimed-but-still-
+// empty Clance sessions (clanceSessionIsEmpty) — a widget conversation that
+// was just opened and hasn't had a real message typed into it yet
+// shouldn't show up as "created" either; see popupWindow.ts's
+// cleanupIfAbandoned for the complementary on-close cleanup.
+ipcMain.handle("agents:list", async (_event, opts: { all?: boolean }) => {
+  const agents = await listAgents(opts);
+  const kept = await Promise.all(
+    agents.map(async (agent) => {
+      if (isPoolSpareId(agent.id)) return null;
+      if (await clanceSessionIsEmpty(agent.sessionId)) return null;
+      return agent;
+    })
+  );
+  return kept.filter((agent): agent is (typeof agents)[number] => agent !== null);
+});
 
 ipcMain.handle("popup:open-with-args", (_event, args: string[]) => openPopupWithArgs(args));
 

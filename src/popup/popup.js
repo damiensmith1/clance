@@ -400,6 +400,6 @@ window.clance.onShown((payload) => {
     showLoading();
   } else {
     currentSystemPromptText = payload.contextPreview?.systemPrompt ?? "";
-    openTerminal(payload.args);
+    openTerminal(payload.args, payload.visibleContext);
   }
 });
