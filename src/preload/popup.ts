@@ -12,6 +12,9 @@ contextBridge.exposeInMainWorld("clance", {
   listChatSessions: () => ipcRenderer.invoke("chatHistory:list-sessions"),
   resolveOpenArgs: (sessionId: string, name: string) =>
     ipcRenderer.invoke("chatHistory:resolve-open-args", sessionId, name),
+  pickDirectory: () => ipcRenderer.invoke("dialog:pick-directory"),
+  getRecentDirectories: () => ipcRenderer.invoke("config:get-recent-directories"),
+  openNewInDirectory: (dir: string) => ipcRenderer.invoke("popup:open-new-in-directory", dir),
   createTerminal: (terminalId: string, command: string, args: string[], cols: number, rows: number) =>
     ipcRenderer.invoke("terminal:create", { terminalId, command, args, cols, rows }),
   writeTerminal: (terminalId: string, data: string) =>
@@ -39,4 +42,4 @@ type ContextPreview = {
 
 type PopupShownPayload =
   | { mode: "loading" }
-  | { mode: "new"; args: string[]; contextPreview?: ContextPreview };
+  | { mode: "new"; args: string[]; contextPreview?: ContextPreview; visibleContext?: string };

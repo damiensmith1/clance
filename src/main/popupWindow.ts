@@ -7,6 +7,7 @@ import { ensureInsertTextServer } from "./insertTextServer";
 import { spawnBackgroundAgent, resolveSessionId, stopAgent, rmAgent } from "./agentSessions";
 import { claimPoolSpare, refillPool } from "./agentPool";
 import { hasRealUserMessage, CLANCE_CONTEXT_PREFIX } from "./chatHistory";
+import { getDefaultDirectory, addRecentDirectory } from "./config";
 
 const DEFAULT_WIDTH = 560;
 const DEFAULT_HEIGHT = 480;
@@ -43,6 +44,29 @@ let currentMode: PopupShownPayload["mode"] | null = null;
 // nothing here for it to opt into — cleanupIfAbandoned below finding this
 // null is exactly the right (safe) behavior for it.
 let currentAgentId: string | null = null;
+
+// Every agent id minted/claimed by the popup, ever (this app run) — used
+// by index.ts's "agents:list" handler, alongside a *live* content check
+// (chatHistory.ts's hasRealUserMessage), to hide a widget session from the
+// Active list while it's still genuinely empty. Membership alone doesn't
+// hide anything — it only narrows which ids are worth a content check at
+// all, the same safety role directory-scoping used to play back when every
+// Clance session lived in one fixed bucket (see the now-deleted
+// clanceSessionIsEmpty and docs/working-directory-design.md) — a false
+// positive here would wrongly hide someone's real, unrelated session,
+// which membership-by-construction rules out entirely (an id only ever
+// gets added when *this* popup minted it). Never removed once a session
+// turns out real — once hasRealUserMessage is true the `&&` below always
+// short-circuits to "don't hide" regardless, so a lingering id here past
+// that point is inert, not a bug — just a small in-memory set that grows
+// with usage and resets on app restart, not worth cross-module bookkeeping
+// to trim (e.g. when "Open in App" moves a still-tracked session to a
+// main-window tab).
+const trackedIds = new Set<string>();
+
+export function isTrackedPopupSessionId(id: string): boolean {
+  return trackedIds.has(id);
+}
 
 // positionNearCursor's own win.setPosition() call fires a "move" event
 // just like a user drag does — this tells the "move" listener below to
@@ -296,9 +320,9 @@ export function popupSessionName(): string {
 // reason a spare should be missing it. Called once at app startup
 // (index.ts), after every claim (toggleClancePopupInner below), and safe to
 // call repeatedly — refillPool collapses concurrent calls into one fill.
-export async function warmAgentPool(): Promise<void> {
+export async function warmAgentPool(cwd: string = getDefaultDirectory()): Promise<void> {
   const mcpArgs = await insertTextMcpArgs();
-  await refillPool(mcpArgs, popupSessionName);
+  await refillPool(mcpArgs, popupSessionName, cwd);
 }
 
 // Set for the duration of the capture/spawn chain below — the widget now
@@ -347,6 +371,13 @@ async function toggleClancePopupInner(): Promise<void> {
   revealPopupWindow();
   sendToPopup({ mode: "loading" });
 
+  // The directory a brand-new session opens in — Settings' configured
+  // default, or SESSION_CWD if never set (see config.ts's
+  // getDefaultDirectory). Resumed/attached sessions never consult this —
+  // they inherit their own recorded cwd instead (agentSessions.ts's
+  // resolveOpenArgs). See docs/working-directory-design.md.
+  const dir = getDefaultDirectory();
+
   // Try the pool first — a pre-warmed spare skips the mint latency
   // entirely, but it was minted before this invocation's context existed,
   // so it can't have received --append-system-prompt. Its context has to
@@ -354,8 +385,11 @@ async function toggleClancePopupInner(): Promise<void> {
   // popup.js's openTerminal) instead of invisibly. Accepted trade-off,
   // decided 2026-09-10: every "New Conversation" open now prefers speed
   // over invisible context when a spare is available, rather than only
-  // pooling for cases where invisibility doesn't matter.
-  const claimedId = claimPoolSpare();
+  // pooling for cases where invisibility doesn't matter. claimPoolSpare
+  // only ever hands back a spare minted at exactly `dir` — one minted
+  // under a since-changed default is discarded rather than claimed (see
+  // agentPool.ts), so `id` below is always genuinely at `dir` either way.
+  const claimedId = claimPoolSpare(dir);
   let id: string;
   let visibleContext: string | undefined;
   if (claimedId) {
@@ -363,7 +397,7 @@ async function toggleClancePopupInner(): Promise<void> {
     visibleContext = contextText;
     // Fire-and-forget — don't make this open wait on minting the next
     // spare, just make sure one's on the way for next time.
-    warmAgentPool().catch(() => {});
+    warmAgentPool(dir).catch(() => {});
   } else {
     // A brand-new session has no prior recorded system-prompt snapshot, so
     // this rides in invisibly — --system-prompt-snapshot off makes sure that
@@ -380,13 +414,11 @@ async function toggleClancePopupInner(): Promise<void> {
     // Clance-launched session (see docs/background-agent-architecture.md) —
     // the popup terminal that opens below is just an `attach` viewport onto
     // it, so closing the widget or the app never ends the conversation.
-    id = await spawnBackgroundAgent(popupSessionName(), [
-      "--append-system-prompt",
-      contextText,
-      "--system-prompt-snapshot",
-      "off",
-      ...mcpArgs,
-    ]);
+    id = await spawnBackgroundAgent(
+      popupSessionName(),
+      ["--append-system-prompt", contextText, "--system-prompt-snapshot", "off", ...mcpArgs],
+      dir
+    );
   }
   // The user may have hit the hotkey again (hiding the widget) while all of
   // the above was in flight — don't resurrect it out from under them.
@@ -395,10 +427,12 @@ async function toggleClancePopupInner(): Promise<void> {
     // — without this it'd leak exactly the way cleanupIfAbandoned exists to
     // prevent, just via a path that never reaches an explicit close at all.
     currentAgentId = id;
+    trackedIds.add(id);
     cleanupIfAbandoned();
     return;
   }
   currentAgentId = id;
+  trackedIds.add(id);
   sendToPopup({
     mode: "new",
     args: ["attach", id],
@@ -416,4 +450,47 @@ export async function openPopupWithArgs(args: string[]): Promise<void> {
   await preparePopupWindow();
   revealPopupWindow();
   sendToPopup({ mode: "new", args });
+}
+
+// Guards openNewSessionInDirectory the same way `opening` guards the
+// hotkey path — a double-click on a recent-directory row (or "Browse…")
+// shouldn't be able to mint two sessions.
+let openingNewInDirectory = false;
+
+// Mints a brand-new session at a directory the user explicitly chose (the
+// "Open in..." dropdown's "New session in..." flow — see popup.js) —
+// always a plain, un-pooled mint, since the directory isn't known until
+// the user picks it, so there's nothing the pool could have pre-warmed.
+// No context injection, unlike the hotkey path: this isn't "the user just
+// invoked Clance and here's what they were looking at" — it's a
+// deliberate "open a session somewhere" action, and whatever happened to
+// be on screen when the dropdown was opened has no particular relevance
+// to the directory being picked now. See docs/working-directory-design.md.
+export async function openNewSessionInDirectory(dir: string): Promise<void> {
+  if (openingNewInDirectory) return;
+  openingNewInDirectory = true;
+  try {
+    await preparePopupWindow();
+    revealPopupWindow();
+    sendToPopup({ mode: "loading" });
+
+    addRecentDirectory(dir);
+    const mcpArgs = await insertTextMcpArgs();
+    const id = await spawnBackgroundAgent(popupSessionName(), mcpArgs, dir);
+
+    // Same as toggleClancePopupInner: the widget may have been dismissed
+    // while the mint was in flight — don't resurrect it, and don't leak
+    // the session that was minted for a widget nobody's looking at anymore.
+    if (currentMode !== "loading") {
+      currentAgentId = id;
+    trackedIds.add(id);
+      cleanupIfAbandoned();
+      return;
+    }
+    currentAgentId = id;
+    trackedIds.add(id);
+    sendToPopup({ mode: "new", args: ["attach", id] });
+  } finally {
+    openingNewInDirectory = false;
+  }
 }

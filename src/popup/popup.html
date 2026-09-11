@@ -182,6 +182,22 @@
         flex-direction: column;
         gap: 3px;
       }
+      /* "New session in..." — a directory, not a past conversation, so it's
+         visually separated from #open-in-list below rather than mixed into
+         the same scrollable list. #open-in-recent-dirs reuses .open-in-row
+         styling for its entries (rendered by renderRecentDirs in popup.js). */
+      #open-in-new-section {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        flex-shrink: 0;
+      }
+      #open-in-divider {
+        height: 1px;
+        background: var(--surface-border);
+        margin: 2px 0;
+        flex-shrink: 0;
+      }
       .open-in-row {
         display: flex;
         flex-direction: column;
@@ -340,6 +356,14 @@
             Open in…
           </button>
           <div id="open-in-dropdown">
+            <div id="open-in-new-section">
+              <button id="open-in-browse-btn" class="open-in-row">
+                <span class="open-in-row-title">New session in…</span>
+                <span class="open-in-row-meta">Choose a folder</span>
+              </button>
+              <div id="open-in-recent-dirs"></div>
+            </div>
+            <div id="open-in-divider"></div>
             <input id="open-in-search" type="text" placeholder="Search conversations…" />
             <div id="open-in-list"></div>
           </div>

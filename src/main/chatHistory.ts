@@ -147,17 +147,13 @@ async function firstUserTitle(filePath: string): Promise<string> {
 // instead of re-scanning the file with separate logic that could disagree.
 const EMPTY_CONVERSATION_TITLE = "New conversation";
 
-// Used to label a main-window tab opened from the popup widget's "Open in
-// App" button, which only has a session id (from the terminal's --resume
-// args), not a title. The session can be resumed from any project — the
-// terminal running it is always in SESSION_CWD, but that's unrelated to
-// where the *original* conversation's project directory was — so this has
-// to check each project bucket for the id the same way listSessions()
-// does, just stopping at the first match instead of reading every
-// session's title. Null if no project has that file, or it's somehow gone —
-// for a brand-new session with no resumed-from id at all, the caller finds
-// one first via findRecentClanceSessionId below.
-export async function titleForSessionId(sessionId: string): Promise<string | null> {
+// Shared by titleForSessionId and cwdForSessionId below — a session can be
+// resumed from any project (the terminal actually running it is always in
+// whatever cwd Clance minted/resumed it with, unrelated to where the
+// *original* conversation's project directory was), so both need to check
+// every project bucket for the id, the same way listSessions() does, just
+// stopping at the first match instead of reading every session's title.
+async function findSessionFilePath(sessionId: string): Promise<string | null> {
   let projectDirs: string[];
   try {
     projectDirs = await readdir(CLAUDE_PROJECTS_DIR);
@@ -168,12 +164,74 @@ export async function titleForSessionId(sessionId: string): Promise<string | nul
   for (const dirName of projectDirs) {
     const filePath = join(CLAUDE_PROJECTS_DIR, dirName, `${sessionId}.jsonl`);
     try {
-      return await firstUserTitle(filePath);
+      await stat(filePath);
+      return filePath;
     } catch {
       continue;
     }
   }
   return null;
+}
+
+// Used to label a main-window tab opened from the popup widget's "Open in
+// App" button, which only has a session id (from the terminal's --resume
+// args), not a title. Null if no project has that file, or it's somehow
+// gone — for a brand-new session with no resumed-from id at all, the
+// caller finds one first via findRecentClanceSessionId below.
+export async function titleForSessionId(sessionId: string): Promise<string | null> {
+  const filePath = await findSessionFilePath(sessionId);
+  if (!filePath) return null;
+  try {
+    return await firstUserTitle(filePath);
+  } catch {
+    return null;
+  }
+}
+
+// The working directory a session actually ran in — read straight off its
+// own transcript (every real "user" entry carries a `cwd` field, confirmed
+// against a live session file) rather than guessed, decoded from the
+// encoded project-bucket dirname (lossy — both "/" and "." collapse to
+// "-", so it's not reliably reversible), or tracked separately by Clance.
+// Works for any session, Clance-created or not. Used when resuming/
+// attaching an existing session, so it reopens in the directory it
+// actually belongs to instead of wherever Clance's own default happens to
+// be (see agentSessions.ts's resolveOpenArgs). Null if the transcript has
+// no user turn yet, or none of them happen to carry a cwd (very old
+// session format) — callers should fall back to a sensible default rather
+// than treat this as fatal.
+async function firstUserCwd(filePath: string): Promise<string | null> {
+  const rl = createInterface({
+    input: createReadStream(filePath, "utf8"),
+    crlfDelay: Infinity,
+  });
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      let entry: Record<string, unknown>;
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (entry.type !== "user") continue;
+      const cwd = entry.cwd;
+      if (typeof cwd === "string" && cwd) return cwd;
+    }
+  } finally {
+    rl.close();
+  }
+  return null;
+}
+
+export async function cwdForSessionId(sessionId: string): Promise<string | null> {
+  const filePath = await findSessionFilePath(sessionId);
+  if (!filePath) return null;
+  try {
+    return await firstUserCwd(filePath);
+  } catch {
+    return null;
+  }
 }
 
 // Used to decide whether a just-closed popup session was ever actually used
@@ -186,63 +244,50 @@ export async function hasRealUserMessage(sessionId: string): Promise<boolean> {
   return title !== null && title !== EMPTY_CONVERSATION_TITLE;
 }
 
-// Like hasRealUserMessage, but scoped to Clance's own project bucket only
-// (CLANCE_PROJECT_DIR) instead of searching every project on the machine —
-// used to hide a *live* Clance-managed agent from the Active list (see
-// index.ts's "agents:list" handler) while it still has no real content.
-// Deliberately narrower than hasRealUserMessage: `claude agents --json` is
-// unscoped by cwd (see agentSessions.ts), so it can list a real background
-// agent from a completely unrelated project — a false positive here would
-// wrongly hide someone's real, unrelated session, which is a much worse
-// mistake than in the already-closed case hasRealUserMessage handles. A
-// missing file (not a Clance session at all, or its transcript hasn't been
-// created yet — a small window right after minting) always reads as "don't
-// hide" rather than "empty", so this only ever hides sessions confirmed to
-// be both Clance's own and genuinely empty.
-export async function clanceSessionIsEmpty(sessionId: string): Promise<boolean> {
-  const filePath = join(CLAUDE_PROJECTS_DIR, CLANCE_PROJECT_DIR, `${sessionId}.jsonl`);
-  try {
-    await stat(filePath);
-  } catch {
-    return false;
-  }
-  return (await firstUserTitle(filePath)) === EMPTY_CONVERSATION_TITLE;
-}
-
 // Finds the session id for a brand-new (never `--resume`'d) Clance popup
 // session by its pty's own spawn time, for the "Open in App" case
 // resolveSessionId (agentSessions.ts) can't handle — such a session has no
 // id anywhere in its launch args (`--append-system-prompt ...`), so the
 // only place it exists yet is the CLI's own transcript file, created
-// moments after the process starts. All Clance sessions land in this one
-// bucket (CLANCE_PROJECT_DIR), unlike titleForSessionId which has to check
-// every project's bucket for a known id. Picks the file whose birthtime is
-// closest to (and no more than SPAWN_MATCH_TOLERANCE_MS earlier than)
-// spawnedAt. Not airtight — two brand-new Clance sessions starting within
-// the tolerance window could be mismatched — but there's no other id to
-// key off before the user's first turn lands.
+// moments after the process starts. Now that a Clance session can mint in
+// any directory (see docs/working-directory-design.md), not just one fixed
+// bucket, this has to check every project's bucket for a birthtime match,
+// the same way titleForSessionId does for a known id — picks the file
+// (across every bucket) whose birthtime is closest to (and no more than
+// SPAWN_MATCH_TOLERANCE_MS earlier than) spawnedAt. Not airtight — two
+// brand-new Clance sessions starting within the tolerance window, in any
+// directories, could be mismatched — but there's no other id to key off
+// before the user's first turn lands.
 const SPAWN_MATCH_TOLERANCE_MS = 3000;
 
 export async function findRecentClanceSessionId(spawnedAt: number): Promise<string | null> {
-  const projectPath = join(CLAUDE_PROJECTS_DIR, CLANCE_PROJECT_DIR);
-  let entries: string[];
+  let projectDirs: string[];
   try {
-    entries = await readdir(projectPath);
+    projectDirs = await readdir(CLAUDE_PROJECTS_DIR);
   } catch {
     return null;
   }
 
   let best: { id: string; birthtimeMs: number } | null = null;
-  for (const entry of entries) {
-    if (extname(entry) !== ".jsonl") continue;
+  for (const dirName of projectDirs) {
+    const projectPath = join(CLAUDE_PROJECTS_DIR, dirName);
+    let entries: string[];
     try {
-      const fileStat = await stat(join(projectPath, entry));
-      if (fileStat.birthtimeMs < spawnedAt - SPAWN_MATCH_TOLERANCE_MS) continue;
-      if (!best || fileStat.birthtimeMs < best.birthtimeMs) {
-        best = { id: basename(entry, ".jsonl"), birthtimeMs: fileStat.birthtimeMs };
-      }
+      entries = await readdir(projectPath);
     } catch {
       continue;
+    }
+    for (const entry of entries) {
+      if (extname(entry) !== ".jsonl") continue;
+      try {
+        const fileStat = await stat(join(projectPath, entry));
+        if (fileStat.birthtimeMs < spawnedAt - SPAWN_MATCH_TOLERANCE_MS) continue;
+        if (!best || fileStat.birthtimeMs < best.birthtimeMs) {
+          best = { id: basename(entry, ".jsonl"), birthtimeMs: fileStat.birthtimeMs };
+        }
+      } catch {
+        continue;
+      }
     }
   }
   return best?.id ?? null;
@@ -276,11 +321,21 @@ export async function listSessions(): Promise<SessionSummary[]> {
         if (!fileStat.isFile()) continue;
         const id = basename(entry, ".jsonl");
         const title = await firstUserTitle(filePath);
-        // Scoped to Clance's own bucket only — a real, unrelated project's
-        // session with no messages yet is none of Clance's business to
-        // hide. Clance sessions should rarely reach here empty at all
-        // (popupWindow.ts's cleanupIfAbandoned rm's them on close); this is
-        // just a backstop for when that best-effort cleanup itself failed.
+        // Scoped to Clance's own default-directory bucket only — a real,
+        // unrelated project's session with no messages yet is none of
+        // Clance's business to hide, and there's no cheap directory-based
+        // signal for "is this actually Clance's" any more now that a
+        // session can be minted in any directory (see
+        // docs/working-directory-design.md) — the Active-list equivalent
+        // of this check uses an explicit id-tracking set instead (see
+        // popupWindow.ts's isTrackedPopupSessionId) precisely because
+        // directory-scoping stopped being reliable. This is only ever a
+        // backstop for the default-directory case, not the general one:
+        // Clance sessions should rarely reach here empty at all
+        // (popupWindow.ts's cleanupIfAbandoned rm's them on close); this
+        // just covers that best-effort cleanup itself failing, for
+        // whichever fraction of sessions still happen to be minted at the
+        // default directory.
         if (dirName === CLANCE_PROJECT_DIR && title === EMPTY_CONVERSATION_TITLE) continue;
         summaries.push({
           id,

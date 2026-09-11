@@ -7,6 +7,8 @@ const openInBtn = document.getElementById("open-in-btn");
 const openInDropdownEl = document.getElementById("open-in-dropdown");
 const openInSearchEl = document.getElementById("open-in-search");
 const openInListEl = document.getElementById("open-in-list");
+const openInBrowseBtn = document.getElementById("open-in-browse-btn");
+const openInRecentDirsEl = document.getElementById("open-in-recent-dirs");
 const closeBtn = document.getElementById("close-btn");
 const openInAppBtn = document.getElementById("open-in-app-btn");
 const contextLinkEl = document.getElementById("context-link");
@@ -221,6 +223,45 @@ function renderOpenInList(sessions) {
   }
 }
 
+// No Node `path` module in the renderer (contextIsolation) — a directory
+// picked via the native folder dialog is always a plain forward-slash
+// absolute path on macOS, so a simple split covers it.
+function dirBasename(dir) {
+  const segments = dir.split("/").filter(Boolean);
+  return segments[segments.length - 1] || dir;
+}
+
+function renderRecentDirs(dirs) {
+  openInRecentDirsEl.replaceChildren();
+  for (const dir of dirs) {
+    const row = document.createElement("button");
+    row.className = "open-in-row";
+
+    const title = document.createElement("span");
+    title.className = "open-in-row-title";
+    title.textContent = dirBasename(dir);
+
+    const meta = document.createElement("span");
+    meta.className = "open-in-row-meta";
+    meta.textContent = dir;
+
+    row.appendChild(title);
+    row.appendChild(meta);
+    row.addEventListener("click", () => {
+      closeOpenInDropdown();
+      window.clance.openNewInDirectory(dir);
+    });
+    openInRecentDirsEl.appendChild(row);
+  }
+}
+
+openInBrowseBtn.addEventListener("click", async () => {
+  const dir = await window.clance.pickDirectory();
+  if (!dir) return;
+  closeOpenInDropdown();
+  window.clance.openNewInDirectory(dir);
+});
+
 function openOpenInDropdown() {
   openInDropdownEl.classList.add("open");
   openInSearchEl.value = "";
@@ -228,6 +269,7 @@ function openOpenInDropdown() {
     openInSessions = sessions;
     renderOpenInList(sessions);
   });
+  window.clance.getRecentDirectories().then(renderRecentDirs);
   openInSearchEl.focus();
 }
 

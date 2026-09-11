@@ -1,12 +1,19 @@
 import { app, ipcMain, Menu, BrowserWindow } from "electron";
 import { createTray } from "./tray";
 import { registerHotkey, unregisterAllHotkeys, isValidAccelerator } from "./hotkey";
-import { toggleClancePopup, openPopupWithArgs, warmAgentPool } from "./popupWindow";
+import {
+  toggleClancePopup,
+  openPopupWithArgs,
+  warmAgentPool,
+  openNewSessionInDirectory,
+  isTrackedPopupSessionId,
+} from "./popupWindow";
 import { openMainWindow, openSessionInMainWindow } from "./mainWindow";
 import { createAppMenu } from "./appMenu";
 import { ensureSessionCwd, SESSION_CWD } from "./paths";
 import { getSetupStatus } from "./setupStatus";
-import { readConfig, writeConfig } from "./config";
+import { readConfig, writeConfig, getDefaultDirectory } from "./config";
+import { pickDirectory } from "./directoryPicker";
 import { connectClaude, disconnectClaude, openInstallDocs } from "./claudeAuth";
 import {
   checkPermissions,
@@ -15,7 +22,7 @@ import {
   openAccessibilitySettings,
 } from "./permissions";
 import { SHORTCUT_ACTIONS } from "./shortcuts";
-import { getSession, listSessions, clanceSessionIsEmpty } from "./chatHistory";
+import { getSession, listSessions, hasRealUserMessage } from "./chatHistory";
 import { setSessionArchived } from "./archivedSessions";
 import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
 import { listSkills, setSkillEnabled } from "./skills";
@@ -148,7 +155,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   "agents:spawn-new",
-  (_event, name: string, claudeArgs: string[]) => spawnBackgroundAgent(name, claudeArgs)
+  (_event, name: string, claudeArgs: string[]) => spawnBackgroundAgent(name, claudeArgs, getDefaultDirectory())
 );
 
 ipcMain.handle("agents:stop", (_event, id: string) => stopAgent(id));
@@ -157,16 +164,20 @@ ipcMain.handle("agents:stop", (_event, id: string) => stopAgent(id));
 // background agents from the CLI's point of view, but not conversations
 // yet from the user's, so the Chats tab's Active list shouldn't show them
 // until they've actually been claimed. Also filters out claimed-but-still-
-// empty Clance sessions (clanceSessionIsEmpty) — a widget conversation that
-// was just opened and hasn't had a real message typed into it yet
-// shouldn't show up as "created" either; see popupWindow.ts's
-// cleanupIfAbandoned for the complementary on-close cleanup.
+// empty widget sessions — a popup conversation that was just opened and
+// hasn't had a real message typed into it yet shouldn't show up as
+// "created" either (see popupWindow.ts's cleanupIfAbandoned for the
+// complementary on-close cleanup). isTrackedPopupSessionId narrows this to
+// ids the popup itself actually minted — a session can now open in any
+// directory (see docs/working-directory-design.md), so there's no cheap
+// directory-based way left to tell "is this Clance's" the way there used
+// to be; membership-by-construction replaces that instead of guessing.
 ipcMain.handle("agents:list", async (_event, opts: { all?: boolean }) => {
   const agents = await listAgents(opts);
   const kept = await Promise.all(
     agents.map(async (agent) => {
       if (isPoolSpareId(agent.id)) return null;
-      if (await clanceSessionIsEmpty(agent.sessionId)) return null;
+      if (isTrackedPopupSessionId(agent.id) && !(await hasRealUserMessage(agent.sessionId))) return null;
       return agent;
     })
   );
@@ -181,13 +192,37 @@ ipcMain.handle(
     openSessionInMainWindow(payload.terminalId, payload.args)
 );
 
+ipcMain.handle("popup:open-new-in-directory", (_event, dir: string) => openNewSessionInDirectory(dir));
+
+// Shared by the popup's "New session in..." flow and Settings' default-
+// directory field — see directoryPicker.ts. Anchored to whichever window
+// actually invoked it, same pattern as "terminal:reparent" below.
+ipcMain.handle("dialog:pick-directory", (event) => pickDirectory(BrowserWindow.fromWebContents(event.sender)));
+
+ipcMain.handle("config:get-recent-directories", () => readConfig().recentDirectories);
+
 ipcMain.handle("settings:get-preferences", () => ({
   launchOnLogin: getLaunchOnLogin(),
+  defaultDirectory: readConfig().defaultDirectory,
 }));
 
 ipcMain.handle("settings:set-launch-on-login", (_event, enabled: boolean) => {
   setLaunchOnLogin(enabled);
   return getLaunchOnLogin();
+});
+
+ipcMain.handle("settings:set-default-directory", (_event, dir: string | null) => {
+  const config = readConfig();
+  config.defaultDirectory = dir;
+  writeConfig(config);
+  // Whatever spare was pre-warmed under the old default is now wrong for
+  // this one — warmAgentPool() with no arg re-reads getDefaultDirectory()
+  // fresh (picking up what was just written above) and refillPool's own
+  // cwd-mismatch handling stops+removes the stale spare rather than
+  // leaving it as an orphaned, untracked process. See
+  // docs/working-directory-design.md.
+  warmAgentPool().catch(() => {});
+  return config.defaultDirectory;
 });
 
 ipcMain.handle("layout:get", () => readWindowLayout());

@@ -2,6 +2,7 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import { getLoginShellPath } from "./ptyManager";
 import { SESSION_CWD } from "./paths";
+import { cwdForSessionId } from "./chatHistory";
 
 const execFileAsync = promisify(execFile);
 
@@ -13,14 +14,18 @@ const execFileAsync = promisify(execFile);
 //   lives (confirmed live: `claude` isn't found on a bare `/usr/bin:/bin`
 //   PATH) — execFile doesn't do a shell PATH lookup, so without this every
 //   mint call would fail outright in the packaged app.
-// - cwd: SESSION_CWD, so every Clance-minted session lands in the one
-//   stable project bucket the rest of the app (chatHistory.ts) assumes.
+// - cwd: defaults to SESSION_CWD, but every real caller now passes the
+//   directory that actually matters for that mint — Clance's configured
+//   default for a brand-new session (see config.ts's getDefaultDirectory),
+//   or the target session's own recorded cwd for a resume (see
+//   resolveOpenArgs below) — rather than unconditionally forcing
+//   SESSION_CWD the way this used to. See docs/working-directory-design.md.
 // - CLAUDE_CODE_AUTO_CONNECT_IDE: "false", same reasoning as ptyManager's
 //   pty spawn — a Clance session has nothing to do with whatever file a
 //   running VS Code/JetBrains instance has open.
-function claudeExecOptions(): { cwd: string; env: NodeJS.ProcessEnv } {
+function claudeExecOptions(cwd: string = SESSION_CWD): { cwd: string; env: NodeJS.ProcessEnv } {
   return {
-    cwd: SESSION_CWD,
+    cwd,
     env: { ...process.env, PATH: getLoginShellPath(), CLAUDE_CODE_AUTO_CONNECT_IDE: "false" },
   };
 }
@@ -53,6 +58,12 @@ export type AgentSession = {
   // Present only for a live process — a stopped-but-known background
   // session (from the `--all` listing) has no pid.
   pid?: number;
+  // The directory this specific background-agent process was actually
+  // minted with — baked in at its own spawn time, immutable. See
+  // resolveOpenArgs below: a stopped copy minted before cwd-awareness
+  // existed (or at a since-changed default) can be sitting on the wrong
+  // one forever, and attaching to it can't fix that.
+  cwd?: string;
 };
 
 // Unscoped by cwd on purpose (no `--cwd`) — a live session is a live
@@ -81,11 +92,15 @@ function stripAnsi(text: string): string {
 // and returns its short id, parsed off the first line of stdout
 // ("backgrounded · <id> · <name>"). Never through a shell string — args is
 // a real argv array, same reasoning as ptyManager's pty.spawn.
-export async function spawnBackgroundAgent(name: string, claudeArgs: string[] = []): Promise<string> {
+export async function spawnBackgroundAgent(
+  name: string,
+  claudeArgs: string[] = [],
+  cwd: string = SESSION_CWD
+): Promise<string> {
   const { stdout } = await execFileAsync(
     "claude",
     ["--bg", "-n", name, ...claudeArgs, ...cliSettingsArgs()],
-    claudeExecOptions()
+    claudeExecOptions(cwd)
   );
   const match = stripAnsi(stdout).match(/backgrounded\s*·\s*(\S+)\s*·/);
   if (!match) throw new Error(`Couldn't parse a session id from "claude --bg" output: ${stdout}`);
@@ -96,11 +111,11 @@ export async function spawnBackgroundAgent(name: string, claudeArgs: string[] = 
 // (`claude --bg --resume <sessionId>`) and returns the (possibly new) short
 // id — see --bg's own help text: this starts a copy under a new id if the
 // session is already running live elsewhere, rather than erroring.
-async function spawnBackgroundResume(sessionId: string, name: string): Promise<string> {
+async function spawnBackgroundResume(sessionId: string, name: string, cwd: string): Promise<string> {
   const { stdout } = await execFileAsync(
     "claude",
     ["--bg", "--resume", sessionId, "-n", name, ...cliSettingsArgs()],
-    claudeExecOptions()
+    claudeExecOptions(cwd)
   );
   const match = stripAnsi(stdout).match(/backgrounded\s*·\s*(\S+)\s*·/);
   if (!match) throw new Error(`Couldn't parse a session id from "claude --bg --resume" output: ${stdout}`);
@@ -143,8 +158,26 @@ export async function resolveOpenArgs(sessionId: string, name: string): Promise<
   const promise = (async () => {
     const known = await listAgents({ all: true });
     const match = known.find((s) => s.sessionId === sessionId && s.kind === "background");
-    if (match) return ["attach", match.id];
-    const id = await spawnBackgroundResume(sessionId, name);
+    // Reopen it where it actually lives, not wherever Clance's own default
+    // happens to be — read straight off its own transcript (see
+    // cwdForSessionId), falling back to SESSION_CWD only for the edge case
+    // of a transcript with no recorded cwd at all (very old session
+    // format).
+    const cwd = (await cwdForSessionId(sessionId)) ?? SESSION_CWD;
+    if (match) {
+      // A known match's own cwd is baked in at whenever *it* was minted —
+      // if that was before cwd-awareness existed (or under a
+      // since-changed default), it can be permanently stuck on the wrong
+      // directory, and attaching to it can't fix that. A *live* one is a
+      // real running process someone might be mid-conversation with —
+      // can't remint out from under that, so attach to it as-is regardless
+      // of cwd. A *stopped* one with the wrong cwd is safe to just
+      // re-resume properly instead: `--bg --resume` on a stopped session
+      // continues it under the same id (see spawnBackgroundResume), so
+      // this corrects it going forward without deleting anything.
+      if (match.cwd === cwd || match.pid) return ["attach", match.id];
+    }
+    const id = await spawnBackgroundResume(sessionId, name, cwd);
     return ["attach", id];
   })();
 
