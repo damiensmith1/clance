@@ -4,7 +4,7 @@ import { filePathsToPastePayload } from "../../shared/dragDropPaste.js";
 
 let terminalCounter = 0;
 
-export function TerminalSection({ terminalId, args = [], onPopOut }) {
+export function TerminalSection({ terminalId, args = [], shell = false, onPopOut }) {
   const containerRef = useRef(null);
   const termRef = useRef(null);
   const fitRef = useRef(null);
@@ -45,7 +45,11 @@ export function TerminalSection({ terminalId, args = [], onPopOut }) {
     termRef.current = term;
     fitRef.current = fitAddon;
 
-    window.clanceApp.createTerminal(terminalId, "claude", args, term.cols, term.rows);
+    if (shell) {
+      window.clanceApp.createShellTerminal(terminalId, term.cols, term.rows);
+    } else {
+      window.clanceApp.createTerminal(terminalId, "claude", args, term.cols, term.rows);
+    }
 
     // The terminal opens (and does its first fit) before the JetBrains Mono
     // web font is necessarily loaded, so that first fit can measure the

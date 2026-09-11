@@ -760,6 +760,22 @@ see `docs/background-agent-architecture.md`.
   actually occupying the top-left corner gets `.tab-bar-inset` (left
   padding to clear the `hiddenInset` traffic lights), computed via
   `topLeftLeafId()` walking `node.children[0]` down the tree.
+- **A fourth cluster button opens a plain terminal tab, not a `claude`
+  session at all** — the user's own login shell (`process.env.SHELL`,
+  `-il` for a real interactive-login environment: aliases, PATH, shell
+  startup files, same as a fresh `Terminal.app` window), for running
+  `claude` themselves, project commands, or anything else alongside
+  Clance-launched sessions. `Shell.js`'s `openShellTab()` opens the tab
+  synchronously (no background agent to mint first, unlike "New Chat" —
+  this pty *is* the actual process), and `TerminalSection`'s `shell` prop
+  routes it to a separate `terminal:create-shell` IPC (`index.ts`) instead
+  of `terminal:create`'s `command: "claude"` path. Its cwd is the same
+  configured default directory a fresh Clance session opens in (see
+  `docs/working-directory-design.md`), not the `SESSION_CWD` bucket
+  `terminal:create` hardcodes for `claude attach` viewports (irrelevant
+  there — the real process already has its own cwd from mint time). No
+  "Open in Widget" pop-out for this tab type: there's no `claude` session
+  underneath for the widget to resume.
 - **Panes (supersedes the single-tab-bar model above):** tabs now live in
   a tree of resizable panes, not one flat tab bar — up to
   `MAX_PANES = 4` at once (product decision: keeps the layout legible and

@@ -97,7 +97,7 @@ function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut) {
     case "settings":
       return html`<${SettingsSection} />`;
     case "terminal":
-      return html`<${TerminalSection} terminalId=${tab.terminalId} args=${tab.args} onPopOut=${onPopOut} />`;
+      return html`<${TerminalSection} terminalId=${tab.terminalId} args=${tab.args} shell=${tab.shell} onPopOut=${onPopOut} />`;
     default:
       return null;
   }
@@ -245,6 +245,9 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
               class="status-dot ${launcher.claudeConnected ? "status-dot-ok" : "status-dot-off"}"
               title=${launcher.claudeConnected ? "Claude Connected" : "Claude Disconnected"}
             ></span>
+            <button class="launcher-item" title="New Terminal" onClick=${() => launcher.openShellTab()}>
+              ${Icon.terminal(15)}
+            </button>
             ${LAUNCHER_ITEMS.map(
               (item) => html`
                 <button
@@ -516,6 +519,19 @@ export function Shell() {
     }
   }
 
+  // A plain terminal tab — not a `claude` process at all, just the user's
+  // own login shell (see index.ts's "terminal:create-shell") — for running
+  // `claude` themselves, project commands, or anything else, alongside
+  // Clance-launched sessions. No background agent to mint first (unlike
+  // openNewChatTab above), so this opens synchronously.
+  function openShellTab() {
+    const terminalId = nextTerminalId();
+    openTab(
+      { id: terminalId, type: "terminal", label: "Terminal", icon: "terminal", terminalId, shell: true },
+      { paneId: state.activePaneId }
+    );
+  }
+
   async function openChatTab(session) {
     if (openingRef.current.has(session.id)) return;
     openingRef.current.add(session.id);
@@ -557,6 +573,7 @@ export function Shell() {
     claudeConnected,
     activeSectionId: activeTab?.type,
     openSection,
+    openShellTab,
   };
 
   return html`

@@ -34,6 +34,8 @@ contextBridge.exposeInMainWorld("clanceApp", {
   openInWidget: (args: string[]) => ipcRenderer.invoke("popup:open-with-args", args),
   createTerminal: (terminalId: string, command: string, args: string[], cols: number, rows: number) =>
     ipcRenderer.invoke("terminal:create", { terminalId, command, args, cols, rows }),
+  createShellTerminal: (terminalId: string, cols: number, rows: number) =>
+    ipcRenderer.invoke("terminal:create-shell", { terminalId, cols, rows }),
   writeTerminal: (terminalId: string, data: string) =>
     ipcRenderer.send("terminal:input", { terminalId, data }),
   resizeTerminal: (terminalId: string, cols: number, rows: number) =>

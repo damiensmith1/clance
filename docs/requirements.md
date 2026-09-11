@@ -332,12 +332,16 @@ the toggle-managed path above) no Clance-specific wiring needed at all.
   & Plugins, Settings) — reachable via the Dock icon or the tray's "Open
   Dashboard" item. This replaces the originally-planned tray-only, no-Dock
   behavior.
-- The main window uses a tab-based navigation model: the sidebar lists
-  what can be opened (a section, or a past conversation from Chats) but
-  doesn't itself switch content — opening something adds a closable tab,
-  and the tab bar is the primary way to switch between what's open. A
-  "Tab Behavior" preference controls whether reopening an already-open
-  item reuses its tab or opens a duplicate. See `docs/design.md`.
+- The main window uses a tab-based navigation model: a floating top-right
+  launcher cluster (not a sidebar — see `docs/design.md`'s "Main
+  application window") opens a section (Sessions/Skills & Plugins/
+  Settings) or a new plain terminal tab; a past conversation opens from
+  the Sessions section itself. Opening something adds a closable tab, and
+  each pane's own tab bar is the primary way to switch between what's
+  open — panes are independently resizable/splittable, up to four at
+  once. Reopening an already-open section activates its existing tab
+  rather than duplicating it; there is no longer a user-facing preference
+  for this. See `docs/design.md`.
 - Cmd+Q now quits the entire app (tray, popup, and main window together),
   via the app menu's Quit role — previously there was no real "app" to
   quit since it ran tray-only. Closing just the main window does not quit

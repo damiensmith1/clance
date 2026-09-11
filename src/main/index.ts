@@ -289,6 +289,35 @@ ipcMain.handle(
   }
 );
 
+// A plain, general-purpose terminal tab (not a `claude` process at all) —
+// the user's own login shell, for running `claude` themselves, project
+// commands, or anything else, right alongside their Clance-launched
+// sessions. Unlike "terminal:create" above (always an `attach` viewport
+// onto a background agent, where cwd is irrelevant — the real process
+// already has its own), this pty *is* the actual process the user's
+// typing into, so its cwd matters: the same configured default directory
+// a fresh Clance session would open in, not the hardcoded SESSION_CWD
+// bucket. `-il` (interactive login) matches what a real Terminal.app
+// window gives you — aliases, PATH, everything from the user's own shell
+// startup files, sourced fresh rather than reusing the cached PATH-only
+// resolution `getLoginShellPath()` does for spawning `claude` itself.
+ipcMain.handle(
+  "terminal:create-shell",
+  (event, payload: { terminalId: string; cols: number; rows: number }) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return;
+    createPtySession(
+      payload.terminalId,
+      process.env.SHELL || "/bin/zsh",
+      ["-il"],
+      getDefaultDirectory(),
+      win,
+      payload.cols,
+      payload.rows
+    );
+  }
+);
+
 ipcMain.on("terminal:input", (_event, payload: { terminalId: string; data: string }) => {
   writeToPty(payload.terminalId, payload.data);
 });
