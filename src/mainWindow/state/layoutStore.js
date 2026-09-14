@@ -297,16 +297,15 @@ function reduce(state, action) {
       let root = removeTabFromTree(state.root, fromPaneId, tabId).rootWithoutTab;
       if (!paneExists(root, toPaneId)) return state;
       // Moving to a different pane unmounts the tab's TerminalSection in
-      // its old pane (killing that pty) and mounts a new one in the new
-      // pane — reusing the same terminalId there would race the two
-      // instances' create/kill IPC calls against each other and could
-      // leave the new pty killed out from under the just-reopened
-      // terminal. A fresh id sidesteps the collision entirely; the CLI
-      // session itself still reopens via the tab's unchanged `args`.
-      const relocatedTab = tab.type === "terminal" ? { ...tab, terminalId: nextTerminalId() } : tab;
+      // its old pane and mounts a new one in the new pane, but that no
+      // longer tears anything down — TerminalSection.js's registry keeps
+      // the terminal's pty/xterm instance alive across an unmount keyed by
+      // terminalId, so keeping the same id here just relocates that live
+      // entry's view into the new pane instead of losing it in favor of a
+      // disconnected new terminal.
       root = updateLeaf(root, toPaneId, (leaf) => {
         const tabs = [...leaf.tabs];
-        tabs.splice(Math.min(toIndex, tabs.length), 0, relocatedTab);
+        tabs.splice(Math.min(toIndex, tabs.length), 0, tab);
         return { ...leaf, tabs, activeTabId: tabId };
       });
       return { ...state, root, activePaneId: toPaneId };
@@ -325,11 +324,10 @@ function reduce(state, action) {
       const effectiveTargetId = resolveEffectiveTarget(state.root, rootWithoutTab, targetPaneId);
       if (effectiveTargetId === null) return state;
       // See the matching comment in MOVE_TAB — splitting always relocates
-      // the tab into a brand-new pane, so its TerminalSection remounts
-      // there; reusing the old terminalId would race the old pane's
-      // kill-on-unmount against the new pane's create-on-mount.
-      const relocatedTab = tab.type === "terminal" ? { ...tab, terminalId: nextTerminalId() } : tab;
-      const newLeaf = makeLeaf([relocatedTab], relocatedTab.id);
+      // the tab into a brand-new pane, remounting its TerminalSection
+      // there, but the registry keeps the same terminalId's live entry
+      // alive across that, so there's nothing to lose by keeping it.
+      const newLeaf = makeLeaf([tab], tab.id);
       const root = applySplit(rootWithoutTab, effectiveTargetId, edge, newLeaf);
       if (!isValidShape(root)) return state;
       return { ...state, root, activePaneId: newLeaf.id };
@@ -373,15 +371,25 @@ export function dispatch(action) {
   schedulePersist();
 }
 
-// Re-key any terminal tabs with a fresh terminalId (a persisted pty id has
-// no live process behind it once the app restarts) and drop anything that
-// doesn't look like a well-formed node, falling back to `initialState()`.
+// Re-key `claude attach <id>` terminal tabs with a fresh terminalId — that
+// id is just a disposable client id (the CLI conversation it attaches to
+// lives independently, keyed by the *session* id in `tab.args`, not this),
+// so reusing the old one after a restart buys nothing and a stale one could
+// even collide with a new client racing to reuse it. Plain shell tabs are
+// different: `terminalId` there doubles as the key for the actual pty
+// process itself (see ptyManager.ts, TerminalSection.js's registry), and
+// that pty can genuinely still be alive — e.g. this hydrate running after
+// a renderer-only refresh rather than a full app restart — so keep its id
+// stable and let createPtySession's own "already exists" check (main
+// process) sort out whether there's really something to reattach to.
+// Drops anything that doesn't look like a well-formed node, falling back
+// to `initialState()`.
 function rehydrateNode(node) {
   if (!node || typeof node !== "object") return null;
   if (node.type === "leaf") {
     if (!Array.isArray(node.tabs) || node.tabs.length === 0) return null;
     const tabs = node.tabs.map((tab) =>
-      tab.type === "terminal" ? { ...tab, terminalId: nextTerminalId() } : tab
+      tab.type === "terminal" && !tab.shell ? { ...tab, terminalId: nextTerminalId() } : tab
     );
     const activeTabId = tabs.some((t) => t.id === node.activeTabId) ? node.activeTabId : tabs[0].id;
     return { ...node, tabs, activeTabId };

@@ -12,9 +12,25 @@ const execFileAsync = promisify(execFile);
 // session can be reparented to a different window after the fact — see
 // reparentPty, used when "Open in App" moves a popup's live session into
 // the main window without restarting the underlying CLI process.
-type PtySession = { proc: pty.IPty; win: BrowserWindow };
+type PtySession = { proc: pty.IPty; win: BrowserWindow; outputBuffer: string };
 
 const sessions = new Map<string, PtySession>();
+
+// Recent raw output (ANSI included), capped, kept alongside the session so
+// a *newly created* xterm instance — one with no scrollback of its own,
+// e.g. after a renderer refresh reconnects to a still-live shell pty (see
+// TerminalSection.js's registry and getPtyBuffer below) — can replay it
+// instead of opening onto a blank screen. Trimmed from the front once it
+// exceeds the cap, so a long-lived session's buffer stays bounded rather
+// than growing forever.
+const OUTPUT_BUFFER_CAP = 200_000;
+
+function appendToBuffer(session: PtySession, data: string): void {
+  session.outputBuffer += data;
+  if (session.outputBuffer.length > OUTPUT_BUFFER_CAP) {
+    session.outputBuffer = session.outputBuffer.slice(session.outputBuffer.length - OUTPUT_BUFFER_CAP);
+  }
+}
 
 // GUI-launched apps (vs. a terminal-launched dev build) inherit launchd's
 // minimal PATH, missing directories a login shell would add (e.g. nvm,
@@ -152,10 +168,11 @@ export async function createPtySession(
     } as Record<string, string>,
   });
 
-  const session: PtySession = { proc: ptyProcess, win };
+  const session: PtySession = { proc: ptyProcess, win, outputBuffer: "" };
   sessions.set(terminalId, session);
 
   ptyProcess.onData((data) => {
+    appendToBuffer(session, data);
     if (!session.win.isDestroyed()) {
       session.win.webContents.send("terminal:data", { terminalId, data });
     }
@@ -213,6 +230,15 @@ export async function pasteImageIntoPty(terminalId: string, imagePath: string): 
     });
     void clipboard.write(restored);
   }, 800);
+}
+
+// Snapshot of a still-live session's recent raw output, for a client that
+// just (re)connected with no scrollback of its own to replay before it
+// starts receiving live data. Returns "" for a session with nothing
+// buffered yet, or one that no longer exists — same "just show nothing
+// extra" behavior either way.
+export function getPtyBuffer(terminalId: string): string {
+  return sessions.get(terminalId)?.outputBuffer ?? "";
 }
 
 export function resizePty(terminalId: string, cols: number, rows: number): void {

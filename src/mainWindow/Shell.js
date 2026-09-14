@@ -3,7 +3,7 @@ import { Icon } from "../shared/icons.js";
 import { ChatsListSection } from "./sections/ChatsSection.js";
 import { SkillsSection } from "./sections/SkillsSection.js";
 import { SettingsSection } from "./sections/SettingsSection.js";
-import { TerminalSection, nextTerminalId } from "./sections/TerminalSection.js";
+import { TerminalSection, nextTerminalId, destroyTerminal } from "./sections/TerminalSection.js";
 import {
   getState,
   subscribe,
@@ -229,6 +229,12 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
                   onPointerDown=${(e) => e.stopPropagation()}
                   onClick=${(e) => {
                     e.stopPropagation();
+                    // Terminal tabs keep their pty/xterm alive across a mere
+                    // tab-switch unmount (see TerminalSection.js's registry)
+                    // — this ✕ is the one place that means "actually end
+                    // this session", so tear it down explicitly rather than
+                    // relying on the component's now-nondestructive unmount.
+                    if (tab.type === "terminal") destroyTerminal(tab.terminalId);
                     closeTab(node.id, tab.id);
                   }}
                 >

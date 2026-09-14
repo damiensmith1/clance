@@ -43,6 +43,8 @@ contextBridge.exposeInMainWorld("clanceApp", {
   killTerminal: (terminalId: string) =>
     ipcRenderer.send("terminal:kill", { terminalId }),
   reparentTerminal: (terminalId: string) => ipcRenderer.invoke("terminal:reparent", terminalId),
+  getTerminalBuffer: (terminalId: string): Promise<string> =>
+    ipcRenderer.invoke("terminal:get-buffer", terminalId),
   onOpenSessionTab: (
     callback: (payload: { terminalId: string; args: string[]; title: string | null }) => void
   ) => {

@@ -41,6 +41,7 @@ import {
   resizePty,
   killPty,
   reparentPty,
+  getPtyBuffer,
   warmLoginShellPath,
   pasteImageIntoPty,
 } from "./ptyManager";
@@ -357,6 +358,12 @@ ipcMain.handle("terminal:reparent", (event, terminalId: string) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   return win ? reparentPty(terminalId, win) : false;
 });
+
+// A freshly (re)connected client's xterm instance has no scrollback of its
+// own — used by TerminalSection.js's registry when it creates a brand-new
+// terminal (as opposed to reusing one already alive in this renderer's own
+// memory) to replay recent output before live data starts flowing.
+ipcMain.handle("terminal:get-buffer", (_event, terminalId: string) => getPtyBuffer(terminalId));
 
 ipcMain.handle("files:copy-dropped", (_event, sourcePath: string) =>
   copyDroppedFile(sourcePath)

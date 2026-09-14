@@ -1135,6 +1135,55 @@ see `docs/background-agent-architecture.md`.
   there — the real process already has its own cwd from mint time). No
   "Open in Widget" pop-out for this tab type: there's no `claude` session
   underneath for the widget to resume.
+- **Shell terminal tabs survive being switched away from, via a
+  module-level registry in `TerminalSection.js`, not by keeping the tab's
+  component mounted.** Since a pane only ever renders its `activeTab`
+  (`Shell.js`), switching tabs unmounts `TerminalSection` — harmless for a
+  `claude attach <id>` tab (the real `claude --bg` process it attaches to
+  outlives the disposable client, and `attach` replays its own scrollback
+  on reconnect), but fatal for a plain shell tab: that pty *is* the actual
+  process, so killing it on unmount ended the session, and xterm's
+  scrollback had no replay mechanism of its own to fall back on. Tried
+  keeping the whole tab tree mounted and hiding inactive ones with CSS
+  first; abandoned — fighting Preact's diffing/resize lifecycle for every
+  tab wasn't worth it just to keep one hidden. Instead, `TerminalSection.js`
+  now keeps each terminalId's `xterm.Terminal` instance, its DOM node, and
+  the registered `onTerminalData` listener alive in a `Map` outside
+  Preact's tree entirely; mounting just moves that existing DOM node into
+  the visible container (or creates it, and the pty, on first use) and
+  unmounting parks it in an off-screen host div rather than disposing it —
+  so both the pty and the on-screen scrollback survive a tab switch with no
+  hidden, permanently-mounted component tree. Real teardown
+  (`destroyTerminal()`: kill the pty, dispose xterm, drop the registry
+  entry) only runs from the tab's own ✕ button (`Shell.js`) — the one place
+  that actually means "end this session" — never from the component's
+  unmount, which is now non-destructive for both tab types. Moving a
+  terminal tab to another pane (`MOVE_TAB`/`SPLIT_PANE` in
+  `layoutStore.js`) also remounts its `TerminalSection`, so for the same
+  reason those no longer re-key the tab's `terminalId` either — the
+  registry entry just relocates with it.
+- **Shell terminal tabs also survive a renderer refresh, not just a tab
+  switch** — a real app relaunch still starts fresh (the pty lives in the
+  main process, which does *not* survive that), but a plain reload
+  (`Cmd+R`) leaves the main process, and therefore the pty, untouched.
+  Two pieces make this work: `layoutStore.js`'s `rehydrateNode` stops
+  re-keying `shell: true` tabs' `terminalId` on hydrate (it still re-keys
+  `claude attach <id>` tabs — that id is only ever a disposable client,
+  the CLI session it attaches to is keyed separately by `tab.args`), so
+  the reload's `createShellTerminal` call targets the same id and
+  `createPtySession`'s existing "already exists" guard (`ptyManager.ts`)
+  turns it into a no-op reattach instead of spawning a new shell. Second,
+  since the reload also throws away the renderer-side registry above (and
+  with it xterm's own scrollback), `ptyManager.ts` now keeps a capped
+  (`OUTPUT_BUFFER_CAP = 200_000` chars) rolling buffer of each session's
+  raw output, fetched via `terminal:get-buffer` and replayed into the
+  fresh xterm instance before it starts receiving live data (queued and
+  flushed in order rather than interleaved — see the buffer-replay
+  comment in `TerminalSection.js`). Only actually exercised for shell
+  tabs in practice (an agent tab's id is always fresh after reload, so
+  there's nothing to reattach to — the buffer fetch for it comes back
+  empty and is a no-op), but applied uniformly since `createPtySession`
+  can't tell the two apart.
 - **Panes (supersedes the single-tab-bar model above):** tabs now live in
   a tree of resizable panes, not one flat tab bar — up to
   `MAX_PANES = 4` at once (product decision: keeps the layout legible and
