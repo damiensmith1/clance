@@ -15,16 +15,21 @@ status: draft
 - Global hotkey opens a popup widget
 - Free-text goal input (open-ended, not fixed actions like "Rewrite"/"Explain")
 - Dictation — speak your goal instead of typing it (local speech-to-text)
-- Screen content capture at time of invocation (frontmost window title +
-  any highlighted/selected text, as context text — see §"Screen context
-  capture") for the request. A screenshot is deliberately **not** captured
-  automatically at invocation — the model has an on-demand `look_at_screen`
-  tool instead (see `docs/design.md` §"Local tools server"), and
-  `Cmd+Shift+R` re-captures everything, screenshot included, mid-conversation
-  (see `docs/design.md` §"Context injection"). When a screenshot does ride
-  in (only via that refresh, or the tool call), it reaches the CLI as a
-  real image content block via clipboard + pty injection, not an SDK call
-  and not a path it has to `Read()`.
+- No screen content — window title, selection, or screenshot — is captured
+  or described to the model automatically at invocation anymore (revisited
+  2026-09-14; see §"Screen context capture"). Instead, every popup session
+  gets a static system prompt (baked in invisibly at mint time) telling it
+  about its on-demand `look_at_screen`/`read_selection`/`list_open_windows`
+  tools (see `docs/design.md` §"Local tools server") and when to reach for
+  them, offloading "what's actually on screen right now" entirely to the
+  model calling a tool when it needs to know — rather than front-loading a
+  snapshot that's often irrelevant and immediately stale. `Cmd+Shift+R`
+  still explicitly re-captures everything, screenshot included,
+  mid-conversation (see `docs/design.md` §"Context injection"). When a
+  screenshot rides in (via that refresh, or a `look_at_screen` tool call),
+  it reaches the CLI as a real image content block via clipboard + pty
+  injection (refresh) or a normal MCP tool result (the tool call) — not an
+  SDK call and not a path it has to `Read()`.
 - The real Claude Code CLI, embedded as a terminal (`node-pty` + `xterm.js`)
   and run as a real child process, handles all reasoning/looping/UI
   rendering — **supersedes the original Claude Agent SDK plan**, see
@@ -75,15 +80,17 @@ status: draft
 3. User types or dictates their goal in natural language (e.g. "reply to
    this email politely declining", "summarize what's on my screen", "fill
    this form with my address")
-4. App captures current screen (a screenshot, saved to disk) and the
-   frontmost window's title as context
+4. The app captures the frontmost window (just enough to know where
+   `insert_text` and friends should default to acting, see §"Screen context
+   capture") and mints a session — no screenshot, no selection read, no
+   description of any of it handed to the model
 5. An embedded terminal opens running the real `claude` CLI as a child
    process — the goal isn't sent separately; the user types/talks to the
    CLI directly inside that terminal, same as any Claude Code session
-6. Context reaches the CLI either invisibly (new sessions, via
-   `--append-system-prompt`) or as visible typed terminal input (resumed
-   sessions) — see `docs/design.md` §"Context injection" for why the two
-   paths differ
+6. A static system prompt, identical every time, rides in invisibly via
+   `--append-system-prompt` telling the model about its on-demand
+   screen/selection/window tools and when to use them — see
+   `docs/design.md` §"Context injection"
 7. Claude Code's own CLI handles everything from here: reasoning, tool
    use, rendering, permission prompts. Text injection into other apps (if
    the user wants it) happens however it would in any terminal-based
@@ -155,40 +162,46 @@ status: draft
 
 ### Screen context capture
 
-- On invocation, and again on-demand via `Cmd+Shift+R` mid-conversation
-  (see `docs/design.md` §"Context injection", "Refreshing context
-  mid-conversation"), capture:
-  - The frontmost window's title (`@nut-tree-fork/nut-js`) — a lighter
-    substitute for the originally-planned accessibility-tree read, not a
-    full structured-content dump
-  - Whatever text was highlighted/selected in the frontmost app, if any
-    (simulated Cmd+C, read back off the clipboard — see `docs/design.md`
-    §"Highlighted-selection capture"), folded into the request context with
-    an instruction to treat it as the primary subject of the request.
-    Delivered invisibly for a brand-new session, typed visibly into the
-    terminal for a resumed session or a refresh — see `docs/design.md`
-    §"Context injection". The widget's "Open in…" dropdown, by contrast,
-    reuses whatever was last captured rather than capturing fresh context
-    for the switch — see `docs/design.md`'s "Open in… dropdown" section.
-  - **A screenshot is captured only during an explicit `Cmd+Shift+R`
-    refresh, never on a plain hotkey-open** — saved to
-    `~/.clance/screenshots/` and delivered to the CLI as a real image
-    content block (clipboard + a `Ctrl+V` byte written into the pty), not
-    a path it has to `Read()` itself. Revisited 2026-09-12: paying that
-    capture-and-paste latency on every invocation stopped being worth it
-    once the model had an on-demand `look_at_screen` tool (see
-    `docs/design.md` §"Local tools server") for whenever a question is
-    actually about the screen — most invocations aren't. When neither a
-    screenshot nor a refresh has happened yet, `buildContextText()` nudges
-    the model to call `look_at_screen` itself if the user's request turns
-    out to be about the screen, rather than guessing from the text
-    description alone.
+- **Revisited 2026-09-14: a plain hotkey-open no longer captures or
+  describes any screen content to the model at all.** It used to capture
+  the frontmost window's title and any highlighted selection and fold both
+  into the request context on every invocation; now the only thing invocation
+  still captures is the frontmost window itself (not its title as text, and
+  nothing handed to the model) — purely so `insert_text`/`click_at`/
+  `activate_app`/`clear_focused_field`/`replace_focused_field` have
+  something to default-target when the model doesn't pass an explicit
+  `app` (see `docs/design.md` §"Context injection"). Selection and screen
+  content are offloaded entirely to the model's own on-demand
+  `read_selection`/`look_at_screen`/`list_open_windows` tools (see
+  `docs/design.md` §"Local tools server"), called only when actually
+  needed rather than front-loaded on every open. A static system prompt,
+  identical across every session, tells the model these tools exist and
+  when to reach for them — it doesn't (and can't) describe anything
+  specific to this particular invocation.
+- **`Cmd+Shift+R` mid-conversation is the one remaining path that captures
+  and hands over a full snapshot** — frontmost window title, current
+  selection, and a screenshot, all at once (see `docs/design.md`
+  §"Context injection", "Refreshing context mid-conversation"). This is
+  still an explicit, user-triggered action, typed/pasted visibly into the
+  terminal so it's part of the conversation the same way anything else the
+  user adds is.
+  - The screenshot piece of a refresh is saved to `~/.clance/screenshots/`
+    and delivered to the CLI as a real image content block (clipboard + a
+    `Ctrl+V` byte written into the pty), not a path it has to `Read()`
+    itself — this predates and is unrelated to the 2026-09-14 change above
+    (see `docs/design.md`'s 2026-09-12 note on why a screenshot was already
+    dropped from automatic invocation capture before selection/title were).
+  - The widget's "Open in…" dropdown (switching to a *different* existing
+    session) types nothing in at all — no fresh capture, and no reuse of
+    whatever a refresh or the original mint happened to know, since the
+    session being switched to already has its own tools and history; see
+    `docs/design.md`'s "Open in… dropdown" section.
 - Read-only and on-demand — never persistent/background capture, unchanged
   from the original plan
-- Accessibility-tree / focused-element content read is still deferred —
-  window title (and now selected text, via simulated copy rather than the
-  accessibility tree) has been sufficient so far; revisit if it proves
-  insufficient for structured-app goals
+- Accessibility-tree / focused-element content read is still deferred — a
+  model-called `read_selection` tool (simulated copy, not the accessibility
+  tree) has been sufficient so far; revisit if it proves insufficient for
+  structured-app goals
 
 ### Claude Code CLI integration (supersedes "Claude Agent SDK integration")
 
@@ -200,23 +213,28 @@ status: draft
 - All reasoning, tool use, streaming, and rendering is the CLI's own —
   Clance no longer parses SDK message events or renders any response UI of
   its own.
-- Screen context reaches the CLI without the SDK: the screenshot as a real
-  image content block (clipboard + pty injection), window title/selection
-  as text — see `docs/design.md` §"Context injection".
+- Screen context reaches the CLI without the SDK: a refresh's screenshot as
+  a real image content block (clipboard + pty injection), everything else
+  via the model's own on-demand tool calls — see `docs/design.md`
+  §"Context injection".
 
 ### Response modes (removed — superseded by the terminal pivot)
 
 - ~~**Talk back** / **Type it out**~~ — the old app-mediated
   propose/accept/reject text-injection flow (model-decided, with a custom
   `proposeText` tool and keystroke-injection-on-accept) is gone and stays
-  gone. What replaced it: an `insert_text` **MCP tool**, offered only to
-  hotkey-opened ("new session") popup invocations, that types text into
-  whatever app was frontmost when the popup opened — see
-  `docs/design.md` §"Text-insertion tool (`insert_text`)". The model decides
-  when to call it, the same way it decides to call any other tool; there's
-  no app-level accept/reject step. For every other flow (a resumed session
-  opened via the widget's "Open in…" dropdown, or just talking in the
-  terminal), Clance still doesn't mediate text delivery — same as any
+  gone. What replaced it: an `insert_text` **MCP tool**, part of the local
+  tools server every Clance-minted or -revived session gets (a fresh
+  hotkey-open, the main window's "New Chat," or reviving a dormant session
+  — see `docs/design.md` §"Local tools server"), that types text into
+  whatever app was frontmost when the *popup* specifically was opened (the
+  only entry point that captures a frontmost-window target at all — see
+  §"Screen context capture" above), or an explicit `app` hint otherwise.
+  The model decides when to call it, the same way it decides to call any
+  other tool; there's no app-level accept/reject step. A session that's
+  already *live* as a background agent can't gain this after the fact
+  (see `docs/design.md` §"Local tools server"), and Clance still doesn't
+  mediate text delivery for plain talking in the terminal — same as any
   terminal-based Claude Code session.
 
 ### Multi-turn conversations
@@ -234,9 +252,10 @@ status: draft
   not a full mode swap) over the current conversation; picking a session
   from it opens a terminal that resumes (or attaches to, if it's a live
   background agent — see `docs/design.md` §"Attach vs. resume") that
-  session in place, with context typed visibly into the terminal input
-  rather than injected invisibly (see `docs/design.md` §"Context injection"
-  for why resumed sessions need a different delivery path than new ones).
+  session in place, with nothing typed into the terminal input on the way
+  in — the session picked already has its own tools and history, so there's
+  no fresh context to hand it (see `docs/design.md`'s "Open in… dropdown"
+  section).
 - **A session can also be continued directly from the main window's Chats
   tab** — clicking a session row opens the same kind of resumed/attached
   terminal tab, just without the popup's screen-context capture (there's
@@ -300,25 +319,40 @@ SDK query.
 - **Skills** — ✅ works, but not through anything Clance manages at
   request-time. Every Clance-launched CLI session reads `~/.claude/skills/`
   itself, exactly like any other `claude` invocation — no app-level plumbing
-  needed for this to work at all.
-- **MCP servers (external)** — ✅ works the same way: a launched session
-  reads its own project/user `.mcp.json` independently.
-- **Config surface — ⚠️ real gap for Skills/MCP servers, resolved for
-  Custom Tools.** The Skills & Plugins section still lists Skills and MCP
-  servers with enable/disable toggles (`src/main/skills.ts`,
-  `src/main/mcpConfig.ts`, writing to `~/.clance/mcp.json`'s per-entry
-  `enabled` flag), but **nothing currently reads that toggle state when
-  launching a terminal session** — the `agent.ts` `query()` call that used
-  to consume it was deleted along with the Agent SDK. The UI still writes
-  real config; it just has no observed effect on what a Clance-launched
-  session can use. Needs a decision (see `docs/design.md` open questions):
-  wire the toggles into the launch args (e.g.
-  `--strict-mcp-config`/`--mcp-config` for MCP; skills have no obvious
-  CLI-level enable/disable flag to hook), or scope the toggle UI down to
-  "informational only," or drop it. **The "Custom Tools" tab's own toggles
-  don't have this gap** — each one genuinely gates whether the CLI can call
-  that tool at all, checked fresh at every mint (see the bullet below and
-  `docs/design.md` §"Local tools server").
+  needed for this to work at all. The Skills & Plugins section's "Skills"
+  tab is a **read-only** list of what's installed there (2026-09-14 — see
+  "Config surface" below for why it's not a toggle).
+- **MCP servers (external)** — ✅ works, and (2026-09-14) Clance's own
+  enable/disable toggle for these now has a real effect on a launched
+  session, not just on-disk config with nothing reading it.
+- **Config surface — resolved for MCP servers and Custom Tools; Skills
+  stays read-only by design, not a gap.** This used to be a real bug for
+  both Skills and MCP servers: the Skills & Plugins section listed both
+  with enable/disable toggles (`src/main/skills.ts`, `src/main/mcpConfig.ts`,
+  writing to `~/.clance/mcp.json`'s per-entry `enabled` flag) that wrote
+  real config **nothing read when launching a terminal session** — the
+  `agent.ts` `query()` call that used to consume it was deleted along with
+  the Agent SDK, and nothing replaced it. Fixed 2026-09-14, differently for
+  each:
+  - **MCP servers:** `mcpConfig.ts`'s `getActiveMcpServers()` (already
+    written, previously unused) is now merged into the same `--mcp-config`
+    JSON every Clance-minted session already gets for its local tools (see
+    `docs/design.md` §"Local tools server") — toggling a server off in
+    Settings now genuinely keeps it out of a launched session, the same way
+    the Custom Tools toggles already worked.
+  - **Skills:** stays **read-only**, on purpose — `claude --help` confirms
+    there's no per-skill enable/disable flag, only `--disable-slash-commands`
+    (all skills at once). A toggle with no way to actually take effect is
+    the exact bug being fixed here, not something to keep in a different
+    form, so the per-skill `Toggle` was removed rather than left
+    non-functional; managing what's available is done the same way a bare
+    `claude` session does it — add/remove a folder under
+    `~/.claude/skills/`. `enabledSkills` (config.ts) and `setSkillEnabled`
+    (skills.ts) were removed along with it, not just hidden in the UI.
+  - **The "Custom Tools" tab's own toggles never had this gap** — each one
+    genuinely gated whether the CLI could call that tool at all, checked
+    fresh at every mint, since the day it shipped (see
+    `docs/design.md` §"Local tools server").
 - **Custom tools** — ✅ a first "computer use" tool set: `insert_text`,
   `list_open_windows`, `look_at_screen` (on-demand screenshot, returned as
   a real image), `read_selection`, `activate_app`, `click_at` (fractional
@@ -352,9 +386,9 @@ SDK query.
     the CLI from calling it outright, not merely "requires approval."
     Defaults to all on (opt-out) — these are Clance's own first-party
     tools, not arbitrary third-party skill instructions, so there's no
-    "not vetted for this" concern the way `enabledSkills` defaulting to
-    none has. Checked fresh at mint time (`localToolsServer.ts`'s
-    `listLocalTools()`), same as everything else about this tool set.
+    "not vetted for this" concern to opt into. Checked fresh at mint time
+    (`localToolsServer.ts`'s `listLocalTools()`), same as everything else
+    about this tool set.
   - **The server backing these tools is visible in the "MCP Servers" tab
     too, with a live health check** — it's Clance's own infrastructure
     (not something from `~/.clance/mcp.json`), so it's shown separately
@@ -448,9 +482,12 @@ the toggle-managed path above) no Clance-specific wiring needed at all.
 - Latency: a Clance-launched terminal should show the CLI's first output
   within ~1-2s of the session starting — mechanism changed (terminal boot
   + CLI startup, not an SDK stream-start), but the target is the same
-- Privacy: screen content is only captured at the moment of invocation,
-  saved to disk (`~/.clance/screenshots/`, not held only in memory the way
-  the old in-memory base64 approach did) and read by the CLI only if it
+- Privacy: no screen content is captured automatically at all anymore — only
+  on an explicit `Cmd+Shift+R` refresh, or the model's own on-demand tool
+  call (`look_at_screen`/`read_selection`/`list_open_windows`), both
+  user/model-initiated rather than front-loaded on every open. A screenshot
+  is saved to disk (`~/.clance/screenshots/`, not held only in memory the
+  way the old in-memory base64 approach did) and read by the CLI only if it
   chooses to; only the resulting session transcript (written by the CLI
   itself) persists long-term
 - ~~Reliability: failed injection should never lose the model's output
@@ -464,13 +501,13 @@ the toggle-managed path above) no Clance-specific wiring needed at all.
 
 - Hotkey reliably opens the popup (an embedded terminal) from any app, any
   time
-- Screen context (frontmost window title/selection, invisibly for new
-  sessions, visibly typed for resumed sessions and refreshes) is captured
-  and reaches the CLI correctly. A screenshot is captured only via
-  `Cmd+Shift+R` or the model's own `look_at_screen` tool call, never
-  automatically on a plain hotkey-open, and rides in as a real image the
-  same way regardless of session type (see `docs/design.md` §"Context
-  injection")
+- Every popup session gets the same static, invisible system prompt at
+  mint time telling it about its on-demand screen/selection/window tools
+  (`--append-system-prompt`, baked into both fresh mints and pool spares —
+  see `docs/design.md` §"Context injection"). No window title, selection,
+  or screenshot is captured or described automatically anymore; a
+  screenshot rides in only via `Cmd+Shift+R` or the model's own
+  `look_at_screen` tool call, as a real image either way
 - ~~Text injection works in at least one real target app~~ — **removed**,
   no longer an app-owned feature to validate
 - ❌ Dictation not yet implemented — still an open item, not yet a met

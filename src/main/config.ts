@@ -5,13 +5,6 @@ import { SESSION_CWD } from "./paths";
 export type ClanceConfig = {
   shortcuts: Record<string, string>;
   shortcutsConfigured: boolean;
-  // Which skills from ~/.claude/skills/ the agent may use. Defaults to
-  // none (opt-in) — skills can carry arbitrary instructions and were
-  // likely installed for unrelated Claude Code CLI work, not vetted for
-  // use inside Clance, so granting all of them by default would be a
-  // broader grant than the app's setup flow gives anywhere else.
-  // "all" remains a valid explicit value for anyone who wants it.
-  enabledSkills: string[] | "all";
   // Working directory new Clance-created sessions open in — null means
   // "use SESSION_CWD" (see getDefaultDirectory below). Doesn't affect
   // resuming an existing session, which always inherits that session's own
@@ -23,11 +16,11 @@ export type ClanceConfig = {
   // without a fresh Finder dialog every time.
   recentDirectories: string[];
   // Which of localToolsServer.ts's LOCAL_TOOLS the agent may use. Defaults
-  // to "all" (opt-out), unlike enabledSkills' opt-in-none above — these are
-  // Clance's own first-party tools (screenshot, click, type), not arbitrary
-  // third-party skill instructions, so there's no equivalent "not vetted
-  // for this" concern; a user disables one they specifically don't want
-  // rather than needing to opt into what's already there.
+  // to "all" (opt-out) — these are Clance's own first-party tools
+  // (screenshot, click, type), not arbitrary third-party skill
+  // instructions, so there's no "not vetted for this" concern; a user
+  // disables one they specifically don't want rather than needing to opt
+  // into what's already there.
   enabledLocalTools: string[] | "all";
 };
 
@@ -36,7 +29,6 @@ const CONFIG_PATH = join(SESSION_CWD, "config.json");
 const DEFAULT_CONFIG: ClanceConfig = {
   shortcuts: { togglePopup: "Alt+Space" },
   shortcutsConfigured: false,
-  enabledSkills: [],
   defaultDirectory: null,
   recentDirectories: [],
   enabledLocalTools: "all",

@@ -15,8 +15,8 @@ status: draft
 | Screenshot capture | Electron `desktopCapturer` | resized to Claude's recommended max edge (1568px), saved to a PNG under `~/.clance/screenshots/`, then delivered to the CLI as a real image content block via clipboard + a `Ctrl+V` byte written into the pty — see "Context injection" below, not sent as a path for the model to `Read()` |
 | Terminal embedding | `node-pty` (real pty process) + `xterm.js` + `@xterm/addon-fit` | vendored (not CDN-loaded) under `src/shared/vendor/xterm/`; `node-pty` is a native addon, requires `electron-rebuild`/`@electron/rebuild` against Electron's Node ABI |
 | AI / reasoning / session UI | The real `claude` CLI binary, run as a child pty process | superseded the Claude Agent SDK — see "Terminal-embedding architecture" below |
-| Frontmost-app read (window title, keystroke injection) | `@nut-tree-fork/nut-js` | captures the frontmost window's title as context and backs `insert_text` (see "Text-insertion tool" below) — the SDK-era `proposeText` accept/reject *UI* is gone with the custom chat UI, but the underlying keystroke-injection capability is back, now surfaced as an MCP tool the CLI decides to call itself |
-| Text-insertion tool transport | `@modelcontextprotocol/sdk` (Streamable HTTP, stateless) | local-only MCP server run inside Electron's main process — see "Text-insertion tool (`insert_text`)" below |
+| Frontmost-app read (window title, keystroke injection) | `@nut-tree-fork/nut-js` | captures the frontmost window at invocation — since 2026-09-14, purely to back `insert_text`/`click_at`/etc.'s default target, not as context text (see "Context injection" below) — the SDK-era `proposeText` accept/reject *UI* is gone with the custom chat UI, but the underlying keystroke-injection capability is back, now surfaced as an MCP tool the CLI decides to call itself |
+| Local tools transport | `@modelcontextprotocol/sdk` (Streamable HTTP, stateful sessions) | local-only MCP server run inside Electron's main process — see "Local tools server" below |
 | Session storage | JSONL files under `~/.claude/projects/...`, written entirely by the CLI itself | Clance no longer writes session files — every session is a real CLI process, so this is the CLI's own format, not something Clance needs to keep byte-compatible with by hand |
 | Packaging | `electron-builder`, ad-hoc/Developer-ID signed, installed to `/Applications` in dev too | see "Packaging & macOS permissions" below — fixes TCC (Screen Recording/Accessibility) permission flakiness that plagued the raw dev Electron binary |
 
@@ -197,111 +197,129 @@ first-party surface rather than a second implementation of it.
 
 ## Context injection
 
-Screen context (frontmost window title + any highlighted selection) is
-built fresh on every popup invocation (`popupWindow.ts`'s
-`buildContextText()`), but **how** it reaches the CLI differs by whether
-the session is new or resumed — this split exists because of a real CLI
-limitation, confirmed by direct testing outside Electron:
+**Revisited 2026-09-14: a plain hotkey-open no longer captures or
+describes any screen content to the model at all.** Earlier, frontmost
+window title and any highlighted selection were captured fresh on every
+invocation and folded into prose (`buildContextText()`); now that's gone
+entirely for the initial-open path. The model already had on-demand
+`look_at_screen`/`read_selection`/`list_open_windows` tools by that point
+(see "Local tools server" below), so front-loading a text snapshot on
+every single open was redundant with what the model could just ask for
+itself when it actually needed to know — and worse, immediately stale the
+moment the user's screen changed after the hotkey was pressed. What every
+fresh popup session gets instead is a **static system prompt**
+(`popupWindow.ts`'s `localToolsSystemPrompt()`) — identical text every
+time, telling the model it was just invoked via Clance's popup and that it
+has these tools, with a nudge toward *when* to reach for each one
+unprompted (bare tool discoverability doesn't need this — every tool's own
+MCP description is always visible to the model regardless — but knowing
+*when* it's appropriate to act without being asked does). Because this text
+no longer depends on anything captured per-invocation, it's identical
+whether a session is a genuinely fresh mint or a pool spare claimed from
+`agentPool.ts` — see "New sessions and pool spares" below for why that
+matters.
 
-**A screenshot is deliberately not part of automatic invocation capture at
-all** (revisited 2026-09-12 — see `docs/ideas.md`'s "Context capture is
-one-shot and frozen" for the earlier state, where it was). Now that the
-model has an on-demand `look_at_screen` tool (`localToolsServer.ts`) and
-the user has `Cmd+Shift+R` (below) for an explicit reload, paying the
-capture-and-paste latency (~1.2-1.6s) on *every* invocation — most of which
-aren't actually about the screen — stopped being worth it.
-`captureContextText()`'s `captureScreenshot` param defaults to whatever
-`isRefresh` is, so a plain hotkey-open never captures one; only an explicit
-refresh does. `buildContextText()` adds a short nudge instead, when no
-screenshot was captured: "you have a look_at_screen tool, call it if this
-is actually about the screen" — insurance against the model just guessing
-from the text description alone when it should look. That same
-initial-invocation-only block also nudges toward the rest of the local
-tools set (`click_at`, `activate_app`, `clear_focused_field`/
-`replace_focused_field`, `read_selection`, `list_open_windows`) — not for
-bare discoverability (every tool's own MCP description is always visible
-to the model regardless of this text), but for steering *when* to reach
-for one unprompted, same reasoning `insert_text`'s nudge always had.
+**One thing invocation still captures: the frontmost window itself — not
+as text, and nothing is handed to the model about it.**
+`captureFrontmostWindow()` still runs in `toggleClancePopupInner`, before
+the popup steals focus, purely so `frontApp.ts`'s module-level
+`capturedWindow` gets set — that's the fallback target
+`insert_text`/`click_at`/`activate_app`/`clear_focused_field`/
+`replace_focused_field` use when the model doesn't pass an explicit `app`.
+Skipping this capture entirely would silently break that default (nothing
+to fall back to on a fresh launch, or a stale target left over from
+wherever a `Cmd+Shift+R` refresh last ran elsewhere) — it's a distinct,
+load-bearing side channel from the prose-building capture that was
+removed, not a leftover of it.
 
-**When a screenshot *is* captured (only ever during a refresh, see
-below), it rides in as a real image content block**, identically for new
-and resumed sessions, via a mechanism confirmed by a live spike
-(`docs/sep10talks.md`): the CLI reads image data directly off the OS
+**A screenshot is still never part of automatic invocation capture**
+(this part predates and is unrelated to the 2026-09-14 change above — see
+2026-09-12, `docs/ideas.md`'s "Context capture is one-shot and frozen" for
+the earlier state, where it was). The model has `look_at_screen`
+(`localToolsServer.ts`) and the user has `Cmd+Shift+R` (below) for an
+explicit reload, so paying the capture-and-paste latency (~1.2-1.6s) on
+*every* invocation — most of which aren't actually about the screen —
+still isn't worth it. Only an explicit refresh ever captures one.
+
+**When a screenshot *is* captured (only ever during a refresh), it rides
+in as a real image content block**, via a mechanism confirmed by a live
+spike (`docs/sep10talks.md`): the CLI reads image data directly off the OS
 clipboard when it sees a paste keystroke — it isn't parsing image bytes
 out of the pty stream. So `ptyManager.ts`'s `pasteImageIntoPty()` writes
 the screenshot PNG to the clipboard (`clipboard.write([new
 ClipboardItem(...)])`), then writes a single `Ctrl+V` byte (`0x16`)
 directly into the pty — no keystroke simulation, no `nut-js`, no
-bracketed-paste wrapper. `popup.js`'s `openTerminal()`/
-`triggerContextRefresh()` fire this once the CLI is ready, landing the
-image as a pending attachment in the input box; any visible typed context
-then follows ~400ms after, so it reads like a normal "paste screenshot,
-type question" turn once the user hits Enter. `buildContextText()` only
-adds a short note that a screenshot is attached — it no longer names a
-path or says "read it," since there's no file for the model to `Read()`
-any more. **Caveat, unverified:** a first-run/never-configured `claude`
-install may have interstitial prompts (a "Teach auto mode about your
-environment?" dialog was hit mid-spike) that could block this path on a
-fresh machine — not yet checked.
+bracketed-paste wrapper. `popup.js`'s `triggerContextRefresh()` fires this
+once the capture's done, landing the image as a pending attachment in the
+input box; the refreshed window-title/selection text follows ~400ms after
+as visible unsubmitted input, so it reads like a normal "paste screenshot,
+type question" turn once the user hits Enter. **Caveat, unverified:** a
+first-run/never-configured `claude` install may have interstitial prompts
+(a "Teach auto mode about your environment?" dialog was hit mid-spike)
+that could block this path on a fresh machine — not yet checked.
 
-**Refreshing context mid-conversation.** Every capture above only ever
-happens once, at invocation — context is otherwise frozen for the life of
-the session (`docs/ideas.md`'s "Context capture is one-shot and frozen").
-`Cmd+Shift+R` while the popup terminal has focus (`popup.js`'s
-`triggerContextRefresh()`, reserved from the CLI via xterm's
-`attachCustomKeyEventHandler` — plain `Cmd+R` is already Electron's default
-"reload" accelerator and would blow away the renderer) re-captures screen
-context for the *live* session instead of spawning anything new:
-`popupWindow.ts`'s `refreshContext()` briefly sets the popup's opacity to 0
-(so the screenshot doesn't just capture the widget itself, without hiding
-it — hiding hands focus to whatever's "next," which can be Clance's own
-main window), re-runs the same capture chain as initial invocation, restores
-opacity, and the result rides into the pty exactly like a resumed session's
-initial context does — image pasted via `pasteImageIntoPty`, text typed as
-visible unsubmitted bracketed-paste input (`popup.js`'s
-`injectContextIntoTerminal()`, factored out so both paths share one
-delivery mechanism). The opening line differs
-from a fresh invocation's (`REFRESH_CONTEXT_PREFIX` vs.
-`CLANCE_CONTEXT_PREFIX`, both in `chatHistory.ts`) since "the user just
-invoked Clance" would be wrong mid-conversation; both are stripped by the
-same title-derivation logic so a refresh triggered before the user's first
-real submitted message can't corrupt that session's title.
+**Refreshing context mid-conversation.** `Cmd+Shift+R` while the popup
+terminal has focus (`popup.js`'s `triggerContextRefresh()`, reserved from
+the CLI via xterm's `attachCustomKeyEventHandler` — plain `Cmd+R` is
+already Electron's default "reload" accelerator and would blow away the
+renderer) is the one remaining path that captures a full snapshot
+(window title, selection, and a screenshot together) and hands it to the
+*live* session instead of spawning anything new: `popupWindow.ts`'s
+`refreshContext()` briefly sets the popup's opacity to 0 (so the
+screenshot doesn't just capture the widget itself, without hiding it —
+hiding hands focus to whatever's "next," which can be Clance's own main
+window), captures window title + selection + a screenshot, restores
+opacity, and the result rides into the pty as visible unsubmitted
+input — image pasted via `pasteImageIntoPty`, text typed as bracketed-paste
+input right after (`popup.js`'s `injectContextIntoTerminal()`). Its
+opening line (`REFRESH_CONTEXT_PREFIX` in `chatHistory.ts`) is stripped by
+the same title-derivation logic that used to also strip the initial-open
+prefix, so a refresh triggered before the user's first real submitted
+message can't corrupt that session's title.
+- **Security:** the frontmost window's title is attacker-influenceable —
+  any running app can set its own window title to arbitrary text,
+  including terminal escape sequences. `sanitizeForTerminal()` in
+  `popupWindow.ts` strips C0/C1 control characters (including ESC) from it
+  before interpolation, and `popup.js` sanitizes again defensively right
+  before injection — stripping ESC specifically prevents a forged
+  `\x1b[201~` paste-terminator from letting attacker-controlled text
+  escape the bracketed-paste block early.
 
-- **New sessions:** context rides in invisibly via
-  `--append-system-prompt <text> --system-prompt-snapshot off`. The
-  `--system-prompt-snapshot off` flag matters for more than this one
-  launch — a session's *first* launch permanently decides whether any
-  *future* `--resume` of it can ever take a fresh `--append-system-prompt`.
-  With the flag off from birth, a later resume of that same session (e.g.
-  via the widget's "Open in…" dropdown) can still receive new context;
-  without it (the CLI's default, and the state of every session that
-  predates this feature — including ones started from a bare terminal),
-  the CLI silently ignores any `--append-system-prompt` on resume, and
-  even flags it as a suspicious injection attempt in its own reasoning.
-  This is not fixable via CLI flags on the resume side — it's decided
-  permanently at a session's original launch.
-- **Resumed/attached sessions** (opened via the widget's "Open in…"
-  dropdown): since most existing sessions were never launched with the
-  snapshot flag off, invisible
-  injection can't be relied on for them. Instead, context is **typed into
-  the terminal as visible, unsubmitted input** once the session is ready —
-  wrapped in a bracketed-paste escape sequence (`\x1b[200~...\x1b[201~`)
-  so the CLI's multi-line input treats embedded newlines as literal text
-  rather than submitting partway through, left unsubmitted so the user can
-  extend it before pressing Enter themselves.
-  - **Security:** the frontmost window's title is attacker-influenceable —
-    any running app can set its own window title to arbitrary text,
-    including terminal escape sequences. `sanitizeForTerminal()` in
-    `popupWindow.ts` strips C0/C1 control characters (including ESC) from
-    it before interpolation, and `popup.js` sanitizes again defensively
-    right before injection — stripping ESC specifically prevents a forged
-    `\x1b[201~` paste-terminator from letting attacker-controlled text
-    escape the paste block early.
-  - `attach <id>` (a bare subcommand connecting to an already-running
-    background process, no other flags accepted) gets the same visible
-    typed-context treatment as `--resume` — there's no meaningful
-    difference from the injection site's perspective once the terminal is
-    open.
+**New sessions and pool spares** (`toggleClancePopupInner`,
+`popupWindow.ts`): every popup session — whether genuinely minted fresh or
+claimed from `agentPool.ts`'s pre-warmed pool — gets the exact same static
+system prompt above, baked in invisibly via `--append-system-prompt <text>
+--system-prompt-snapshot off`. This wasn't possible before the
+2026-09-14 change: back when the prompt carried per-invocation window
+title/selection text, a claimed pool spare (already a running process,
+minted before "this invocation" existed) couldn't retroactively receive
+it, so claimed spares got that context typed visibly into the chat box
+instead as a trade-off (decided 2026-09-10). Now that the prompt is
+invariant, that trade-off no longer applies — `agentPool.ts` bakes it into
+every spare at warm time too (see `popupMintArgs()`), and
+`claimPoolSpare()`'s staleness check compares a spare's baked args against
+a freshly-recomputed set the same way it already did for `cwd`, so a spare
+warmed before Accessibility settled (or before the local tools server's
+wiring was ready) gets discarded rather than handed out with broken tool
+access — see agentPool.ts's own comments for the bug this specifically
+fixed (the very first widget open of a launch always breaking, silently).
+The `--system-prompt-snapshot off` flag still matters for more than this
+one launch, independent of any of the above — a session's *first* launch
+permanently decides whether any *future* `--resume` of it can ever take a
+fresh `--append-system-prompt`; with the flag off from birth, that stays
+possible (not that anything currently relies on it, since the "Open in…"
+dropdown no longer types anything in either — see below).
+
+**Resumed/attached sessions** (opened via the widget's "Open in…"
+dropdown): type **nothing** in at all now (changed alongside the
+2026-09-14 mint-time change above) — no fresh capture, and no reuse of
+whatever the widget last showed. A resumed/attached session already has
+its own tools (wired in at whatever point it was originally minted) and
+its own conversation history; repeating the generic tool-nudge text on
+every tab-switch would just be visible clutter with no new signal (the
+MCP tool descriptions are always there regardless). `attach <id>` (a bare
+subcommand connecting to an already-running background process) and
+`--resume` are treated identically here — neither gets anything typed in.
 
 ## Local tools server
 
@@ -510,7 +528,7 @@ the screen/keyboard/mouse could usefully expose.
   and act on whatever app the user last had focused.
 - **The `mcpServers` config key is unpredictable per launch, not the
   literal string `"clance"` it used to be** (`popupWindow.ts`'s
-  `localToolsMcpArgs()`, `serverKey = \`clance-${token.slice(0, 16)}\``,
+  `sessionMcpArgs()`, `serverKey = \`clance-${token.slice(0, 16)}\``,
   reusing the same per-launch random token already generated for auth
   above): that key becomes the "clance" segment of the CLI's
   `mcp__<key>__<tool>` naming convention, which `--allowedTools` (below)
@@ -534,15 +552,21 @@ the screen/keyboard/mouse could usefully expose.
   (`toggleClancePopup`'s brand-new hotkey-opened sessions,
   `agents:spawn-new`'s main-window "New Chat", and `resolveOpenArgs`'s
   revival of a *dormant* session — all three go through `popupWindow.ts`'s
-  `localToolsMcpArgs()`), and only when `checkPermissions().accessibility`
-  is already true; otherwise the flag is omitted entirely so the CLI never
-  offers tools that would just fail. This is a blanket gate for the *whole*
-  server, including the nominally read-only tools (`list_open_windows`,
-  `look_at_screen`, `read_selection`) — they don't strictly need
-  Accessibility themselves, but there was no reason to special-case them
-  out of the same all-or-nothing flag, and doing so would need the CLI to
-  be told about a tool set that can change mid-session depending on a
-  permission grant.
+  `sessionMcpArgs()`). Clance's own local tools server is only added to
+  that `mcpServers` object when `checkPermissions().accessibility` is
+  already true — otherwise the CLI never offers tools that would just
+  fail. This is a blanket gate for the *whole* server, including the
+  nominally read-only tools (`list_open_windows`, `look_at_screen`,
+  `read_selection`) — they don't strictly need Accessibility themselves,
+  but there was no reason to special-case them out of the same
+  all-or-nothing flag, and doing so would need the CLI to be told about a
+  tool set that can change mid-session depending on a permission grant.
+  **This gate is scoped to the local tools server only** (2026-09-14) — a
+  user's own MCP servers, merged into the same `mcpServers` object from
+  `mcpConfig.ts`'s `getActiveMcpServers()`, have nothing to do with
+  Accessibility and are never held back by it; `--mcp-config` itself is
+  only omitted entirely when *neither* is present (no local tools and no
+  user-configured servers).
   - **A session that's already *live* as a background agent can never gain
     tools it wasn't minted with** — same limitation `--system-prompt-
     snapshot` already has (see "Context injection" above): `attach <id>`
@@ -564,10 +588,12 @@ the screen/keyboard/mouse could usefully expose.
     to begin with — just a degraded default for those three specifically.
 - **Approval tiering via `--allowedTools`, not a Clance-built UI:** only
   the read-only tools (`list_open_windows`, `look_at_screen`,
-  `read_selection`) and `click_at` are listed in `popupWindow.ts`'s
-  `AUTO_ALLOWED_TOOL_NAMES` (expanded to the per-launch `mcp__<serverKey>
-  __<name>` form above, space-separated per `--allowedTools`' own accepted
-  format), so the CLI never prompts for them — reading the screen and clicking somewhere already on screen are
+  `read_selection`) and `click_at` — `localToolsServer.ts`'s `LOCAL_TOOLS`
+  tags each of these `tier: "auto"` — end up in `popupWindow.ts`'s
+  `sessionMcpArgs()`'s `--allowedTools` list (expanded to the per-launch
+  `mcp__<serverKey>__<name>` form above, space-separated per
+  `--allowedTools`' own accepted format), so the CLI never prompts for
+  them — reading the screen and clicking somewhere already on screen are
   either non-destructive or as low-stakes as a single click, and prompting
   per-click would be exactly the friction-without-safety
   `docs/sep10talks.md` called out as the wrong shape for approval UX.
@@ -627,7 +653,7 @@ the screen/keyboard/mouse could usefully expose.
 - **Per-tool on/off toggle — the Skills & Plugins section's "Custom
   Tools" tab is real now, not the placeholder it used to be**
   (`SkillsSection.js`; backed by `localToolsServer.ts`'s `LOCAL_TOOLS`
-  metadata array — the single source of truth both `localToolsMcpArgs()`
+  metadata array — the single source of truth both `sessionMcpArgs()`
   and this UI read from, so a new `server.registerTool()` call always has
   a matching toggle entry). This is orthogonal to approval tier: tier
   decides whether an *enabled* tool still needs the CLI's prompt; the
@@ -635,21 +661,22 @@ the screen/keyboard/mouse could usefully expose.
   `mcp__<serverKey>__<name>` goes into `--disallowedTools` — the CLI
   refuses it outright, not merely "requires approval" — checked fresh at
   every mint the same way Accessibility already is. Defaults to all
-  enabled (`config.ts`'s `enabledLocalTools: "all"`), unlike
-  `enabledSkills` defaulting to none: these are Clance's own first-party
-  tools, not arbitrary third-party skill instructions, so there's no
-  "not vetted for this app" concern to opt into. **Unlike the pre-existing
-  Skills/MCP toggles** (`docs/requirements.md`'s "Config surface" gap —
-  those toggles write real config that nothing currently reads at launch
-  time), this one is fully wired: `setLocalToolEnabled()`/
-  `listLocalTools()` mirror `skills.ts`'s `setSkillEnabled()` pattern
-  exactly (first toggle-off converts the `"all"` default into an explicit
-  list), but actually feed `localToolsMcpArgs()`.
+  enabled (`config.ts`'s `enabledLocalTools: "all"`) — these are Clance's
+  own first-party tools, not arbitrary third-party skill instructions, so
+  there's no "not vetted for this app" concern to opt into. This was the
+  first of the Skills & Plugins section's toggles to actually be wired
+  into a launched session — the other two (Skills, MCP servers) wrote real
+  config that nothing read at launch time back when this shipped (see
+  `docs/requirements.md`'s "Config surface" note); MCP servers caught up to
+  this 2026-09-14 (`getActiveMcpServers()` now feeds `sessionMcpArgs()` the
+  same way), and Skills went read-only instead, since there's no CLI-level
+  flag for it to hook into the way this one hooks into
+  `--allowedTools`/`--disallowedTools`.
 - **Server status + a live health check, in the same "MCP Servers" tab
   the user asked "isn't that a server, shouldn't it be visible there"
   about.** The server itself is invisible infrastructure most of the
   time — it's lazily started (`ensureLocalToolsServer()` only runs the
-  first time a real mint actually calls `localToolsMcpArgs()`), so
+  first time a real mint actually calls `sessionMcpArgs()`), so
   `getLocalToolsServerStatus()` just reports whether it's running yet
   without starting it, letting Settings show "not started yet" as a
   distinct, non-alarming state rather than looking broken before the
@@ -665,44 +692,47 @@ the screen/keyboard/mouse could usefully expose.
 
 ## Highlighted-selection capture
 
-Lets a hotkey-opened popup session know what text, if any, was
-highlighted/selected in the frontmost app at invocation time, and steers the
-model to treat it as the focus of the request rather than requiring the
-user to re-describe or re-paste it. Wired into both `toggleClancePopup`
-(Option+Space, the initial capture) and `refreshContext` (Cmd+Shift+R,
-mid-conversation — see "Context injection" above) since both go through
-the same `captureContextText()`.
+Lets the model know what text, if any, is highlighted/selected in the
+frontmost app, so it can treat it as the focus of a request rather than
+requiring the user to re-describe or re-paste it. Two different paths use
+this now, not one:
 
-- **Mechanism:** `captureSelectedText()` in `src/main/frontApp.ts` runs
-  alongside `captureFrontmostWindow()`/the screenshot capture, before the
-  popup steals focus. There's no generic cross-app "what's selected" OS API
-  short of the accessibility-tree read `docs/design.md` still defers, so
-  this simulates Cmd+C and reads the result back off the clipboard — the
-  same trick `insert_text` uses in reverse (Cmd+V), and the same
+- **On demand, via the `read_selection` MCP tool** (see "Local tools
+  server" below) — the normal path since the 2026-09-14 change removed
+  automatic invocation capture. The model calls it whenever it actually
+  needs to know, reading whatever's selected *at that moment*, not
+  whatever was selected when the popup happened to open.
+- **On an explicit `Cmd+Shift+R` refresh** (`refreshContext`,
+  `popupWindow.ts`) — still captures a selection as part of that full
+  snapshot and types it visibly into the terminal (see "Context injection"
+  above).
+
+Both go through the same underlying mechanism:
+
+- **Mechanism:** `captureSelectedText()` in `src/main/frontApp.ts` — for
+  `read_selection`, called directly at tool-call time; for a refresh,
+  called alongside the screenshot/window-title capture, before the popup
+  steals focus. There's no generic cross-app "what's selected" OS API short
+  of the accessibility-tree read `docs/design.md` still defers, so this
+  simulates Cmd+C and reads the result back off the clipboard — the same
+  trick `insert_text` uses in reverse (Cmd+V), and the same
   save/restore-the-user's-real-clipboard trade-off. The clipboard is
   cleared to an empty sentinel *before* the simulated copy (rather than
   diffed against whatever was already there), so a no-op copy — nothing was
   selected — reads back empty rather than being confused with a selection
   that happens to match old clipboard contents.
 - **Gated on Accessibility**, same permission (and same keystroke-simulation
-  mechanism) `insert_text` needs — both `toggleClancePopup` and
-  `refreshContext` reuse the same `checkPermissions().accessibility` check.
-- **Same capture, different delivery depending on when it fires:**
-  `captureContextText()`'s `captureSelection` param is `true` from both
-  call sites. What differs is how the resulting text reaches the CLI —
-  invisibly via `--append-system-prompt` for a brand-new session, or typed
-  into the terminal as visible input for a resumed session or a refresh
-  (see "Context injection" above) — not whether the selection gets
-  captured at all. `insert_text` itself is still new-session-only (no MCP
-  server wiring for resumed sessions), which is unrelated: capturing a
-  selection is just a keystroke simulation, same Accessibility gate, no
-  MCP config needed.
-- **Prompting:** when a selection was captured, `buildContextText()` in
-  `popupWindow.ts` includes it verbatim (sanitized the same way the window
-  title is, and capped at `MAX_SELECTED_TEXT_CHARS` — 4000 — so one huge
-  selection can't blow out every invocation's context) plus an instruction
-  to treat it as the primary subject of the request unless the user's ask
-  is clearly about something else.
+  mechanism) `insert_text` needs — the local tools server as a whole is
+  gated on `checkPermissions().accessibility` (see "Local tools server"
+  below), and `refreshContext` reuses the same check for its own capture.
+- **Prompting:** when a refresh captures a selection, `buildContextText()`
+  in `popupWindow.ts` includes it verbatim (sanitized the same way the
+  window title is, and capped at `MAX_SELECTED_TEXT_CHARS` — 4000 — so one
+  huge selection can't blow out the context) plus an instruction to treat
+  it as the primary subject of the request unless the user's ask is
+  clearly about something else. `read_selection`'s tool result carries no
+  such instruction of its own — the model called it because it already
+  decided the selection mattered, so there's nothing to steer.
 
 ## Packaging & macOS permissions
 
@@ -780,50 +810,34 @@ Clance-specific is the window chrome and which session gets opened:
   fresh `"loading"`/`"new"` payload arrives (a new hotkey press shouldn't
   leave a stale dropdown open over a different conversation). Picking a
   row calls the same `resolveOpenArgs()` → `openTerminal()` path the old
-  picker mode used, reusing `currentSystemPromptText` (the flattened
-  context captured when the widget itself was last opened/shown) as the
-  visible typed context, rather than capturing fresh context for the
-  switch — capturing fresh context would need the widget to disappear
-  again first (see the capture-before-reveal ordering above), just to
-  switch which session is showing.
+  picker mode used, but (2026-09-14) with nothing typed into the terminal
+  on the way in — no fresh capture, and no reuse of whatever the widget
+  last showed. The session being switched to already has its own tools
+  (wired in whenever it was originally minted) and its own history, so
+  repeating the generic tool-nudge text on every tab-switch would just be
+  clutter with no new signal.
 - **The window itself always appears instantly, before any of the async
-  work behind opening it.** `toggleClancePopup` used to await the whole
-  context-capture chain (permission check, screenshot, simulated-Cmd+C
-  selection capture) — and minting a real `claude --bg` background agent on
-  top of that — before ever calling `popup.show()`, so the hotkey press
-  produced no visible feedback at all until that entire chain finished
-  (occasionally a couple of seconds). Fixed by splitting window-prep
-  (`preparePopupWindow()` — create/position only, no visible effect) from
-  reveal (`revealPopupWindow()` — the actual `show()`/`focus()`) and
-  payload-send (`sendToPopup()`): `preparePopupWindow()` runs concurrently
-  with context capture (safe, since it has no visible effect), but
-  `revealPopupWindow()` waits until capture is done — revealing any earlier
-  would put the widget itself in its own screenshot (a full-screen capture
-  doesn't care about focus, only what's on screen) and would steal
-  keyboard focus away from whatever app the simulated-Cmd+C selection
-  capture needs it on. Once revealed, the window shows a transient
-  `{ mode: "loading" }` payload (popup.js renders a plain "Starting…"
-  placeholder in the terminal area), and the real `"new"` payload — with
-  the actual `attach` args and context preview — follows once
-  `spawnBackgroundAgent()` resolves. A module-level `opening` flag on
-  `toggleClancePopup` guards against a second hotkey press mid-flight
-  spawning a second background agent; a `currentMode` check right before
-  the deferred `sendToPopup()` call skips it if the widget was explicitly
-  dismissed while the work was still in flight, so it can't pop back up
-  after the user closed it. Within that async work, `localToolsMcpArgs()`
-  (its slow part — `ensureLocalToolsServer()` — only matters for the CLI
-  flags, not for the accessibility boolean context capture needs, which
-  `checkPermissions()` itself answers synchronously) and
-  `captureContextText()` now run concurrently rather than the latter
-  waiting on the former, since neither actually depends on the other's
-  result. `spawnBackgroundAgent()` still has to wait for
-  `captureContextText()`'s result specifically — the captured context is
-  baked into `--append-system-prompt` at spawn time, so the CLI process
-  can't be started before it's known without giving up the
-  invisible-injection design (see "Context injection" above) — that
-  remaining serialization is the next thing to look at if this isn't enough
-  (see `warmLoginShellPath()` below for one piece of it that *was*
-  removable).
+  work behind opening it — and since 2026-09-14, that's true unconditionally
+  rather than "as soon as capture finishes."** `toggleClancePopup` used to
+  await a context-capture chain (permission check, screenshot,
+  simulated-Cmd+C selection capture) before it was safe to reveal the
+  window — revealing any earlier would've put the widget itself in its own
+  screenshot, or stolen keyboard focus away from whatever app the
+  simulated-Cmd+C capture needed it on. Now that a plain hotkey-open
+  doesn't do any of that capture (see "Context injection" above — the only
+  thing invocation still captures, the frontmost window for
+  `insert_text`'s default target, has no such focus/screenshot
+  sensitivity), `toggleClancePopupInner` reveals the window right after
+  `preparePopupWindow()` finishes, with nothing left to wait on first. Once
+  revealed, the window shows a transient `{ mode: "loading" }` payload
+  (popup.js renders a plain "Starting…" placeholder in the terminal area),
+  and the real `"new"` payload — just the `attach` args now, no context
+  preview for this path — follows once the pool claim or fresh mint
+  resolves. A module-level `opening` flag on `toggleClancePopup` guards
+  against a second hotkey press mid-flight spawning a second background
+  agent; a `currentMode` check right before the deferred `sendToPopup()`
+  call skips it if the widget was explicitly dismissed while the work was
+  still in flight, so it can't pop back up after the user closed it.
 - **Visual style:** flat, warm, editorial (`#F7F3EB` background,
   `#D97757` accent) — matches the main window's terminal theme (see
   "Terminal-embedding architecture" above) rather than a default dark
@@ -857,21 +871,23 @@ Clance-specific is the window chrome and which session gets opened:
   the only affordance is a color change on hover. Hovering reveals a card
   (`#context-dialog`, 480×560px max, one `overflow-y: auto` scrollbar for
   the whole thing — deliberately not nested per-section scroll areas, to
-  avoid mouse-wheel-bubbling ambiguity) showing everything that was
-  actually captured and handed to the CLI at invocation: the screenshot
-  (an `<img>` loaded via a `file://` URL, `encodeURI`'d since a home
-  directory path could contain spaces), the frontmost window title, any
-  highlighted-selection text, and — labeled "System prompt" — the full
-  text `buildContextText()` produced, verbatim. `captureContextText()`
-  returns these as a `contextPreview` object (`{ windowTitle,
-  screenshotPath, selectedText, systemPrompt }`, the last always present
-  since `buildContextText()` never returns empty) alongside the flattened
-  string used for the actual launch args, forwarded through `popup-shown`
-  unchanged so the renderer shows them directly rather than re-parsing
-  them back out of that string. `openPopupWithArgs` (pop-out-to-widget)
-  never captures fresh context, so `contextPreview` is `undefined` there
-  (not just empty fields) — the card shows an empty-state message instead.
-  `#context-dialog` sits flush against `#context-link` (`margin-top: 0`)
+  avoid mouse-wheel-bubbling ambiguity) showing everything a `Cmd+Shift+R`
+  refresh actually captured: the screenshot (an `<img>` loaded via a
+  `file://` URL, `encodeURI`'d since a home directory path could contain
+  spaces), the frontmost window title, any highlighted-selection text, and
+  — labeled "System prompt" — the full text `buildContextText()` produced,
+  verbatim. `captureContextText()` returns these as a `contextPreview`
+  object (`{ windowTitle, screenshotPath, selectedText, systemPrompt }`,
+  the last always present since `buildContextText()` never returns empty)
+  alongside the flattened string used for the actual injected text,
+  forwarded through `popup-shown` unchanged so the renderer shows them
+  directly rather than re-parsing them back out of that string. **A plain
+  hotkey-open never sends a `contextPreview` at all** (2026-09-14) — its
+  system prompt is static and invariant (see "Context injection" above),
+  nothing specific to this invocation to show — so the card's empty state
+  covers that alongside `openPopupWithArgs` (pop-out-to-widget), which
+  never captured fresh context either. `#context-dialog` sits flush
+  against `#context-link` (`margin-top: 0`)
   rather than with a gap — a gap is a dead zone the mouse has to cross in
   a straight line to reach the card, and leaving either element mid-cross
   (easy when aiming for the scrollbar) drops `:hover` and closes it before
@@ -1312,21 +1328,31 @@ see `docs/background-agent-architecture.md`.
   spec still describes the since-superseded `ChatDetailSection` UI; the
   data layer (`chatHistory.ts`'s session-listing/parsing) is what's still
   current, the rendering layer it describes is not.
-- **Extensibility management UI (sub-project #5) — config layer still
-  live, but no longer wired to anything Clance itself runs.** The Skills &
-  Plugins section still manages `~/.claude/skills/*/SKILL.md` (via
-  `src/main/skills.ts`) and `~/.clance/mcp.json` (via
-  `src/main/mcpConfig.ts`, wrapping each Claude-Code-`.mcp.json`-shaped
-  entry with a Clance-only `enabled` flag) as real, working config
-  surfaces. What changed: there is no more `agent.ts` `query()` call for
-  this config to feed into — every session is a real external `claude`
-  process that reads `~/.claude/skills/` and its own MCP config
-  independently of Clance's `enabledSkills`/`mcp.json` toggle state. The
-  toggles in Settings currently have **no effect on what a Clance-launched
-  terminal session can actually use** — this is a real gap introduced by
-  the terminal pivot, not a design choice, and needs a decision on
-  whether/how to reconcile it (see open questions below). Custom tools,
-  hooks, and subagents remain deferred as before.
+- **Extensibility management UI (sub-project #5) — resolved 2026-09-14,
+  differently for Skills vs. MCP servers.** The terminal pivot left a real
+  gap here: every session is a real external `claude` process that reads
+  `~/.claude/skills/` and its own MCP config independently, with no more
+  `agent.ts` `query()` call for Clance's own `enabledSkills`/`mcp.json`
+  toggle state to feed into — the Settings toggles wrote real config with
+  **no effect on what a Clance-launched terminal session could actually
+  use**. Fixed, not left open:
+  - **MCP servers** (`src/main/mcpConfig.ts`, `~/.clance/mcp.json`
+    wrapping each Claude-Code-`.mcp.json`-shaped entry with a Clance-only
+    `enabled` flag): `getActiveMcpServers()` — already written, previously
+    never called from anywhere — is now merged into the same
+    `--mcp-config` every launch gets for local tools (see
+    `popupWindow.ts`'s `sessionMcpArgs()`). The toggle now has the effect
+    it always looked like it had.
+  - **Skills** (`~/.claude/skills/*/SKILL.md`, previously managed via
+    `src/main/skills.ts`'s `enabledSkills`/`setSkillEnabled`): removed
+    rather than wired up — `claude --help` confirms there's no per-skill
+    enable/disable flag, only `--disable-slash-commands` for all of them
+    at once. A toggle with nothing to control is the same trust bug
+    either way (looks like it works, doesn't), so the toggle itself is
+    gone; the Skills tab is a read-only list now. Managing what's
+    available is the same as for a bare `claude` session: add/remove a
+    folder under `~/.claude/skills/`.
+  - Custom tools, hooks, and subagents remain deferred as before.
 
 ## Open questions (resolve before building)
 
@@ -1361,8 +1387,9 @@ see `docs/background-agent-architecture.md`.
       custom chat UI (see "Terminal-embedding architecture" above). There
       is no more app-mediated accept/reject step — a launched session
       decides for itself, the same way it decides to call any tool. See
-      "Text-insertion tool (`insert_text`)" below for the reintroduced
-      insertion path.
+      "Local tools server" below for the reintroduced insertion path
+      (`insert_text`, alongside the rest of the computer-use tool set it
+      grew into).
 - [x] Where does the Anthropic API key/auth live — env var, onboarding
       flow, macOS Keychain? **Resolved, unchanged by the terminal pivot:**
       delegated entirely to the `claude` CLI's own credential store via
@@ -1383,22 +1410,26 @@ see `docs/background-agent-architecture.md`.
       open requirements-level question (see `docs/requirements.md`
       §"Dictation" — that requirement predates the CLI embedding and its
       UX under a terminal-input model hasn't been thought through)
-- [ ] Exact folder/config conventions for skills, tools, and MCP servers —
-      **partially moot for skills/MCP now.** A Clance-launched CLI process
-      reads `~/.claude/skills/` and its own project/user `.mcp.json`
-      exactly as any other `claude` invocation would — no Clance-specific
-      namespace decision needed for those two. What's now genuinely open:
-      whether Clance's own `enabledSkills`/`~/.clance/mcp.json` toggle
-      state (Settings UI) should be reconciled into what a launched
-      session actually sees (e.g. via `--strict-mcp-config` +
-      `--mcp-config`, or per-launch env/flags), left as a UI that edits
-      config nothing currently reads, or removed/repurposed. See the
-      Extensibility management UI note above.
-- [ ] How much of the settings UI (enabling/disabling plugins) ships in v1
-      vs. "edit the config file yourself for now" — same underlying gap as
-      above: the toggle UI exists and writes real config, but nothing
-      currently reads `enabledSkills`/`mcp.json`'s `enabled` flags when
-      launching a terminal session
+- [x] Exact folder/config conventions for skills, tools, and MCP servers —
+      **moot for skills/MCP.** A Clance-launched CLI process reads
+      `~/.claude/skills/` and its own project/user `.mcp.json` exactly as
+      any other `claude` invocation would — no Clance-specific namespace
+      decision needed for those two. **Resolved 2026-09-14:** Clance's own
+      `~/.clance/mcp.json` toggle state is now reconciled into what a
+      launched session sees — `mcpConfig.ts`'s `getActiveMcpServers()` is
+      merged into the same `--mcp-config` every launch already gets for
+      local tools (see "Local tools server" above). Skills went the other
+      way, deliberately: there's no CLI-level per-skill enable/disable flag
+      to hook (`--disable-slash-commands` is all-or-nothing), so
+      `enabledSkills`/`setSkillEnabled` were removed rather than left as a
+      toggle with nothing to actually control — the Skills tab is read-only
+      now, managed the same way a bare `claude` session manages it (add/
+      remove a folder under `~/.claude/skills/`).
+- [x] How much of the settings UI (enabling/disabling plugins) ships in v1
+      vs. "edit the config file yourself for now" — **resolved alongside
+      the above:** MCP servers keep their real toggle (now actually wired);
+      Skills ships as a read-only list instead of a toggle that silently
+      did nothing.
 - [ ] `src/shared/markdown.js` is dead code (no imports anywhere) since the
       custom chat UI it rendered for no longer exists — delete, or is
       there a future terminal-adjacent use for it (e.g. rendering

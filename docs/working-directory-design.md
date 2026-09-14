@@ -105,16 +105,15 @@ by construction, not as a missed optimization.
 - Pool size stays at 1 — nothing about directory-awareness changes that
   reasoning (single hotkey, single user, can't fire two default-opens at
   once; see `agentPool.ts`'s existing comment).
-- The claimed-spare context trade-off (visible-typed context instead of
-  invisible `--append-system-prompt`, since a pre-warmed spare exists
-  before there's any context to bake in) is unrelated to and unaffected by
-  any of this — still applies exactly as before, regardless of which
-  directory the spare or fresh mint uses.
+- Which directory a spare or fresh mint uses is unrelated to and unaffected
+  by the popup's system prompt (now static and invisible for both, see
+  `docs/design.md`'s "Context injection" — the pool-spare trade-off this
+  used to describe no longer applies as of 2026-09-14).
 
 ## Implementation punch list — all done
 
 - [x] Settings: default-directory field (persisted in `config.json`
-      alongside `shortcuts`/`enabledSkills` — `config.ts`'s
+      alongside `shortcuts`/`enabledLocalTools` — `config.ts`'s
       `getDefaultDirectory`)
 - [x] `cwd` threaded through as a real parameter everywhere `SESSION_CWD`
       was hardcoded for session *creation* — `SESSION_CWD` itself stays as

@@ -114,7 +114,7 @@ export async function spawnBackgroundAgent(
 // `attach` (which connects to an already-running process and accepts no
 // other flags — see docs/design.md's "Local tools server"), this is a
 // genuinely fresh `claude --bg` mint, so `mcpArgs` (popupWindow.ts's
-// `localToolsMcpArgs()`) can ride in here the same way it does for a
+// `sessionMcpArgs()`) can ride in here the same way it does for a
 // brand-new session.
 async function spawnBackgroundResume(
   sessionId: string,

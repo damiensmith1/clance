@@ -8,7 +8,7 @@ import {
   openNewSessionInDirectory,
   isPopupSessionName,
   refreshContext,
-  localToolsMcpArgs,
+  sessionMcpArgs,
 } from "./popupWindow";
 import { openMainWindow, openSessionInMainWindow } from "./mainWindow";
 import { createAppMenu } from "./appMenu";
@@ -27,7 +27,7 @@ import { SHORTCUT_ACTIONS } from "./shortcuts";
 import { getSession, listSessions, hasRealUserMessage } from "./chatHistory";
 import { setSessionArchived } from "./archivedSessions";
 import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
-import { listSkills, setSkillEnabled } from "./skills";
+import { listSkills } from "./skills";
 import { listMcpServers, setMcpServerEnabled } from "./mcpConfig";
 import {
   listLocalTools,
@@ -161,7 +161,7 @@ ipcMain.handle("chatHistory:get-session", (_event, filePath: string) =>
 );
 
 ipcMain.handle("chatHistory:resolve-open-args", async (_event, sessionId: string, name: string) =>
-  resolveOpenArgs(sessionId, name, await localToolsMcpArgs())
+  resolveOpenArgs(sessionId, name, (await sessionMcpArgs()).args)
 );
 
 ipcMain.handle(
@@ -176,7 +176,8 @@ ipcMain.handle(
 // "Default" should never itself become a "recent" entry).
 ipcMain.handle("agents:spawn-new", async (_event, name: string, claudeArgs: string[], cwd?: string | null) => {
   if (cwd) addRecentDirectory(cwd);
-  return spawnBackgroundAgent(name, [...claudeArgs, ...(await localToolsMcpArgs())], cwd || getDefaultDirectory());
+  const { args: mcpArgs } = await sessionMcpArgs();
+  return spawnBackgroundAgent(name, [...claudeArgs, ...mcpArgs], cwd || getDefaultDirectory());
 });
 
 // Guards against shelling out `claude stop` with no real id (seen live:
@@ -263,11 +264,6 @@ ipcMain.handle("layout:save", (_event, layout: unknown) => {
 });
 
 ipcMain.handle("extensibility:list-skills", () => listSkills());
-
-ipcMain.handle(
-  "extensibility:set-skill-enabled",
-  (_event, name: string, enabled: boolean) => setSkillEnabled(name, enabled)
-);
 
 ipcMain.handle("extensibility:list-mcp-servers", () => listMcpServers());
 

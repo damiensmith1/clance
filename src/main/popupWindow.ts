@@ -4,6 +4,7 @@ import { captureFrontmostWindow, captureSelectedText } from "./frontApp";
 import { captureAndSaveActiveDisplay } from "./screenCapture";
 import { checkPermissions } from "./permissions";
 import { ensureLocalToolsServer, listLocalTools } from "./localToolsServer";
+import { getActiveMcpServers, type StoredMcpServerConfig } from "./mcpConfig";
 import { spawnBackgroundAgent, resolveSessionId, stopAgent, rmAgent } from "./agentSessions";
 import { claimPoolSpare, refillPool } from "./agentPool";
 import { hasRealUserMessage, REFRESH_CONTEXT_PREFIX } from "./chatHistory";
@@ -335,56 +336,71 @@ export async function refreshContext(): Promise<{ text: string; preview: Context
 // no human ever seeing it happen. See `docs/design.md`'s "Local tools
 // server" for the full reasoning.
 //
-// Gives the launched CLI session Clance's local "computer use" tools — see
-// src/main/localToolsServer.ts for the full list — additive (not
-// --strict-mcp-config), so the user's own configured MCP servers still load
-// too. Gated on Accessibility since every tool here needs at least keystroke
-// or mouse simulation (even the read-only ones reuse that machinery — see
-// frontApp.ts); when it's not granted, the CLI just doesn't see any of these
-// tools rather than seeing ones that silently fail.
-export async function localToolsMcpArgs(): Promise<string[]> {
-  if (!checkPermissions().accessibility) return [];
-  const { url, token } = await ensureLocalToolsServer();
-  // The mcpServers key becomes the "clance" segment of the CLI's
-  // mcp__<key>__<tool> naming convention — exactly what the
-  // --allowedTools/--disallowedTools lists below reference, by name. A
-  // static, guessable key (this used to be the literal string "clance")
-  // could collide with a same-named server a project's own .mcp.json
-  // defines — Clance sessions can now open in real project directories
-  // (see docs/working-directory-design.md), so that's not a hypothetical,
-  // it's an actual file a session's cwd could contain. Since --mcp-config
-  // is additive (not --strict-mcp-config), a colliding project-supplied
-  // "clance" server could load alongside ours; if the CLI's precedence
-  // rules ever let it win the name, our allowlist — which only ever checks
-  // a tool name string — would silently pre-approve calls into that
-  // attacker-controlled tool instead of ours, no prompt ever shown.
-  // Deriving the key from the same per-launch random token already used
-  // for the bearer auth (unpredictable, not a secret in this context)
-  // makes it impossible for a static project file to predict or target.
-  const serverKey = `clance-${token.slice(0, 16)}`;
-  const toolName = (name: string) => `mcp__${serverKey}__${name}`;
+// Gives the launched CLI session every MCP server Clance should wire in:
+// Clance's own local "computer use" tools (see src/main/localToolsServer.ts
+// for the full list) plus whatever the user has enabled in Settings' "MCP
+// Servers" tab (`mcpConfig.ts`'s `getActiveMcpServers()` — previously
+// configured but never actually reached a launched session, see
+// docs/requirements.md's "Config surface" gap, closed 2026-09-14). Additive
+// (not --strict-mcp-config), so a project's own `.mcp.json` still loads too.
+// `localToolsAvailable` is returned separately from `args` rather than
+// folded into "args is non-empty" — a user's own custom MCP servers can
+// make `args` non-empty even when Accessibility isn't granted, and callers
+// (see popupMintArgs) need to know specifically whether the *local* tools
+// are what's available, since that's what the system-prompt nudge is
+// about.
+export async function sessionMcpArgs(): Promise<{ args: string[]; localToolsAvailable: boolean }> {
+  const mcpServers: Record<string, StoredMcpServerConfig> = { ...getActiveMcpServers() };
+  let allowedNames: string[] = [];
+  let disallowedNames: string[] = [];
 
-  // Settings' "Custom Tools" toggle list (SkillsSection.js, backed by
-  // localToolsServer.ts's listLocalTools()) decides which tools are
-  // offered at all, checked fresh at mint time same as everything else
-  // here — a tool that's off is passed via --disallowedTools so the CLI
-  // refuses it outright, not just left unapproved (which would still let
-  // the user approve it through a prompt).
-  const tools = listLocalTools();
-  const allowedNames = tools
-    .filter((t) => t.enabled && t.tier === "auto")
-    .map((t) => toolName(t.name));
-  const disallowedNames = tools.filter((t) => !t.enabled).map((t) => toolName(t.name));
+  // Every tool here needs at least keystroke or mouse simulation (even the
+  // read-only ones reuse that machinery — see frontApp.ts), so the whole
+  // local tools server is gated on Accessibility; when it's not granted,
+  // the CLI just doesn't see any of these tools rather than seeing ones
+  // that silently fail. This gate is scoped to Clance's own local tools
+  // only — a user's own configured MCP servers above have nothing to do
+  // with Accessibility and are never held back by it.
+  const localToolsAvailable = checkPermissions().accessibility;
+  if (localToolsAvailable) {
+    const { url, token } = await ensureLocalToolsServer();
+    // The mcpServers key becomes the "clance" segment of the CLI's
+    // mcp__<key>__<tool> naming convention — exactly what the
+    // --allowedTools/--disallowedTools lists below reference, by name. A
+    // static, guessable key (this used to be the literal string "clance")
+    // could collide with a same-named server a project's own .mcp.json
+    // defines — Clance sessions can now open in real project directories
+    // (see docs/working-directory-design.md), so that's not a
+    // hypothetical, it's an actual file a session's cwd could contain.
+    // Since --mcp-config is additive, a colliding project-supplied
+    // "clance" server could load alongside ours; if the CLI's precedence
+    // rules ever let it win the name, our allowlist — which only ever
+    // checks a tool name string — would silently pre-approve calls into
+    // that attacker-controlled tool instead of ours, no prompt ever shown.
+    // Deriving the key from the same per-launch random token already used
+    // for the bearer auth (unpredictable, not a secret in this context)
+    // makes it impossible for a static project file to predict or target.
+    const serverKey = `clance-${token.slice(0, 16)}`;
+    const toolName = (name: string) => `mcp__${serverKey}__${name}`;
+    mcpServers[serverKey] = { type: "http", url, headers: { Authorization: `Bearer ${token}` } };
 
-  const args = [
-    "--mcp-config",
-    JSON.stringify({
-      mcpServers: { [serverKey]: { type: "http", url, headers: { Authorization: `Bearer ${token}` } } },
-    }),
-  ];
+    // Settings' "Custom Tools" toggle list (SkillsSection.js, backed by
+    // localToolsServer.ts's listLocalTools()) decides which tools are
+    // offered at all, checked fresh at mint time same as everything here
+    // — a tool that's off is passed via --disallowedTools so the CLI
+    // refuses it outright, not just left unapproved (which would still
+    // let the user approve it through a prompt).
+    const tools = listLocalTools();
+    allowedNames = tools.filter((t) => t.enabled && t.tier === "auto").map((t) => toolName(t.name));
+    disallowedNames = tools.filter((t) => !t.enabled).map((t) => toolName(t.name));
+  }
+
+  if (Object.keys(mcpServers).length === 0) return { args: [], localToolsAvailable };
+
+  const args = ["--mcp-config", JSON.stringify({ mcpServers })];
   if (allowedNames.length > 0) args.push("--allowedTools", allowedNames.join(" "));
   if (disallowedNames.length > 0) args.push("--disallowedTools", disallowedNames.join(" "));
-  return args;
+  return { args, localToolsAvailable };
 }
 
 // Every popup conversation used to be minted with the exact same literal
@@ -431,9 +447,9 @@ function localToolsSystemPrompt(): string {
 // all when local tools aren't available (Accessibility not granted) —
 // nothing to nudge the model toward using.
 async function popupMintArgs(): Promise<string[]> {
-  const mcpArgs = await localToolsMcpArgs();
-  if (mcpArgs.length === 0) return mcpArgs;
-  return ["--append-system-prompt", localToolsSystemPrompt(), "--system-prompt-snapshot", "off", ...mcpArgs];
+  const { args, localToolsAvailable } = await sessionMcpArgs();
+  if (!localToolsAvailable) return args;
+  return ["--append-system-prompt", localToolsSystemPrompt(), "--system-prompt-snapshot", "off", ...args];
 }
 
 // Fills the pool spare(s) with the same args a fresh mint would get (see
@@ -470,14 +486,20 @@ export async function toggleClancePopup(): Promise<void> {
 }
 
 async function toggleClancePopupInner(): Promise<void> {
-  // Nothing captured anymore (no screenshot, window title, or selection —
-  // see popupMintArgs/localToolsSystemPrompt), so there's no reason to keep
-  // the widget hidden while this runs — preparePopupWindow used to have to
-  // finish before a capture-sensitive step could run, back when this
-  // function did more than create/position the window. Reveal it right
-  // away; the mint/claim below still takes real time, so it shows a
-  // "loading" state rather than staying blank until that's done too.
-  await preparePopupWindow();
+  // Nothing rides into the prompt anymore (no screenshot, window title, or
+  // selection prose — see popupMintArgs/localToolsSystemPrompt), but
+  // captureFrontmostWindow() still has to run here, before the popup steals
+  // focus: it's not just prompt content, it's also the *only* way
+  // frontApp.ts's `capturedWindow` ever gets set — what insert_text/
+  // click_at/clear_focused_field/replace_focused_field fall back to
+  // targeting when the model doesn't pass an explicit `app`. Skipping it
+  // entirely would silently break that default for every fresh widget open
+  // (nothing to fall back to, or a stale target left over from wherever the
+  // last Cmd+Shift+R refresh happened). Its own return value (the title
+  // text) is unused here now — only the side effect matters — but it's
+  // still cheap enough (no screenshot, no simulated Cmd+C) that it's not
+  // worth special-casing out of preparePopupWindow's concurrent run.
+  await Promise.all([preparePopupWindow(), captureFrontmostWindow()]);
   revealPopupWindow();
   sendToPopup({ mode: "loading" });
 
@@ -562,7 +584,7 @@ export async function openNewSessionInDirectory(dir: string): Promise<void> {
     sendToPopup({ mode: "loading" });
 
     addRecentDirectory(dir);
-    const mcpArgs = await localToolsMcpArgs();
+    const { args: mcpArgs } = await sessionMcpArgs();
     const id = await spawnBackgroundAgent(popupSessionName(), mcpArgs, dir);
 
     // Same as toggleClancePopupInner: the widget may have been dismissed

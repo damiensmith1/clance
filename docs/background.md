@@ -9,18 +9,22 @@ status: draft
 ## What Clance is
 
 Clance is a macOS menu-bar app (Apple Silicon) that puts the real Claude
-Code CLI one hotkey away from anywhere on the system, with screen context
-injected automatically. Press the hotkey, and an embedded terminal opens
-running an actual `claude` process — VS Code's integrated-terminal model,
-not a custom chat UI — pre-seeded with what you were looking at (the
-frontmost window's title, and any text you had highlighted) so you can ask
-about it immediately. A screenshot is deliberately **not** part of that
-automatic capture — see `docs/design.md`'s "Context injection" for why: the
-model has an on-demand `look_at_screen` tool for whenever a question is
-actually about the screen, and `Cmd+Shift+R` re-captures everything
-(including a screenshot) mid-conversation, so paying screenshot-capture
-latency on every single invocation — most of which aren't about the screen
-at all — stopped being worth it once those two existed.
+Code CLI one hotkey away from anywhere on the system, with a set of
+"computer use" tools (screenshot, list open windows, read the current
+selection, type into another app, click, and more) available on demand.
+Press the hotkey, and an embedded terminal opens running an actual `claude`
+process — VS Code's integrated-terminal model, not a custom chat UI — ready
+immediately, no screen capture required before it appears. Nothing about
+the screen, the frontmost window, or any highlighted text is captured or
+described to the model automatically anymore — see `docs/design.md`'s
+"Context injection" for why: the model has on-demand `look_at_screen`/
+`read_selection`/`list_open_windows` tools for whenever a question actually
+needs any of that, and a static system prompt (baked in invisibly at mint
+time) just tells it those tools exist and when to reach for them, rather
+than front-loading a snapshot that's often irrelevant and immediately
+stale. `Cmd+Shift+R` still explicitly re-captures everything (including a
+screenshot) mid-conversation, typed visibly into the terminal, for whenever
+you want to hand the model that snapshot yourself.
 
 The core loop:
 

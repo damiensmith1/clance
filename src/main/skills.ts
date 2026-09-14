@@ -1,16 +1,23 @@
 import { readdir, readFile } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
-import { readConfig, writeConfig } from "./config";
 
 // Reuses Claude Code's own convention so skills are shared directly between
 // the two ecosystems, per the compatibility goal in the requirements doc.
 const SKILLS_DIR = join(homedir(), ".claude", "skills");
 
+// Read-only — there's no CLI flag to selectively enable/disable individual
+// skills (only --disable-slash-commands, which is all-or-nothing), so
+// there's nothing for a per-skill toggle to actually control. An earlier
+// version had one anyway (`enabledSkills` in config.ts, a `setSkillEnabled`
+// export here): it wrote real config that no launched session ever read —
+// exactly the "toggle that looks like it works but doesn't" trust bug this
+// replaced (2026-09-14, see docs/requirements.md's "Config surface" note).
+// Skills are managed the same way a bare `claude` session manages them: add
+// or remove a folder under `~/.claude/skills/`.
 export type SkillInfo = {
   name: string;
   description: string;
-  enabled: boolean;
 };
 
 // SKILL.md frontmatter is a small, flat "key: value" block — no need for a
@@ -38,9 +45,6 @@ export async function listSkills(): Promise<SkillInfo[]> {
     return [];
   }
 
-  const config = readConfig();
-  const enabledSkills = config.enabledSkills;
-
   const skills: SkillInfo[] = [];
   for (const dirName of entries) {
     const skillPath = join(SKILLS_DIR, dirName, "SKILL.md");
@@ -56,39 +60,9 @@ export async function listSkills(): Promise<SkillInfo[]> {
     skills.push({
       name,
       description: frontmatter.description || "",
-      enabled: enabledSkills === "all" || enabledSkills.includes(name),
     });
   }
 
   skills.sort((a, b) => a.name.localeCompare(b.name));
   return skills;
-}
-
-// Turning one skill off for the first time converts the "all" default into
-// an explicit list, so newly-added skills stay off by default afterward —
-// a later "on" only ever adds back to that explicit list, it never
-// collapses back to "all" implicitly.
-export async function setSkillEnabled(name: string, enabled: boolean): Promise<SkillInfo[]> {
-  const current = await listSkills();
-  const allNames = current.map((skill) => skill.name);
-
-  // name/enabled cross an IPC boundary from the renderer — only ever a
-  // known, currently-discovered skill name is accepted, so a compromised
-  // or buggy renderer can't write arbitrary strings into config.json.
-  if (typeof name !== "string" || typeof enabled !== "boolean" || !allNames.includes(name)) {
-    return current;
-  }
-
-  const config = readConfig();
-  const currentlyEnabled =
-    config.enabledSkills === "all" ? allNames : config.enabledSkills;
-
-  const nextEnabled = enabled
-    ? Array.from(new Set([...currentlyEnabled, name]))
-    : currentlyEnabled.filter((skillName) => skillName !== name);
-
-  config.enabledSkills = nextEnabled;
-  writeConfig(config);
-
-  return listSkills();
 }

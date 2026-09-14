@@ -74,8 +74,6 @@ contextBridge.exposeInMainWorld("clanceApp", {
     ipcRenderer.invoke("settings:set-default-directory", dir),
   pickDirectory: () => ipcRenderer.invoke("dialog:pick-directory"),
   listSkills: () => ipcRenderer.invoke("extensibility:list-skills"),
-  setSkillEnabled: (name: string, enabled: boolean) =>
-    ipcRenderer.invoke("extensibility:set-skill-enabled", name, enabled),
   listMcpServers: () => ipcRenderer.invoke("extensibility:list-mcp-servers"),
   setMcpServerEnabled: (name: string, enabled: boolean) =>
     ipcRenderer.invoke("extensibility:set-mcp-server-enabled", name, enabled),

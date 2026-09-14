@@ -62,8 +62,7 @@ export function listLocalTools(): LocalToolStatus[] {
 // Turning one tool off for the first time converts the "all" default into
 // an explicit list, so a tool added here later stays on by default
 // afterward — a later "on" only ever adds back to that explicit list, it
-// never collapses back to "all" implicitly. Mirrors skills.ts's
-// setSkillEnabled exactly, same reasoning.
+// never collapses back to "all" implicitly.
 export function setLocalToolEnabled(name: string, enabled: boolean): LocalToolStatus[] {
   const allNames = LOCAL_TOOLS.map((tool) => tool.name);
   // name/enabled cross an IPC boundary from the renderer — only ever a

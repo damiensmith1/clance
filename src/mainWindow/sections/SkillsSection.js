@@ -9,6 +9,9 @@ const TABS = [
   { id: "tools", label: "Custom Tools" },
 ];
 
+// onToggle is optional — omit it (see the Skills list below) to render a
+// plain, non-interactive card with no Toggle at all, for extensions Clance
+// has no way to actually gate (see skills.ts's read-only note).
 function ExtensionCard({ icon, title, subtitle, description, enabled, onToggle }) {
   return html`
     <div class="item-card item-card-static">
@@ -19,7 +22,7 @@ function ExtensionCard({ icon, title, subtitle, description, enabled, onToggle }
         ${description && html`<span class="item-card-description">${description}</span>`}
       </span>
       <span class="item-card-actions">
-        <${Toggle} checked=${enabled} onChange=${onToggle} />
+        ${onToggle && html`<${Toggle} checked=${enabled} onChange=${onToggle} />`}
         <span class="icon-button">${Icon.moreVertical(16)}</span>
       </span>
     </div>
@@ -67,13 +70,6 @@ export function SkillsSection() {
     });
   }
 
-  function handleSkillToggle(name, enabled) {
-    setSkills((current) =>
-      current.map((skill) => (skill.name === name ? { ...skill, enabled } : skill))
-    );
-    window.clanceApp.setSkillEnabled(name, enabled).then(setSkills);
-  }
-
   function handleServerToggle(name, enabled) {
     setServers((current) =>
       current.map((server) => (server.name === name ? { ...server, enabled } : server))
@@ -114,6 +110,12 @@ export function SkillsSection() {
       html`
         <section class="extension-group">
           <h2 class="group-title">Skills</h2>
+          <p class="page-subtitle">
+            Read-only — every Clance-launched session already reads
+            <code>~/.claude/skills/</code> directly, the same way any other <code>claude</code>
+            session does. There's no per-skill on/off switch at the CLI level to hook a toggle
+            to here, so add or remove a skill's folder there to change what's available.
+          </p>
           ${loadingSkills
             ? html`<p class="empty-note">Loading…</p>`
             : skills.length === 0
@@ -126,8 +128,6 @@ export function SkillsSection() {
                     icon=${Icon.markdown(18)}
                     title=${skill.name}
                     description=${skill.description}
-                    enabled=${skill.enabled}
-                    onToggle=${(enabled) => handleSkillToggle(skill.name, enabled)}
                   />
                 `
               )}
