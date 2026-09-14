@@ -12,8 +12,15 @@ Clance is a macOS menu-bar app (Apple Silicon) that puts the real Claude
 Code CLI one hotkey away from anywhere on the system, with screen context
 injected automatically. Press the hotkey, and an embedded terminal opens
 running an actual `claude` process — VS Code's integrated-terminal model,
-not a custom chat UI — pre-seeded with what you were looking at (frontmost
-window title, a screenshot) so you can ask about it immediately.
+not a custom chat UI — pre-seeded with what you were looking at (the
+frontmost window's title, and any text you had highlighted) so you can ask
+about it immediately. A screenshot is deliberately **not** part of that
+automatic capture — see `docs/design.md`'s "Context injection" for why: the
+model has an on-demand `look_at_screen` tool for whenever a question is
+actually about the screen, and `Cmd+Shift+R` re-captures everything
+(including a screenshot) mid-conversation, so paying screenshot-capture
+latency on every single invocation — most of which aren't about the screen
+at all — stopped being worth it once those two existed.
 
 The core loop:
 

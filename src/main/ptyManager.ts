@@ -1,6 +1,12 @@
 import * as pty from "node-pty";
 import { BrowserWindow, clipboard, nativeImage, ClipboardItem } from "electron";
-import { execFile, execFileSync } from "child_process";
+import { execFile } from "child_process";
+import { promisify } from "util";
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { join } from "path";
+import { SESSION_CWD } from "./paths";
+
+const execFileAsync = promisify(execFile);
 
 // `win` is mutable per-session (not just captured at spawn time) so a
 // session can be reparented to a different window after the fact — see
@@ -16,38 +22,102 @@ const sessions = new Map<string, PtySession>();
 // literal, non-interpolated login-shell invocation, never from user input,
 // so we can spawn the target binary directly instead of through a shell
 // string (which would otherwise be a command-injection vector via `args`).
-let resolvedPath: string | undefined;
-export function getLoginShellPath(): string {
-  if (resolvedPath) return resolvedPath;
+//
+// Resolution is always async — it used to fall back to a *synchronous*
+// execFileSync() the first time anything needed the PATH before
+// warmLoginShellPath()'s background resolution had finished. That's exactly
+// what happened when a widget was opened right after app launch: the popup's
+// pty attach (createPtySession) and the background agent mint
+// (agentSessions.ts's claudeExecOptions) both ultimately called this, and an
+// interactive login shell sourcing .zshrc/.zprofile/nvm/etc. can take the
+// better part of a minute — during which the *synchronous* call froze the
+// entire single-threaded Electron main process, including the local tools
+// MCP HTTP server, so the `claude` child process trying to reach it over
+// HTTP got nothing back and gave up (see localToolsServer.ts's session/GET
+// debugging for what that failure looks like from the CLI's side). Awaiting
+// the same in-flight resolution instead never blocks anything else in the
+// process while it waits — but that still means every single app launch
+// pays the full ~minute-long interactive-shell cost before a widget can
+// actually mint a session, since nothing was ever persisted between
+// launches. Cached to disk (see PATH_CACHE_FILE below) so only the very
+// first launch ever pays that cost — every launch after that has an
+// immediately-usable PATH while a fresh resolution quietly re-runs in the
+// background to catch up with anything that's changed since (a new nvm
+// install, etc.), rather than trusting a possibly-stale value forever.
+let resolvedPath: string | undefined = readCachedPath();
+let resolvingPath: Promise<string> | undefined;
+
+// Sits next to agentPool.ts's pool.json in the same per-user directory.
+// Just a resolved PATH string — nothing sensitive enough to need anything
+// more than best-effort read/write, same as pool.json.
+const PATH_CACHE_FILE = join(SESSION_CWD, "loginShellPath.json");
+
+function readCachedPath(): string | undefined {
   try {
-    const shell = process.env.SHELL || "/bin/zsh";
-    resolvedPath = execFileSync(shell, ["-ilc", "echo -n $PATH"], {
-      encoding: "utf8",
-    }).trim();
+    const parsed = JSON.parse(readFileSync(PATH_CACHE_FILE, "utf8"));
+    return typeof parsed?.path === "string" ? parsed.path : undefined;
   } catch {
-    resolvedPath = process.env.PATH || "";
+    return undefined;
   }
-  return resolvedPath;
 }
 
-// Fire-and-forget: resolves the same PATH as getLoginShellPath(), but via
-// the non-blocking execFile rather than execFileSync — call this once,
-// early, at app startup so the (potentially slow — an interactive login
-// shell can take a while to source .zshrc/.zprofile/nvm/etc.) shell spin-up
-// has already happened by the time anything actually needs the PATH, e.g.
-// the popup widget's hotkey-triggered `claude --bg` spawn. Harmless no-op
-// if getLoginShellPath() already resolved it (synchronously, on demand)
-// first — this only ever fills the same cache, never races it unsafely,
-// since the last write wins and both branches compute the same value.
+function writeCachedPath(path: string): void {
+  try {
+    mkdirSync(SESSION_CWD, { recursive: true });
+    writeFileSync(PATH_CACHE_FILE, JSON.stringify({ path }), "utf8");
+  } catch {
+    // Best-effort — a failed write just means the next launch pays the full
+    // lookup again instead of a corrupted or half-written cache being read
+    // back, since readCachedPath's own JSON.parse would just fail closed too.
+  }
+}
+
+async function resolveLoginShellPath(): Promise<string> {
+  try {
+    const shell = process.env.SHELL || "/bin/zsh";
+    const { stdout } = await execFileAsync(shell, ["-ilc", "echo -n $PATH"], { encoding: "utf8" });
+    return stdout.trim();
+  } catch {
+    return process.env.PATH || "";
+  }
+}
+
+// Call once, early, at app startup (index.ts) — unconditionally, even when a
+// cached value already satisfies getLoginShellPath() immediately, so the
+// cache still gets refreshed (and corrected, if it's gone stale) once per
+// launch rather than being trusted forever. Only guards against running the
+// (slow) resolution twice concurrently, never against running it at all.
 export function warmLoginShellPath(): void {
-  if (resolvedPath) return;
-  const shell = process.env.SHELL || "/bin/zsh";
-  execFile(shell, ["-ilc", "echo -n $PATH"], { encoding: "utf8" }, (err, stdout) => {
-    if (!err && stdout) resolvedPath = stdout.trim();
+  if (resolvingPath) return;
+  resolvingPath = resolveLoginShellPath().then((path) => {
+    resolvedPath = path;
+    resolvingPath = undefined;
+    writeCachedPath(path);
+    return path;
   });
 }
 
-export function createPtySession(
+// Every real caller needs the resolved PATH to actually spawn something
+// (`pty.spawn`, `execFile`). Returns the cached value immediately if one
+// exists — even while a fresh resolution is still running in the
+// background to refresh it for *next* launch — rather than making every
+// caller wait on that fresh resolution just to double-check a value that's
+// almost always still correct. Only actually waits when there's truly
+// nothing cached yet (first launch ever, or a cache read/write failure).
+export async function getLoginShellPath(): Promise<string> {
+  if (resolvedPath) return resolvedPath;
+  if (resolvingPath) return resolvingPath;
+  warmLoginShellPath();
+  return resolvingPath!;
+}
+
+// Reserves `terminalId` for the duration of the (now async, PATH-resolving)
+// spawn below — without this, a second call for the same id arriving while
+// the first is still awaiting the PATH would race past the `sessions.has`
+// check too (nothing's in the map yet) and spawn twice.
+const pendingSessions = new Set<string>();
+
+export async function createPtySession(
   terminalId: string,
   command: string,
   args: string[],
@@ -55,8 +125,17 @@ export function createPtySession(
   win: BrowserWindow,
   cols: number,
   rows: number
-): void {
-  if (sessions.has(terminalId)) return;
+): Promise<void> {
+  if (sessions.has(terminalId) || pendingSessions.has(terminalId)) return;
+  pendingSessions.add(terminalId);
+
+  let path: string;
+  try {
+    path = await getLoginShellPath();
+  } finally {
+    pendingSessions.delete(terminalId);
+  }
+  if (sessions.has(terminalId) || win.isDestroyed()) return;
 
   const ptyProcess = pty.spawn(command, args, {
     name: "xterm-256color",
@@ -65,7 +144,7 @@ export function createPtySession(
     cwd,
     env: {
       ...process.env,
-      PATH: getLoginShellPath(),
+      PATH: path,
       // Clance's terminals aren't tied to whatever project a code editor
       // happens to have open — auto-connecting to it just shows an
       // unrelated file in the status line.

@@ -33,7 +33,7 @@ export function PermissionsStep({ onComplete } = {}) {
       <${StatusCard}
         ok=${status.accessibility}
         title="Accessibility"
-        description="Required for Clance to type or act on your behalf."
+        description="Required for Clance to type, click, or edit fields on your behalf."
         actionLabel=${status.accessibility ? null : "Grant Access"}
         onAction=${() => window.clanceApp.openAccessibilitySettings()}
       />
@@ -54,7 +54,7 @@ export function PermissionsStep({ onComplete } = {}) {
       <${StatusCard}
         ok=${status.accessibility}
         title="Accessibility"
-        description="Lets Clance type or act on your behalf in other apps."
+        description="Lets Clance type, click, or edit fields in other apps on your behalf."
         actionLabel=${status.accessibility ? null : "Open Settings"}
         onAction=${() => window.clanceApp.openAccessibilitySettings()}
       />

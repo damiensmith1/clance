@@ -22,6 +22,13 @@ export type ClanceConfig = {
   // most-recently-used first — lets that flow offer one-click reopen
   // without a fresh Finder dialog every time.
   recentDirectories: string[];
+  // Which of localToolsServer.ts's LOCAL_TOOLS the agent may use. Defaults
+  // to "all" (opt-out), unlike enabledSkills' opt-in-none above — these are
+  // Clance's own first-party tools (screenshot, click, type), not arbitrary
+  // third-party skill instructions, so there's no equivalent "not vetted
+  // for this" concern; a user disables one they specifically don't want
+  // rather than needing to opt into what's already there.
+  enabledLocalTools: string[] | "all";
 };
 
 const CONFIG_PATH = join(SESSION_CWD, "config.json");
@@ -32,6 +39,7 @@ const DEFAULT_CONFIG: ClanceConfig = {
   enabledSkills: [],
   defaultDirectory: null,
   recentDirectories: [],
+  enabledLocalTools: "all",
 };
 
 export function readConfig(): ClanceConfig {

@@ -79,4 +79,10 @@ contextBridge.exposeInMainWorld("clanceApp", {
   listMcpServers: () => ipcRenderer.invoke("extensibility:list-mcp-servers"),
   setMcpServerEnabled: (name: string, enabled: boolean) =>
     ipcRenderer.invoke("extensibility:set-mcp-server-enabled", name, enabled),
+  listLocalTools: () => ipcRenderer.invoke("extensibility:list-local-tools"),
+  setLocalToolEnabled: (name: string, enabled: boolean) =>
+    ipcRenderer.invoke("extensibility:set-local-tool-enabled", name, enabled),
+  localToolsServerStatus: () => ipcRenderer.invoke("extensibility:local-tools-server-status"),
+  checkLocalToolsServerHealth: () =>
+    ipcRenderer.invoke("extensibility:check-local-tools-server-health"),
 });

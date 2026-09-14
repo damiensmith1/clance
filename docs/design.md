@@ -40,12 +40,37 @@ first-party surface rather than a second implementation of it.
   (`$SHELL -ilc "echo -n $PATH"`) and cached, since GUI-launched apps
   inherit launchd's minimal PATH and would otherwise fail to find `claude`
   itself. That resolution can itself be slow — an interactive login shell
-  sourcing `.zshrc`/`.zprofile`/nvm/etc. — so `warmLoginShellPath()` (the
-  same lookup via non-blocking `execFile` instead of `getLoginShellPath()`'s
-  blocking `execFileSync`) is fired once at app startup (`index.ts`'s
-  `app.whenReady()`) to get it cached well before anything's actually on the
-  hook waiting for it, e.g. the popup widget's hotkey path. Every spawned
-  terminal also gets
+  sourcing `.zshrc`/`.zprofile`/nvm/etc., confirmed live to take the better
+  part of a minute — so `warmLoginShellPath()` fires it in the background
+  at app startup (`index.ts`'s `app.whenReady()`), well before anything's
+  actually on the hook waiting for it, e.g. the popup widget's hotkey path.
+  **`getLoginShellPath()` is fully async now, with no blocking fallback** —
+  it used to fall back to a *synchronous* `execFileSync` the moment
+  anything needed the PATH before that background resolution had finished,
+  and a widget opened right after app launch did exactly that: the popup's
+  pty attach and its background-agent mint (`agentSessions.ts`'s
+  `claudeExecOptions`) both call this, and the synchronous call froze the
+  entire single-threaded Electron main process — including the local tools
+  MCP HTTP server — for however much of that up-to-a-minute shell
+  resolution was still outstanding. From the freshly-spawned `claude`
+  child process's side, trying to reach the frozen MCP server over HTTP
+  during that window looked identical to the connection failures
+  documented in "Local tools server" below, and it gave up rather than
+  ever getting a response. Every caller now awaits the one in-flight
+  resolution (`warmLoginShellPath`/`getLoginShellPath` share it) instead,
+  so opening a widget during that startup window is slower — however long
+  is left of the login-shell resolution — but never broken.
+  **The resolved PATH is now also cached to disk** (`loginShellPath.json`,
+  next to `agentPool.ts`'s `pool.json` in the same per-user directory) —
+  without this, every single app launch paid the full up-to-a-minute
+  interactive-shell cost, since nothing persisted between runs. Now only
+  the very first launch ever does; every launch after that has an
+  immediately-usable PATH from the cache while `warmLoginShellPath()`
+  still re-resolves fresh in the background (unconditionally, every
+  launch, not just when the cache is empty) and overwrites the cache once
+  that finishes — self-correcting if the real PATH ever changes (a new nvm
+  install, say) within one launch cycle, rather than trusting a first-ever
+  resolution forever. Every spawned terminal also gets
   `CLAUDE_CODE_AUTO_CONNECT_IDE: "false"` in its env — without it, the CLI
   auto-connects to a running VS Code/JetBrains session and shows whatever
   file that editor happens to have open in its status line, which has
@@ -172,32 +197,52 @@ first-party surface rather than a second implementation of it.
 
 ## Context injection
 
-Screen context (frontmost window title + a saved screenshot) is built fresh
-on every popup invocation (`popupWindow.ts`'s `buildContextText()`), but
-**how** the text portion reaches the CLI differs by whether the session is
-new or resumed — this split exists because of a real CLI limitation,
-confirmed by direct testing outside Electron:
+Screen context (frontmost window title + any highlighted selection) is
+built fresh on every popup invocation (`popupWindow.ts`'s
+`buildContextText()`), but **how** it reaches the CLI differs by whether
+the session is new or resumed — this split exists because of a real CLI
+limitation, confirmed by direct testing outside Electron:
 
-**The screenshot itself is not part of that text split at all.** It rides in
-as a real image content block, identically for new and resumed sessions,
-via a mechanism confirmed by a live spike (`docs/sep10talks.md`): the CLI
-reads image data directly off the OS clipboard when it sees a paste
-keystroke — it isn't parsing image bytes out of the pty stream. So
-`ptyManager.ts`'s `pasteImageIntoPty()` writes the screenshot PNG to the
-clipboard (`clipboard.write([new ClipboardItem(...)])`), then writes a
-single `Ctrl+V` byte (`0x16`) directly into the pty — no keystroke
-simulation, no `nut-js`, no bracketed-paste wrapper. `popup.js`'s
-`openTerminal()` fires this once the CLI is ready (~1.2s after the terminal
-opens, the same mark used for typed context below), landing the image as a
-pending attachment in the input box; any visible typed context then follows
-~400ms after, so it reads like a normal "paste screenshot, type question"
-turn once the user hits Enter. `buildContextText()` only adds a short note
-that a screenshot is attached — it no longer names a path or says "read it,"
-since there's no file for the model to `Read()` any more.
-**Caveat, unverified:** a first-run/never-configured `claude` install may
-have interstitial prompts (a "Teach auto mode about your environment?"
-dialog was hit mid-spike) that could block this path on a fresh machine —
-not yet checked.
+**A screenshot is deliberately not part of automatic invocation capture at
+all** (revisited 2026-09-12 — see `docs/ideas.md`'s "Context capture is
+one-shot and frozen" for the earlier state, where it was). Now that the
+model has an on-demand `look_at_screen` tool (`localToolsServer.ts`) and
+the user has `Cmd+Shift+R` (below) for an explicit reload, paying the
+capture-and-paste latency (~1.2-1.6s) on *every* invocation — most of which
+aren't actually about the screen — stopped being worth it.
+`captureContextText()`'s `captureScreenshot` param defaults to whatever
+`isRefresh` is, so a plain hotkey-open never captures one; only an explicit
+refresh does. `buildContextText()` adds a short nudge instead, when no
+screenshot was captured: "you have a look_at_screen tool, call it if this
+is actually about the screen" — insurance against the model just guessing
+from the text description alone when it should look. That same
+initial-invocation-only block also nudges toward the rest of the local
+tools set (`click_at`, `activate_app`, `clear_focused_field`/
+`replace_focused_field`, `read_selection`, `list_open_windows`) — not for
+bare discoverability (every tool's own MCP description is always visible
+to the model regardless of this text), but for steering *when* to reach
+for one unprompted, same reasoning `insert_text`'s nudge always had.
+
+**When a screenshot *is* captured (only ever during a refresh, see
+below), it rides in as a real image content block**, identically for new
+and resumed sessions, via a mechanism confirmed by a live spike
+(`docs/sep10talks.md`): the CLI reads image data directly off the OS
+clipboard when it sees a paste keystroke — it isn't parsing image bytes
+out of the pty stream. So `ptyManager.ts`'s `pasteImageIntoPty()` writes
+the screenshot PNG to the clipboard (`clipboard.write([new
+ClipboardItem(...)])`), then writes a single `Ctrl+V` byte (`0x16`)
+directly into the pty — no keystroke simulation, no `nut-js`, no
+bracketed-paste wrapper. `popup.js`'s `openTerminal()`/
+`triggerContextRefresh()` fire this once the CLI is ready, landing the
+image as a pending attachment in the input box; any visible typed context
+then follows ~400ms after, so it reads like a normal "paste screenshot,
+type question" turn once the user hits Enter. `buildContextText()` only
+adds a short note that a screenshot is attached — it no longer names a
+path or says "read it," since there's no file for the model to `Read()`
+any more. **Caveat, unverified:** a first-run/never-configured `claude`
+install may have interstitial prompts (a "Teach auto mode about your
+environment?" dialog was hit mid-spike) that could block this path on a
+fresh machine — not yet checked.
 
 **Refreshing context mid-conversation.** Every capture above only ever
 happens once, at invocation — context is otherwise frozen for the life of
@@ -258,67 +303,365 @@ real submitted message can't corrupt that session's title.
     difference from the injection site's perspective once the terminal is
     open.
 
-## Text-insertion tool (`insert_text`)
+## Local tools server
 
-Reintroduces the ability for a Clance-launched session to write text into
-another app — the old model-decided `proposeText`/accept-reject flow was
-removed with the custom chat UI (see "Terminal-embedding architecture"), but
-per requirements.md's "Custom tools" §, this kind of "type primitive" was
-always meant to come back as an MCP tool the CLI process calls itself, not
-as app-level mediation.
+Gives a Clance-launched session a set of "computer use" tools — reading
+and acting on the user's screen — beyond what the CLI's own `Read`/`Bash`/
+`Edit` already cover (those act on the filesystem; these act on the GUI).
+Started with just `insert_text` (reintroducing the old SDK-era
+`proposeText` capability as a model-called MCP tool instead of app-level
+mediation, per requirements.md's "Custom tools" §) and grew into the
+fuller set below during a conversation about what else Clance's access to
+the screen/keyboard/mouse could usefully expose.
 
-- **Mechanism:** `src/main/insertTextServer.ts` runs a local
-  MCP-over-HTTP server (`@modelcontextprotocol/sdk`, stateless Streamable
-  HTTP transport, `127.0.0.1` + a random port picked fresh per app launch)
-  inside Electron's main process, exposing two tools: `insert_text(text,
-  app?)` and `list_open_windows()`. The handler calls
-  `typeIntoCapturedWindow()` in `src/main/frontApp.ts` (previously dead
-  code, written in anticipation of exactly this), which refocuses the
-  window captured by `captureFrontmostWindow()` right before the popup
-  stole focus, then delivers the text via a clipboard paste (write to
-  clipboard, simulate Cmd+V via `@nut-tree-fork/nut-js`, restore the
-  previous clipboard contents ~500ms later) rather than simulating each
-  keystroke — `keyboard.type()` was tried first but is noticeably slow for
-  anything longer than a sentence, since it sends one synthetic keypress
-  per character.
-- **Redirecting to a different app than the one captured at invocation**
-  (e.g. "put this in Slack" while looking at something else — previously a
-  dead end, `insert_text` could only ever target the window captured at
-  hotkey-press): `insert_text` takes an optional `app` string, a
-  case-insensitive substring matched against open window titles via
-  `getWindows()` (`findWindowByTitleHint()` in `frontApp.ts`); when it
-  matches, that window is focused instead of the captured one. `list_open_
-  windows` exposes `getWindows()`'s titles as its own tool so the CLI can
-  see what's actually running (and what its title looks like) before
-  picking an `app` value, rather than guessing. Read-only, so it isn't
-  gated on Accessibility the way typing is — though in practice it's only
-  ever useful alongside `insert_text`, which already requires it.
+- **Mechanism:** `src/main/localToolsServer.ts` (originally
+  `insertTextServer.ts`, renamed once its scope outgrew just one tool) runs
+  a local MCP-over-HTTP server (`@modelcontextprotocol/sdk`, session-based
+  Streamable HTTP transport — see "five rounds" below for why it isn't
+  stateless — `127.0.0.1` + a random port picked fresh per app launch)
+  inside Electron's main process. Handlers live in
+  `src/main/frontApp.ts`, reusing (and, for the tools added later, sharing
+  via two new private helpers — `focusTarget()`, `pasteViaClipboard()`) the
+  same keystroke/clipboard-simulation machinery `insert_text` already
+  established. `keyboard.type()` (one synthetic keypress per character)
+  was tried first for typing and is noticeably slow for anything longer
+  than a sentence — every text-delivery tool here pastes instead (write to
+  clipboard, simulate Cmd+V, restore the previous clipboard contents
+  ~500ms later).
+- **Every request and every tool call is logged** (`console.log`/
+  `console.error`, visible in the terminal running `npm start`/
+  `electron .`) — added after a reported "unable to connect" error on tool
+  calls that a health check (a plain `initialize` round trip — see below)
+  couldn't reproduce, meaning the connection/auth/handshake layer wasn't
+  the problem. The request handler itself is now wrapped in a top-level
+  try/catch that guarantees a response on every path: previously, anything
+  throwing between accepting the request and `transport.handleRequest()`
+  would leave the connection hanging with no response ever sent at all —
+  indistinguishable from "the server never responded" on the CLI's side,
+  not a clean tool error. `withLogging()` wraps every `registerTool`
+  handler individually (start, success/failure, timing), so a hang
+  specifically inside one tool's own logic (as opposed to the HTTP layer)
+  shows up as a "called" log with no matching "returned"/"threw" after it.
+  **Arguments are logged with `text` redacted to a length** (an initial
+  version logged raw arguments — `insert_text`/`replace_focused_field`'s
+  `text` is arbitrary user content typed into another app, not something
+  that should end up in plaintext in a terminal, a log file, or a screen
+  recording of one). Return values are never logged at all, redacted or
+  not — several (`read_selection`'s text, `look_at_screen`'s image data)
+  are exactly the kind of content this shouldn't capture, and knowing a
+  call finished never needed the result to debug a hang or an error.
+- **What that logging actually found — five rounds, each confirmed live
+  against the real `claude` CLI, not guessed:**
+  1. A `GET` request hangs forever and breaks the whole session, not just
+     one tool call. The Streamable HTTP spec lets a client send `GET` to
+     open a long-lived SSE stream for server-initiated messages —
+     optional for a server to support, and the original stateless design
+     (a fresh `McpServer`/transport pair per HTTP request, no session
+     concept at all) architecturally couldn't: a GET's stream had no
+     shared state with any later request and no way to ever receive
+     anything or close on its own. Handing it to `transport.handleRequest()`
+     anyway left it open indefinitely — no response, no error, nothing to
+     even log. A live capture caught exactly this: several POSTs each
+     logged "request finished", then a `GET` with no matching line before
+     the next request came in.
+  2. Declining the GET outright (405, spec-legal — a compliant client is
+     supposed to gracefully fall back to POST-only) made things *worse*,
+     also confirmed live: the real `claude` CLI's MCP client treats a
+     declined GET as the whole server being broken and stops attempting
+     tool calls to it entirely afterward — no tool-specific `withLogging`
+     line ever appeared for the tool the model tried to call next,
+     meaning the CLI never even issued that request over HTTP.
+  3. Opening a real (if empty) `200 text/event-stream` for GET and ending
+     it immediately after one SSE comment line got past the CLI's initial
+     "does this server support streaming" check, but confirmed live to be
+     a different failure: the CLI's client reconnected the immediately-closed
+     GET in a tight, repeating loop, and its own `/plugin` diagnostic panel
+     reported "Failed to reconnect to clance-\<key\> (detail withheld on
+     this connection)" even while showing the server as connected,
+     authenticated, and listing all 8 tools — a real tool call
+     (`activate_app`) still failed end-to-end, with no tool-specific
+     `withLogging` line, meaning the CLI still never issued the call. Root
+     cause: a GET stream is spec-defined to live for the lifetime of one
+     MCP *session*, correlated by `Mcp-Session-Id` with the POSTs before
+     and after it — with no session concept at all, closing the stream
+     immediately just gave the client something to legitimately keep
+     retrying forever, since nothing this design did was actually wrong
+     per-request, only architecturally incompatible with what the client
+     expected a GET to mean. Fixed the session gap by adopting the SDK's
+     own reference session pattern: a `sessions` map keyed by
+     `Mcp-Session-Id`, one `McpServer`/transport pair created only on an
+     `initialize` POST with no session ID yet (via `isInitializeRequest`),
+     assigned an ID by the transport itself (`sessionIdGenerator`) and
+     registered into the map from `onsessioninitialized`; every later
+     request for that session (`GET`, `DELETE`, or a subsequent POST) is
+     required to carry that same `Mcp-Session-Id` and is dispatched to the
+     *same* transport instance rather than a fresh one. `transport.onclose`
+     removes the session from the map and closes its `McpServer`. A
+     request with an unrecognized or missing session ID (GET/DELETE), or a
+     POST that's neither part of a known session nor a fresh `initialize`,
+     gets a `400` with the same `-32000 Bad Request: No valid session ID
+     provided` shape the SDK's own reference server returns.
+  4. With real sessions in place, GET was changed to actually keep the
+     stream open indefinitely instead of closing it — session-scoped now,
+     it finally had a real lifetime to last for. Confirmed live to still
+     fail, differently again: a real tool call (`activate_app`) completed
+     at the HTTP layer with no error (logged "request finished" in single
+     digits of ms) yet the CLI reported the tool "couldn't connect", and
+     every *subsequent* tool call failed without a matching HTTP request
+     ever appearing in this server's logs at all — the CLI stopped trying.
+     Reading `@modelcontextprotocol/sdk`'s own client source
+     (`client/streamableHttp.js`) rather than guessing further explained
+     why: this server never sends a single byte on the GET stream (it has
+     no server-initiated messages to push — every tool result already
+     rides back on its own POST response), and the client's HTTP stack
+     treats a GET stream that goes fully idle as an *unexpected*
+     disconnect once its own idle/body timeout elapses. It retries
+     reconnecting a bounded number of times and, once exhausted, marks the
+     whole session permanently broken — precisely the `/plugin` panel's
+     "Failed to reconnect to clance-\<key\> (detail withheld on this
+     connection)", and precisely why every tool call after the first
+     working one silently stopped reaching this server. The same client
+     source also settled what round 2's "made it worse" result actually
+     meant: it hard-codes `405` on the GET endpoint as an *expected,
+     error-free* outcome ("server does not offer an SSE stream... should
+     not trigger an error") and falls back to POST-only silently — round
+     2's failure was confounded by having no session concept yet, not by
+     405 itself being wrong.
+  Landed on declining `GET` with `405` permanently (this server has no
+  server-initiated messages to stream, so there's nothing an SSE stream
+  would ever carry) while keeping the session machinery from round 3 for
+  `POST`/`DELETE` correlation, which those still need regardless of
+  whether GET is supported. This avoids the idle-timeout failure mode
+  entirely rather than working around it (e.g. with periodic keep-alive
+  pings), and is the documented, client-graceful path per the SDK's own
+  source.
+  5. Even with GET fixed, "unable to connect" kept recurring — but this
+     round finally had a smoking gun instead of another guess: `claude
+     --debug-file` (the CLI's own full debug logging, confirmed via
+     `claude --help`) on the actual failing session showed the tool call
+     failing *instantly* — `Tool 'list_open_windows' failed after 0s:
+     Unable to connect. Is the computer able to access the url?` — right
+     next to `HTTP connection dropped after 56s uptime`. Not a hang, not a
+     slow client, not our request routing: Node's `http.Server` defaults
+     to a 5-second `keepAliveTimeout`, closing an idle persistent
+     connection that quickly on the assumption a client will just
+     reconnect for its next request — but the real `claude` CLI's MCP
+     client opens one connection per session and expects to reuse it for
+     the session's whole lifetime, with no way to know this server ever
+     unilaterally closed it out from under it. Any gap longer than 5
+     seconds between requests on the same session — i.e. ordinary idle
+     time between a user's messages, not a bug in anything — left the
+     client writing its next request onto a socket this server had
+     already dropped, failing instantly with a connection error that
+     looks exactly like "the tool couldn't connect." (This also explains
+     why earlier live captures seemed to show a "first widget only"
+     pattern: it was never about which widget was first, just whichever
+     one happened to sit idle past 5 seconds before its next message —
+     circumstantial, not causal.) Fixed by raising both
+     `httpServer.keepAliveTimeout` and `httpServer.headersTimeout` (which
+     Node requires to exceed `keepAliveTimeout`) to an hour — comfortably
+     past any realistic idle gap inside one popup conversation.
+- **The full tool list:**
+  - `insert_text(text, app?)` — types text wherever focus currently is (a
+    clipboard paste, not a click-into-a-field-first action).
+  - `list_open_windows()` — lists open window titles, so the model can
+    find the right `app` value for any tool below that takes one, instead
+    of guessing.
+  - `look_at_screen()` — a screenshot, right now, returned as a genuine
+    MCP image content block (`{ type: "image", data, mimeType }`) directly
+    in the tool result — reuses `screenCapture.ts`'s
+    `captureActiveDisplay()`. Simpler than the invocation-time/refresh
+    image delivery (see "Context injection" above): those need the
+    clipboard + `Ctrl+V`-byte trick because they're injecting into a
+    conversation turn that isn't a tool call at all; a real tool call has
+    a normal request/response cycle, so the image just rides back as the
+    response.
+  - `read_selection()` — whatever's highlighted right now, reusing
+    `captureSelectedText()` (see "Highlighted-selection capture" below) on
+    demand instead of only at invocation/refresh.
+  - `activate_app(app)` — focuses a different app by title hint, with no
+    typing or clicking, so the model can e.g. "switch to Notes" before
+    acting on it.
+  - `click_at(x, y)` — clicks on the display nearest the cursor, where `x`
+    and `y` are **fractions of that display's width/height (0-1), not
+    pixels** — scale-invariant regardless of the resolution a screenshot
+    happened to be sent at (`screenCapture.ts` resizes for token cost),
+    and avoids needing to communicate a scale factor back and forth. The
+    model is expected to eyeball fractional position directly off
+    whatever screenshot it just looked at. Deliberately has no `app`
+    param of its own (unlike the text tools) — composes with
+    `activate_app` instead (bring the right app to front, then click
+    relative to the now-frontmost display) rather than every tool
+    reimplementing app-redirect.
+  - `clear_focused_field(app?)` — Cmd+A then Delete. A blunt "clear
+    everything in this field" primitive, not a targeted range — there's no
+    generic cross-app way to know a field's exact content or cursor
+    position short of the accessibility-tree read this doc has deferred
+    since the start (see "Screen context capture" in requirements.md).
+  - `replace_focused_field(text, app?)` — Cmd+A then paste, as one atomic
+    action rather than requiring two separate tool calls (clear, then
+    insert) that could be interrupted or reordered between them.
 - **Auth:** the port is random but not secret, so every request is checked
   against a random per-launch bearer token (`crypto.randomBytes`, compared
   with `timingSafeEqual`) passed to the CLI via `--mcp-config`'s `headers`,
   plus a `Host`/`Origin` check against `127.0.0.1:<port>` as defense in
   depth against DNS rebinding — otherwise any other local process (or a
   malicious page in a browser, via DNS rebinding) could hit the endpoint
-  and type into whatever app the user last had focused.
+  and act on whatever app the user last had focused.
+- **The `mcpServers` config key is unpredictable per launch, not the
+  literal string `"clance"` it used to be** (`popupWindow.ts`'s
+  `localToolsMcpArgs()`, `serverKey = \`clance-${token.slice(0, 16)}\``,
+  reusing the same per-launch random token already generated for auth
+  above): that key becomes the "clance" segment of the CLI's
+  `mcp__<key>__<tool>` naming convention, which `--allowedTools` (below)
+  authorizes purely by name string. A static key is guessable, and Clance
+  sessions can now open in real project directories
+  (`docs/working-directory-design.md`) — a project's own `.mcp.json`
+  defining a same-named server isn't hypothetical. Since `--mcp-config` is
+  additive, a colliding project-supplied server could load alongside ours;
+  if the CLI's precedence ever let it win the name, the name-based
+  allowlist would silently pre-approve calls into that attacker-controlled
+  tool instead of ours. Making the key itself unpredictable closes this
+  the same way the bearer token already closes the port-guessing case.
 - **Why HTTP, not an in-process SDK tool:** the launched session is a real
   `claude` CLI child process (see "Terminal-embedding architecture"), not
   an Agent SDK `query()` call — there's no `query()` left to attach a
   custom SDK tool to. A local-only MCP server is the CLI's own extension
   point for this.
 - **Wired in via `--mcp-config`**, additive (not `--strict-mcp-config`), so
-  the user's own configured MCP servers still load alongside it — only for
-  `toggleClancePopup`'s brand-new hotkey-opened sessions
-  (`popupWindow.ts`'s `insertTextMcpArgs()`), and only when
-  `checkPermissions().accessibility` is already true; otherwise the flag is
-  omitted entirely so the CLI never offers a tool that would just fail.
-  Resumed/attached sessions (opened via "Open in…") don't get it — there's
-  no freshly captured frontmost window for those to type back into.
-- **Model-decided, no app-level accept/reject:** the CLI calls the tool
-  like any other tool when it judges the user wants text written into the
-  app they were just using, rather than printed in the terminal. There is
-  still no Clance-mediated propose/confirm step — same principle as before
-  the Agent SDK was removed, just moved one layer down (CLI's own tool-use
-  loop instead of Clance's).
+  the user's own configured MCP servers still load alongside it — passed to
+  every mint of a real `claude --bg` process regardless of entry point
+  (`toggleClancePopup`'s brand-new hotkey-opened sessions,
+  `agents:spawn-new`'s main-window "New Chat", and `resolveOpenArgs`'s
+  revival of a *dormant* session — all three go through `popupWindow.ts`'s
+  `localToolsMcpArgs()`), and only when `checkPermissions().accessibility`
+  is already true; otherwise the flag is omitted entirely so the CLI never
+  offers tools that would just fail. This is a blanket gate for the *whole*
+  server, including the nominally read-only tools (`list_open_windows`,
+  `look_at_screen`, `read_selection`) — they don't strictly need
+  Accessibility themselves, but there was no reason to special-case them
+  out of the same all-or-nothing flag, and doing so would need the CLI to
+  be told about a tool set that can change mid-session depending on a
+  permission grant.
+  - **A session that's already *live* as a background agent can never gain
+    tools it wasn't minted with** — same limitation `--system-prompt-
+    snapshot` already has (see "Context injection" above): `attach <id>`
+    connects to an already-running process and accepts no other flags, so
+    there's no way to retroactively add `--mcp-config`/`--allowedTools` to
+    one. `resolveOpenArgs`'s "already live" branch (`agentSessions.ts`)
+    just attaches as-is; only reviving a *dormant* session goes through a
+    genuinely fresh mint (`spawnBackgroundResume`) that can take `mcpArgs`.
+    A live session minted before this existed (or from a bare terminal)
+    stays without local tools until it's stopped and reopened.
+  - **The default target for `insert_text`/`clear_focused_field`/
+    `replace_focused_field` (no `app` given) can be stale or empty outside
+    the popup hotkey path** — that default falls back to whatever
+    `captureFrontmostWindow()` last captured, which only ever happens on a
+    hotkey-open; a main-window "New Chat" or a resumed session has no such
+    capture at all. Not broken — the model can still pass an explicit
+    `app`, and `look_at_screen`/`click_at`/`activate_app`/
+    `list_open_windows`/`read_selection` don't depend on a captured window
+    to begin with — just a degraded default for those three specifically.
+- **Approval tiering via `--allowedTools`, not a Clance-built UI:** only
+  the read-only tools (`list_open_windows`, `look_at_screen`,
+  `read_selection`) and `click_at` are listed in `popupWindow.ts`'s
+  `AUTO_ALLOWED_TOOL_NAMES` (expanded to the per-launch `mcp__<serverKey>
+  __<name>` form above, space-separated per `--allowedTools`' own accepted
+  format), so the CLI never prompts for them — reading the screen and clicking somewhere already on screen are
+  either non-destructive or as low-stakes as a single click, and prompting
+  per-click would be exactly the friction-without-safety
+  `docs/sep10talks.md` called out as the wrong shape for approval UX.
+  Everything else — `insert_text`, `activate_app`,
+  `clear_focused_field`/`replace_focused_field` — is deliberately left off
+  that list, so the CLI's own native "Allow / Deny / Always allow" prompt
+  still gates each of them (the first time per session, or forever if the
+  user picks "Always allow"):
+  - `clear_focused_field`/`replace_focused_field` are destructive by
+    nature (overwrite a field's entire contents).
+  - `insert_text` and `activate_app` both accept an `app` hint matched by
+    loose substring against *any* open window (see `findWindowByTitleHint`
+    below) — auto-allowing either would let the model (or content it read
+    via `look_at_screen`/`read_selection` and treated as an instruction)
+    autonomously pivot to an unrelated app the user never referenced and
+    act there, with no human ever seeing it happen. `click_at` doesn't
+    have this problem — it has no `app` param at all, and only ever acts
+    on whatever's already the frontmost display. `insert_text` predates
+    this whole tool set and was always designed around the CLI's native
+    prompt being the actual gate (see "Model-decided, no app-level
+    accept/reject" below) — it was never pre-authorized before
+    `AUTO_ALLOWED_TOOLS` existed, and isn't now either.
+  This resolves `sep10talks.md`'s "genuinely unsolved" approval-UX
+  question for this concrete tool set, though a true multi-step
+  computer-use agent (many chained clicks toward one risky end state,
+  entirely within one already-consented app) may still want something
+  more than per-tool-call gating — not designed here.
+- **`findWindowByTitleHint` fails closed on an ambiguous match, at *both*
+  tiers:** every `app` hint above (loose substring against window titles,
+  which are attacker-influenceable — any app can set its own title)
+  prefers an exact title match over a substring one, but *both* tiers only
+  count as a match if they're the *unique* hit at that tier. Two-or-more
+  matches at either tier return no match at all rather than silently
+  picking whichever window `getWindows()` happened to list first — a
+  spoofing surface otherwise, since a malicious/compromised app could
+  title itself to intercept a hint aimed at something else. The
+  exact-match tier originally skipped this check (`Array.find` just
+  returns the first hit), inconsistent with the substring tier's own
+  fail-closed design right next to it — fixed to require uniqueness there
+  too.
+- **Title comparison and title display share one normalization** —
+  `frontApp.ts`'s `normalizeTitle()` (trim + lowercase), used by both
+  `findWindowByTitleHint`'s matching and `listOpenWindows`'s output —
+  because they didn't originally: `list_open_windows` trimmed titles
+  before showing them to the model, but the matcher didn't trim before
+  comparing, so a hint the model copied verbatim from that tool's own
+  output could fail the exact-match check above over incidental
+  whitespace alone and silently fall back to the weaker substring path,
+  undermining the point of adding an exact-match preference at all.
+- **Model-decided, no app-level accept/reject beyond the above:** the CLI
+  calls each tool like any other when it judges it's the right primitive,
+  rather than printing text in the terminal or asking the user to click
+  something themselves. There is still no Clance-mediated propose/confirm
+  step of its own — same principle as before the Agent SDK was removed,
+  just moved one layer down (the CLI's own tool-use loop, gated by its own
+  permission system where `--allowedTools` doesn't pre-clear it).
+- **Per-tool on/off toggle — the Skills & Plugins section's "Custom
+  Tools" tab is real now, not the placeholder it used to be**
+  (`SkillsSection.js`; backed by `localToolsServer.ts`'s `LOCAL_TOOLS`
+  metadata array — the single source of truth both `localToolsMcpArgs()`
+  and this UI read from, so a new `server.registerTool()` call always has
+  a matching toggle entry). This is orthogonal to approval tier: tier
+  decides whether an *enabled* tool still needs the CLI's prompt; the
+  toggle decides whether it's offered at all. Off means the tool's
+  `mcp__<serverKey>__<name>` goes into `--disallowedTools` — the CLI
+  refuses it outright, not merely "requires approval" — checked fresh at
+  every mint the same way Accessibility already is. Defaults to all
+  enabled (`config.ts`'s `enabledLocalTools: "all"`), unlike
+  `enabledSkills` defaulting to none: these are Clance's own first-party
+  tools, not arbitrary third-party skill instructions, so there's no
+  "not vetted for this app" concern to opt into. **Unlike the pre-existing
+  Skills/MCP toggles** (`docs/requirements.md`'s "Config surface" gap —
+  those toggles write real config that nothing currently reads at launch
+  time), this one is fully wired: `setLocalToolEnabled()`/
+  `listLocalTools()` mirror `skills.ts`'s `setSkillEnabled()` pattern
+  exactly (first toggle-off converts the `"all"` default into an explicit
+  list), but actually feed `localToolsMcpArgs()`.
+- **Server status + a live health check, in the same "MCP Servers" tab
+  the user asked "isn't that a server, shouldn't it be visible there"
+  about.** The server itself is invisible infrastructure most of the
+  time — it's lazily started (`ensureLocalToolsServer()` only runs the
+  first time a real mint actually calls `localToolsMcpArgs()`), so
+  `getLocalToolsServerStatus()` just reports whether it's running yet
+  without starting it, letting Settings show "not started yet" as a
+  distinct, non-alarming state rather than looking broken before the
+  popup's ever been opened once. `checkLocalToolsServerHealth()` is the
+  actual diagnostic: it starts the server if needed, then sends a real
+  MCP `initialize` POST to its own `/mcp` URL with the correct bearer
+  token — the exact path a launched CLI session uses — and reports
+  success/failure plus latency. Not a full protocol client (no session
+  handshake beyond that one call), just enough to tell "this server is
+  reachable and speaks MCP" apart from "the port's dead" or "auth is
+  broken," which narrows down a reported tool failure to this server vs.
+  something in how the CLI was configured to reach it.
 
 ## Highlighted-selection capture
 
@@ -467,8 +810,8 @@ Clance-specific is the window chrome and which session gets opened:
   spawning a second background agent; a `currentMode` check right before
   the deferred `sendToPopup()` call skips it if the widget was explicitly
   dismissed while the work was still in flight, so it can't pop back up
-  after the user closed it. Within that async work, `insertTextMcpArgs()`
-  (its slow part — `ensureInsertTextServer()` — only matters for the CLI
+  after the user closed it. Within that async work, `localToolsMcpArgs()`
+  (its slow part — `ensureLocalToolsServer()` — only matters for the CLI
   flags, not for the accessibility boolean context capture needs, which
   `checkPermissions()` itself answers synchronously) and
   `captureContextText()` now run concurrently rather than the latter

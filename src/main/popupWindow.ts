@@ -3,10 +3,10 @@ import { join } from "path";
 import { captureFrontmostWindow, captureSelectedText } from "./frontApp";
 import { captureAndSaveActiveDisplay } from "./screenCapture";
 import { checkPermissions } from "./permissions";
-import { ensureInsertTextServer } from "./insertTextServer";
+import { ensureLocalToolsServer, listLocalTools } from "./localToolsServer";
 import { spawnBackgroundAgent, resolveSessionId, stopAgent, rmAgent } from "./agentSessions";
 import { claimPoolSpare, refillPool } from "./agentPool";
-import { hasRealUserMessage, CLANCE_CONTEXT_PREFIX, REFRESH_CONTEXT_PREFIX } from "./chatHistory";
+import { hasRealUserMessage, REFRESH_CONTEXT_PREFIX } from "./chatHistory";
 import { getDefaultDirectory, addRecentDirectory } from "./config";
 
 const DEFAULT_WIDTH = 560;
@@ -228,27 +228,25 @@ function truncateSelectedText(text: string): string {
     : text;
 }
 
-// Built fresh per invocation (never cached) so the CLI session always
-// reflects what the user was actually looking at and how they opened the
-// widget.
+// Built fresh per refresh (never cached) so the re-captured context reflects
+// what's actually on screen right now. The only remaining caller is
+// refreshContext's explicit Cmd+Shift+R path — a plain hotkey-open no
+// longer captures or types any of this (see localToolsSystemPrompt below
+// for what a fresh/claimed session gets instead, baked in invisibly at
+// mint time), so this is always the "refresh" framing now.
 function buildContextText(
   windowTitle: string | undefined,
   screenshotPath: string | undefined,
-  selectedText: string | undefined,
-  insertTextAvailable: boolean,
-  isRefresh: boolean
+  selectedText: string | undefined
 ): string {
-  const lines = [isRefresh ? REFRESH_CONTEXT_PREFIX : CLANCE_CONTEXT_PREFIX];
+  const lines = [REFRESH_CONTEXT_PREFIX];
   if (windowTitle) {
-    lines.push(
-      `The frontmost window ${isRefresh ? "now" : "at the time"} is: "${sanitizeForTerminal(windowTitle)}".`
-    );
+    lines.push(`The frontmost window now is: "${sanitizeForTerminal(windowTitle)}".`);
   }
   if (screenshotPath) {
     lines.push(
-      `An ${isRefresh ? "updated screenshot of their screen, just captured" : "screenshot of their screen at that moment"} ` +
-        "is attached to this conversation as an image — look at it directly if it's relevant to what they ask, " +
-        "no need to read a file for it."
+      "An updated screenshot of their screen, just captured, is attached to this conversation as an " +
+        "image — look at it directly if it's relevant to what they ask, no need to read a file for it."
     );
   }
   if (selectedText) {
@@ -257,34 +255,25 @@ function buildContextText(
         "Treat this selection as the primary subject of their request — focus on it unless they clearly ask about something unrelated to it."
     );
   }
-  // Only worth repeating on the initial invocation — a refresh happens
-  // mid-conversation, so the model's already been told this once.
-  if (insertTextAvailable && !isRefresh) {
-    lines.push(
-      "You have an insert_text tool that types text directly into that frontmost app. If the user's request is " +
-        "naturally about producing content for that app — writing, drafting, replying, filling in something — use " +
-        "insert_text to deliver it there instead of just printing it in this terminal, without waiting to be told " +
-        "explicitly to insert/type/paste it. Don't use it for requests that are really just questions or unrelated " +
-        "to that app."
-    );
-  }
   return lines.join("\n");
 }
 
 // captureSelection gates on the same Accessibility permission insert_text
 // needs, since it's the same underlying mechanism (a simulated keystroke,
 // here Cmd+C instead of Cmd+V) — see captureSelectedText in frontApp.ts.
+// Only caller is refreshContext's explicit Cmd+Shift+R path (a plain
+// hotkey-open captures nothing at all anymore, see toggleClancePopupInner),
+// so this always captures a screenshot too — that's the explicit "look
+// again" action.
 async function captureContextText(
-  insertTextAvailable: boolean,
-  captureSelection: boolean,
-  isRefresh = false
+  captureSelection: boolean
 ): Promise<{ text: string; preview: ContextPreview }> {
   const [windowTitle, screenshotPath, selectedText] = await Promise.all([
     captureFrontmostWindow(),
     captureAndSaveActiveDisplay().catch(() => undefined),
     captureSelection ? captureSelectedText() : Promise.resolve(undefined),
   ]);
-  const text = buildContextText(windowTitle, screenshotPath, selectedText, insertTextAvailable, isRefresh);
+  const text = buildContextText(windowTitle, screenshotPath, selectedText);
   return {
     text,
     preview: { windowTitle, screenshotPath, selectedText, systemPrompt: text },
@@ -322,28 +311,80 @@ export async function refreshContext(): Promise<{ text: string; preview: Context
     // to-catch-up value used elsewhere for this class of problem (see
     // frontApp.ts's captureSelectedText).
     await new Promise((resolve) => setTimeout(resolve, 150));
-    return await captureContextText(accessibilityGranted, accessibilityGranted, true);
+    return await captureContextText(accessibilityGranted);
   } finally {
     if (popup && !popup.isDestroyed()) popup.setOpacity(1);
   }
 }
 
-// Gives the launched CLI session an `insert_text` tool that types into
-// whatever app was frontmost when the popup opened (see
-// src/main/insertTextServer.ts) — additive (not --strict-mcp-config), so the
-// user's own configured MCP servers still load too. Gated on Accessibility
-// since that's what the underlying keystroke injection needs; when it's not
-// granted, the CLI just doesn't see the tool rather than seeing one that
-// silently fails.
-export async function insertTextMcpArgs(): Promise<string[]> {
+// Which of localToolsServer.ts's LOCAL_TOOLS are pre-authorized (no
+// per-call CLI prompt) when enabled — independent of the Settings on/off
+// toggle below, which controls whether a tool is offered *at all*. Only
+// `tier: "auto"` tools qualify: click_at is as low-stakes an action as
+// exists, and (unlike every other action tool here) it's never told which
+// app to act on, only where on the *currently frontmost* display — it
+// can't reach somewhere the user didn't already have on screen. The
+// `tier: "approval"` tools (insert_text, activate_app,
+// clear_focused_field, replace_focused_field) always keep the CLI's native
+// "Allow / Deny / Always allow" prompt even when enabled — insert_text
+// predates this whole tool set and was always designed around that prompt
+// being the actual gate; activate_app/clear/replace can redirect to or
+// overwrite content in an app the user never referenced, so auto-allowing
+// them would let injected content the model reads via
+// look_at_screen/read_selection autonomously act on an unrelated app with
+// no human ever seeing it happen. See `docs/design.md`'s "Local tools
+// server" for the full reasoning.
+//
+// Gives the launched CLI session Clance's local "computer use" tools — see
+// src/main/localToolsServer.ts for the full list — additive (not
+// --strict-mcp-config), so the user's own configured MCP servers still load
+// too. Gated on Accessibility since every tool here needs at least keystroke
+// or mouse simulation (even the read-only ones reuse that machinery — see
+// frontApp.ts); when it's not granted, the CLI just doesn't see any of these
+// tools rather than seeing ones that silently fail.
+export async function localToolsMcpArgs(): Promise<string[]> {
   if (!checkPermissions().accessibility) return [];
-  const { url, token } = await ensureInsertTextServer();
-  return [
+  const { url, token } = await ensureLocalToolsServer();
+  // The mcpServers key becomes the "clance" segment of the CLI's
+  // mcp__<key>__<tool> naming convention — exactly what the
+  // --allowedTools/--disallowedTools lists below reference, by name. A
+  // static, guessable key (this used to be the literal string "clance")
+  // could collide with a same-named server a project's own .mcp.json
+  // defines — Clance sessions can now open in real project directories
+  // (see docs/working-directory-design.md), so that's not a hypothetical,
+  // it's an actual file a session's cwd could contain. Since --mcp-config
+  // is additive (not --strict-mcp-config), a colliding project-supplied
+  // "clance" server could load alongside ours; if the CLI's precedence
+  // rules ever let it win the name, our allowlist — which only ever checks
+  // a tool name string — would silently pre-approve calls into that
+  // attacker-controlled tool instead of ours, no prompt ever shown.
+  // Deriving the key from the same per-launch random token already used
+  // for the bearer auth (unpredictable, not a secret in this context)
+  // makes it impossible for a static project file to predict or target.
+  const serverKey = `clance-${token.slice(0, 16)}`;
+  const toolName = (name: string) => `mcp__${serverKey}__${name}`;
+
+  // Settings' "Custom Tools" toggle list (SkillsSection.js, backed by
+  // localToolsServer.ts's listLocalTools()) decides which tools are
+  // offered at all, checked fresh at mint time same as everything else
+  // here — a tool that's off is passed via --disallowedTools so the CLI
+  // refuses it outright, not just left unapproved (which would still let
+  // the user approve it through a prompt).
+  const tools = listLocalTools();
+  const allowedNames = tools
+    .filter((t) => t.enabled && t.tier === "auto")
+    .map((t) => toolName(t.name));
+  const disallowedNames = tools.filter((t) => !t.enabled).map((t) => toolName(t.name));
+
+  const args = [
     "--mcp-config",
     JSON.stringify({
-      mcpServers: { clance: { type: "http", url, headers: { Authorization: `Bearer ${token}` } } },
+      mcpServers: { [serverKey]: { type: "http", url, headers: { Authorization: `Bearer ${token}` } } },
     }),
   ];
+  if (allowedNames.length > 0) args.push("--allowedTools", allowedNames.join(" "));
+  if (disallowedNames.length > 0) args.push("--disallowedTools", disallowedNames.join(" "));
+  return args;
 }
 
 // Every popup conversation used to be minted with the exact same literal
@@ -357,15 +398,54 @@ export function popupSessionName(): string {
   return `${POPUP_SESSION_NAME_PREFIX} ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 
-// Fills the pool spare(s) with the same insert_text MCP wiring a fresh mint
-// would get — that wiring doesn't depend on any per-invocation capture
-// (it's just the already-running local server's URL/token), so there's no
-// reason a spare should be missing it. Called once at app startup
-// (index.ts), after every claim (toggleClancePopupInner below), and safe to
-// call repeatedly — refillPool collapses concurrent calls into one fill.
+// The system prompt a fresh popup session gets, steering the model to
+// actually reach for Clance's local tools unprompted — each tool's own MCP
+// description (see localToolsServer.ts) is always visible to the model
+// regardless of this text, but discoverability alone doesn't mean the model
+// will *reach* for one without being told when that's appropriate, the same
+// reason insert_text always got a nudge like this. Used to also carry
+// whatever was on screen/selected at the moment the hotkey was pressed, but
+// that's gone now (2026-09-14 decision) — offloaded entirely to the model
+// calling look_at_screen/read_selection/list_open_windows itself when it
+// actually needs to know, rather than front-loading a snapshot that's often
+// irrelevant and immediately stale. That makes this text fully static
+// (doesn't depend on anything captured per-invocation), which is exactly
+// what makes popupMintArgs below safe to bake into a pool spare at warm
+// time, not just a fresh mint — see agentPool.ts.
+function localToolsSystemPrompt(): string {
+  return [
+    "The user just invoked Clance via its global screen-overlay shortcut — a quick-access popup, not a full coding session.",
+    "You have a look_at_screen tool that takes a fresh screenshot of the user's screen right now. If the user's request is actually about what's currently on their screen, call it before answering rather than guessing.",
+    "You also have an insert_text tool that types text directly into whatever app was frontmost when this popup opened. If the user's request is naturally about producing content for that app — writing, drafting, replying, filling in something — use insert_text to deliver it there instead of just printing it in this terminal, without waiting to be told explicitly to insert/type/paste it. Don't use it for requests that are really just questions or unrelated to that app.",
+    "Beyond typing, you can also act more directly on the screen: click_at clicks a position on the current display (as a fraction of its width/height, not pixels — eyeball it from a screenshot you've looked at), activate_app brings a different app to the front by name, and clear_focused_field/replace_focused_field clear or replace the entire contents of whatever field is currently focused. Use these when the user's request calls for actually doing something on screen, not just describing or typing text. activate_app and the two field-editing tools will ask the user to approve the first time each session; click_at and insert_text won't. read_selection reads whatever's currently highlighted, and list_open_windows shows what's running if you need an exact name for `app`.",
+  ].join("\n");
+}
+
+// The full --append-system-prompt/--mcp-config args a fresh popup session
+// (or pool spare, see agentPool.ts) should be minted with. Static across
+// invocations — see localToolsSystemPrompt above — so unlike the old
+// per-invocation context text, it's identical whether this is a pool spare
+// warmed at app startup or a session minted right now, which is what makes
+// it safe for claimPoolSpare's staleness check to compare a spare's args
+// against this directly. Returns just the mcp args with no system prompt at
+// all when local tools aren't available (Accessibility not granted) —
+// nothing to nudge the model toward using.
+async function popupMintArgs(): Promise<string[]> {
+  const mcpArgs = await localToolsMcpArgs();
+  if (mcpArgs.length === 0) return mcpArgs;
+  return ["--append-system-prompt", localToolsSystemPrompt(), "--system-prompt-snapshot", "off", ...mcpArgs];
+}
+
+// Fills the pool spare(s) with the same args a fresh mint would get (see
+// popupMintArgs) — that wiring doesn't depend on any per-invocation capture
+// (it's just the already-running local server's URL/token plus the static
+// system prompt above), so there's no reason a spare should be missing it.
+// Called once at app startup (index.ts), after every claim
+// (toggleClancePopupInner below), and safe to call repeatedly — refillPool
+// collapses concurrent calls into one fill.
 export async function warmAgentPool(cwd: string = getDefaultDirectory()): Promise<void> {
-  const mcpArgs = await insertTextMcpArgs();
-  await refillPool(mcpArgs, popupSessionName, cwd);
+  const spawnArgs = await popupMintArgs();
+  await refillPool(spawnArgs, popupSessionName, cwd);
 }
 
 // Set for the duration of the capture/spawn chain below — the widget now
@@ -390,27 +470,14 @@ export async function toggleClancePopup(): Promise<void> {
 }
 
 async function toggleClancePopupInner(): Promise<void> {
-  // preparePopupWindow() only creates/positions the window — it has no
-  // visible effect, so it's safe to run concurrently with context capture
-  // below. It can NOT be revealed yet: captureContextText's screenshot
-  // needs the widget to not be on screen at all (a full-screen capture
-  // would otherwise catch the widget itself), and its selection capture
-  // (simulated Cmd+C) needs whatever app the user was in to still hold
-  // keyboard focus, which revealing/focusing the popup would steal.
-  // insertTextMcpArgs() has no such constraint (nothing it does is visible
-  // or focus-sensitive) and doesn't depend on the capture result, so it
-  // runs alongside both rather than after.
-  const accessibilityGranted = checkPermissions().accessibility;
-  const [, mcpArgs, { text: contextText, preview }] = await Promise.all([
-    preparePopupWindow(),
-    insertTextMcpArgs(),
-    captureContextText(accessibilityGranted, accessibilityGranted),
-  ]);
-
-  // Only now — context safely captured — is it safe to actually show the
-  // widget. The remaining work (spawning the background agent) still takes
-  // real time, so it shows a "loading" state rather than staying invisible
-  // until that's done too.
+  // Nothing captured anymore (no screenshot, window title, or selection —
+  // see popupMintArgs/localToolsSystemPrompt), so there's no reason to keep
+  // the widget hidden while this runs — preparePopupWindow used to have to
+  // finish before a capture-sensitive step could run, back when this
+  // function did more than create/position the window. Reveal it right
+  // away; the mint/claim below still takes real time, so it shows a
+  // "loading" state rather than staying blank until that's done too.
+  await preparePopupWindow();
   revealPopupWindow();
   sendToPopup({ mode: "loading" });
 
@@ -420,48 +487,32 @@ async function toggleClancePopupInner(): Promise<void> {
   // they inherit their own recorded cwd instead (agentSessions.ts's
   // resolveOpenArgs). See docs/working-directory-design.md.
   const dir = getDefaultDirectory();
+  const spawnArgs = await popupMintArgs();
 
   // Try the pool first — a pre-warmed spare skips the mint latency
-  // entirely, but it was minted before this invocation's context existed,
-  // so it can't have received --append-system-prompt. Its context has to
-  // ride in the same visible-typed way a resumed session's does (see
-  // popup.js's openTerminal) instead of invisibly. Accepted trade-off,
-  // decided 2026-09-10: every "New Conversation" open now prefers speed
-  // over invisible context when a spare is available, rather than only
-  // pooling for cases where invisibility doesn't matter. claimPoolSpare
-  // only ever hands back a spare minted at exactly `dir` — one minted
-  // under a since-changed default is discarded rather than claimed (see
-  // agentPool.ts), so `id` below is always genuinely at `dir` either way.
-  const claimedId = claimPoolSpare(dir);
+  // entirely. Its args are now identical to whatever a fresh mint would get
+  // (see popupMintArgs — no longer per-invocation, so nothing is lost by
+  // having been baked in ahead of time). claimPoolSpare only ever hands
+  // back a spare minted at exactly `dir` *and* with exactly this
+  // invocation's freshly-recomputed `spawnArgs` — one minted under a
+  // since-changed default directory, or whose baked-in wiring has since
+  // gone stale (e.g. Accessibility wasn't granted yet at the app-startup
+  // prewarm that made it), is discarded rather than claimed (see
+  // agentPool.ts), so `id` below is always genuinely at `dir` with correct
+  // tool wiring either way.
+  const claimedId = claimPoolSpare(dir, spawnArgs);
   let id: string;
-  let visibleContext: string | undefined;
   if (claimedId) {
     id = claimedId;
-    visibleContext = contextText;
     // Fire-and-forget — don't make this open wait on minting the next
     // spare, just make sure one's on the way for next time.
     warmAgentPool(dir).catch(() => {});
   } else {
-    // A brand-new session has no prior recorded system-prompt snapshot, so
-    // this rides in invisibly — --system-prompt-snapshot off makes sure that
-    // stays true on any *future* resume of this exact session too: a resumed
-    // session can't reliably take a fresh --append-system-prompt otherwise
-    // (the CLI only honors it if the session's *original* launch had this
-    // off), and there'd be no way to tell from here whether a given resumed
-    // session was Clance's own or something else entirely (a bare-terminal
-    // session, say) that never had this flag at all. That's also why the
-    // popup's "Open in..." dropdown (popup.js) types context visibly into a
-    // resumed session's input instead of relying on this invisible path.
-    //
     // Minted as a background agent immediately, same as every other
     // Clance-launched session (see docs/background-agent-architecture.md) —
     // the popup terminal that opens below is just an `attach` viewport onto
     // it, so closing the widget or the app never ends the conversation.
-    id = await spawnBackgroundAgent(
-      popupSessionName(),
-      ["--append-system-prompt", contextText, "--system-prompt-snapshot", "off", ...mcpArgs],
-      dir
-    );
+    id = await spawnBackgroundAgent(popupSessionName(), spawnArgs, dir);
   }
   // The user may have hit the hotkey again (hiding the widget) while all of
   // the above was in flight — don't resurrect it out from under them.
@@ -474,12 +525,7 @@ async function toggleClancePopupInner(): Promise<void> {
     return;
   }
   currentAgentId = id;
-  sendToPopup({
-    mode: "new",
-    args: ["attach", id],
-    contextPreview: preview,
-    visibleContext,
-  });
+  sendToPopup({ mode: "new", args: ["attach", id] });
 }
 
 // Reopens an already-running terminal tab's session in the popup — used by
@@ -516,7 +562,7 @@ export async function openNewSessionInDirectory(dir: string): Promise<void> {
     sendToPopup({ mode: "loading" });
 
     addRecentDirectory(dir);
-    const mcpArgs = await insertTextMcpArgs();
+    const mcpArgs = await localToolsMcpArgs();
     const id = await spawnBackgroundAgent(popupSessionName(), mcpArgs, dir);
 
     // Same as toggleClancePopupInner: the widget may have been dismissed

@@ -23,10 +23,10 @@ const execFileAsync = promisify(execFile);
 // - CLAUDE_CODE_AUTO_CONNECT_IDE: "false", same reasoning as ptyManager's
 //   pty spawn — a Clance session has nothing to do with whatever file a
 //   running VS Code/JetBrains instance has open.
-function claudeExecOptions(cwd: string = SESSION_CWD): { cwd: string; env: NodeJS.ProcessEnv } {
+async function claudeExecOptions(cwd: string = SESSION_CWD): Promise<{ cwd: string; env: NodeJS.ProcessEnv }> {
   return {
     cwd,
-    env: { ...process.env, PATH: getLoginShellPath(), CLAUDE_CODE_AUTO_CONNECT_IDE: "false" },
+    env: { ...process.env, PATH: await getLoginShellPath(), CLAUDE_CODE_AUTO_CONNECT_IDE: "false" },
   };
 }
 
@@ -72,7 +72,7 @@ export type AgentSession = {
 export async function listAgents(opts: { all?: boolean } = {}): Promise<AgentSession[]> {
   try {
     const args = opts.all ? ["agents", "--json", "--all"] : ["agents", "--json"];
-    const { stdout } = await execFileAsync("claude", args, claudeExecOptions());
+    const { stdout } = await execFileAsync("claude", args, await claudeExecOptions());
     const parsed = JSON.parse(stdout);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
@@ -100,7 +100,7 @@ export async function spawnBackgroundAgent(
   const { stdout } = await execFileAsync(
     "claude",
     ["--bg", "-n", name, ...claudeArgs, ...cliSettingsArgs()],
-    claudeExecOptions(cwd)
+    await claudeExecOptions(cwd)
   );
   const match = stripAnsi(stdout).match(/backgrounded\s*·\s*(\S+)\s*·/);
   if (!match) throw new Error(`Couldn't parse a session id from "claude --bg" output: ${stdout}`);
@@ -110,12 +110,22 @@ export async function spawnBackgroundAgent(
 // Continues an existing session as a background agent
 // (`claude --bg --resume <sessionId>`) and returns the (possibly new) short
 // id — see --bg's own help text: this starts a copy under a new id if the
-// session is already running live elsewhere, rather than erroring.
-async function spawnBackgroundResume(sessionId: string, name: string, cwd: string): Promise<string> {
+// session is already running live elsewhere, rather than erroring. Unlike
+// `attach` (which connects to an already-running process and accepts no
+// other flags — see docs/design.md's "Local tools server"), this is a
+// genuinely fresh `claude --bg` mint, so `mcpArgs` (popupWindow.ts's
+// `localToolsMcpArgs()`) can ride in here the same way it does for a
+// brand-new session.
+async function spawnBackgroundResume(
+  sessionId: string,
+  name: string,
+  cwd: string,
+  mcpArgs: string[] = []
+): Promise<string> {
   const { stdout } = await execFileAsync(
     "claude",
-    ["--bg", "--resume", sessionId, "-n", name, ...cliSettingsArgs()],
-    claudeExecOptions(cwd)
+    ["--bg", "--resume", sessionId, "-n", name, ...mcpArgs, ...cliSettingsArgs()],
+    await claudeExecOptions(cwd)
   );
   const match = stripAnsi(stdout).match(/backgrounded\s*·\s*(\S+)\s*·/);
   if (!match) throw new Error(`Couldn't parse a session id from "claude --bg --resume" output: ${stdout}`);
@@ -123,7 +133,7 @@ async function spawnBackgroundResume(sessionId: string, name: string, cwd: strin
 }
 
 export async function stopAgent(id: string): Promise<void> {
-  await execFileAsync("claude", ["stop", id], claudeExecOptions());
+  await execFileAsync("claude", ["stop", id], await claudeExecOptions());
 }
 
 // Permanently removes a session — unlike stopAgent, there's no `claude
@@ -131,7 +141,7 @@ export async function stopAgent(id: string): Promise<void> {
 // confirmed to have zero real user turns (see popupWindow.ts's
 // cleanupIfAbandoned) — a real conversation is never a candidate for this.
 export async function rmAgent(id: string): Promise<void> {
-  await execFileAsync("claude", ["rm", id], claudeExecOptions());
+  await execFileAsync("claude", ["rm", id], await claudeExecOptions());
 }
 
 // Guards resolveOpenArgs against a double-click (or two windows/panes)
@@ -151,7 +161,11 @@ const inFlightOpens = new Map<string, Promise<string[]>>();
 // already includes stopped-but-known agents (no `pid`), and `attach`
 // transparently restarts those, so there's nothing left to special-case
 // beyond "is there a known id at all."
-export async function resolveOpenArgs(sessionId: string, name: string): Promise<string[]> {
+export async function resolveOpenArgs(
+  sessionId: string,
+  name: string,
+  mcpArgs: string[] = []
+): Promise<string[]> {
   const existing = inFlightOpens.get(sessionId);
   if (existing) return existing;
 
@@ -171,13 +185,17 @@ export async function resolveOpenArgs(sessionId: string, name: string): Promise<
       // directory, and attaching to it can't fix that. A *live* one is a
       // real running process someone might be mid-conversation with —
       // can't remint out from under that, so attach to it as-is regardless
-      // of cwd. A *stopped* one with the wrong cwd is safe to just
-      // re-resume properly instead: `--bg --resume` on a stopped session
-      // continues it under the same id (see spawnBackgroundResume), so
-      // this corrects it going forward without deleting anything.
+      // of cwd — this also means a *live* session started somewhere that
+      // never passed mcpArgs (a bare terminal, or before this parameter
+      // existed) stays without local tools until it's stopped and reopened;
+      // `attach` genuinely cannot add them to an already-running process.
+      // A *stopped* one with the wrong cwd is safe to just re-resume
+      // properly instead: `--bg --resume` on a stopped session continues it
+      // under the same id (see spawnBackgroundResume), so this corrects it
+      // going forward without deleting anything.
       if (match.cwd === cwd || match.pid) return ["attach", match.id];
     }
-    const id = await spawnBackgroundResume(sessionId, name, cwd);
+    const id = await spawnBackgroundResume(sessionId, name, cwd, mcpArgs);
     return ["attach", id];
   })();
 

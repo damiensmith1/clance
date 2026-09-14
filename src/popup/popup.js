@@ -23,13 +23,6 @@ const contextDialogSystemPromptEl = document.getElementById("context-dialog-syst
 const contextDialogEmptyEl = document.getElementById("context-dialog-empty");
 
 let openInSessions = [];
-// The flattened system-prompt text from whatever context was captured when
-// this widget was last opened/shown — reused as the visible typed context
-// for a session switched to via the "Open in…" dropdown (see openTerminal's
-// visibleContext param), rather than capturing fresh context for that,
-// which would need the widget to disappear again first (see
-// popupWindow.ts's capture-before-reveal ordering) just to switch tabs.
-let currentSystemPromptText = "";
 let term = null;
 let fitAddon = null;
 let activeTerminalId = null;
@@ -141,7 +134,6 @@ async function triggerContextRefresh() {
     const result = await window.clance.refreshContext();
     if (!result || activeTerminalId !== terminalId) return;
     renderContextPreview(result.preview);
-    currentSystemPromptText = result.preview.systemPrompt;
     injectContextIntoTerminal(terminalId, result.text, result.preview.screenshotPath);
   } finally {
     refreshingContext = false;
@@ -277,7 +269,12 @@ function renderOpenInList(sessions) {
     row.addEventListener("click", async () => {
       closeOpenInDropdown();
       const args = await window.clance.resolveOpenArgs(session.id, session.title);
-      openTerminal(args, currentSystemPromptText);
+      // No visible context typed in here anymore — the session's own MCP
+      // tool descriptions are enough (see popupWindow.ts's
+      // localToolsSystemPrompt), and re-typing a generic nudge on every
+      // tab-switch into an already-running, already-in-progress
+      // conversation would just be repeated clutter with no new signal.
+      openTerminal(args);
     });
     openInListEl.appendChild(row);
   }
@@ -397,17 +394,20 @@ termInnerEl.addEventListener("drop", async (event) => {
   term?.focus();
 });
 
-// Populates the "See context" hover card with what was actually captured
-// at invocation — the same pieces buildContextText() (popupWindow.ts) wove
-// into prose for the CLI, shown here as-is instead of re-parsed back out of
-// that prose. `openPopupWithArgs` (pop-out-to-widget) never captures fresh
-// context at all, so `preview` is undefined there — the empty state covers it.
+// Populates the "See context" hover card with what was actually captured —
+// the same pieces buildContextText() (popupWindow.ts) wove into prose for
+// the CLI, shown here as-is instead of re-parsed back out of that prose.
+// Only ever populated by a Cmd+Shift+R refresh now — a plain hotkey-open no
+// longer captures anything (its system prompt is static, baked in
+// invisibly at mint time), and `openPopupWithArgs` (pop-out-to-widget)
+// never captured fresh context at all — so `preview` is undefined in both
+// of those cases, and the empty state below covers them the same way.
 function renderContextPreview(preview) {
-  // preview is undefined for flows that never capture fresh context at all
-  // (openPopupWithArgs's pop-out-to-widget) — genuinely nothing to show,
-  // unlike a captured-but-empty field below. systemPrompt itself is never
-  // empty when preview exists (buildContextText always returns at least
-  // its boilerplate first line), so it's shown whenever preview is.
+  // preview is undefined for flows with nothing captured to show —
+  // genuinely nothing, unlike a captured-but-empty field below.
+  // systemPrompt itself is never empty when preview exists (buildContextText
+  // always returns at least its boilerplate first line), so it's shown
+  // whenever preview is.
   if (!preview) {
     contextDialogTitleEl.hidden = true;
     contextDialogImageLabelEl.hidden = true;
@@ -501,7 +501,6 @@ window.clance.onShown((payload) => {
   if (payload.mode === "loading") {
     showLoading();
   } else {
-    currentSystemPromptText = payload.contextPreview?.systemPrompt ?? "";
     openTerminal(payload.args, payload.visibleContext, payload.contextPreview?.screenshotPath);
   }
 });

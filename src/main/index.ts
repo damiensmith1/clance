@@ -8,6 +8,7 @@ import {
   openNewSessionInDirectory,
   isPopupSessionName,
   refreshContext,
+  localToolsMcpArgs,
 } from "./popupWindow";
 import { openMainWindow, openSessionInMainWindow } from "./mainWindow";
 import { createAppMenu } from "./appMenu";
@@ -28,6 +29,12 @@ import { setSessionArchived } from "./archivedSessions";
 import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
 import { listSkills, setSkillEnabled } from "./skills";
 import { listMcpServers, setMcpServerEnabled } from "./mcpConfig";
+import {
+  listLocalTools,
+  setLocalToolEnabled,
+  getLocalToolsServerStatus,
+  checkLocalToolsServerHealth,
+} from "./localToolsServer";
 import {
   createPtySession,
   writeToPty,
@@ -153,8 +160,8 @@ ipcMain.handle("chatHistory:get-session", (_event, filePath: string) =>
   getSession(filePath)
 );
 
-ipcMain.handle("chatHistory:resolve-open-args", (_event, sessionId: string, name: string) =>
-  resolveOpenArgs(sessionId, name)
+ipcMain.handle("chatHistory:resolve-open-args", async (_event, sessionId: string, name: string) =>
+  resolveOpenArgs(sessionId, name, await localToolsMcpArgs())
 );
 
 ipcMain.handle(
@@ -167,9 +174,9 @@ ipcMain.handle(
 // directory in exactly that case, same invariant popupWindow.ts's
 // openNewSessionInDirectory keeps for the popup's equivalent flow (picking
 // "Default" should never itself become a "recent" entry).
-ipcMain.handle("agents:spawn-new", (_event, name: string, claudeArgs: string[], cwd?: string | null) => {
+ipcMain.handle("agents:spawn-new", async (_event, name: string, claudeArgs: string[], cwd?: string | null) => {
   if (cwd) addRecentDirectory(cwd);
-  return spawnBackgroundAgent(name, claudeArgs, cwd || getDefaultDirectory());
+  return spawnBackgroundAgent(name, [...claudeArgs, ...(await localToolsMcpArgs())], cwd || getDefaultDirectory());
 });
 
 // Guards against shelling out `claude stop` with no real id (seen live:
@@ -269,6 +276,17 @@ ipcMain.handle(
   (_event, name: string, enabled: boolean) => setMcpServerEnabled(name, enabled)
 );
 
+ipcMain.handle("extensibility:list-local-tools", () => listLocalTools());
+
+ipcMain.handle(
+  "extensibility:set-local-tool-enabled",
+  (_event, name: string, enabled: boolean) => setLocalToolEnabled(name, enabled)
+);
+
+ipcMain.handle("extensibility:local-tools-server-status", () => getLocalToolsServerStatus());
+
+ipcMain.handle("extensibility:check-local-tools-server-health", () => checkLocalToolsServerHealth());
+
 ipcMain.handle(
   "terminal:create",
   (
@@ -277,7 +295,7 @@ ipcMain.handle(
   ) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) return;
-    createPtySession(
+    return createPtySession(
       payload.terminalId,
       payload.command,
       payload.args,
@@ -306,7 +324,7 @@ ipcMain.handle(
   (event, payload: { terminalId: string; cols: number; rows: number }) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) return;
-    createPtySession(
+    return createPtySession(
       payload.terminalId,
       process.env.SHELL || "/bin/zsh",
       ["-il"],

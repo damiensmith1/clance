@@ -209,16 +209,48 @@ backed by `nut-js` the same way `insert_text` already is, wired in via
 free — Anthropic's own hardened approval flow, not something Clance has to
 build from scratch for the highest-stakes actions in the whole app.
 
-**What's genuinely unsolved (product work, not engineering):**
+**Resolved 2026-09-12** (see `docs/design.md`'s "Local tools server"):
+`move_file(src, dest)`/`open_folder(path)`-style filesystem tools turned
+out to be unnecessary as *custom* tools at all — the real `claude` CLI
+process already has `Bash`/`Read`/`Write`/`Edit`, and now that sessions can
+open in the user's actual project directory (`docs/working-directory-
+design.md`), it can already act on real files without Clance building
+anything. The gap that needed new tools was specifically GUI interaction:
+`look_at_screen`, `read_selection`, `activate_app`, `click_at`, and two
+destructive field-editing tools (`clear_focused_field`/
+`replace_focused_field`) — all landed, using exactly the "same pattern as
+insert_text" this section predicted.
+
+**What's genuinely unsolved (product work, not engineering)** — resolved
+for this concrete tool set, not for the general problem:
 - A yes/no prompt per individual click is probably too granular to be
   usable for a multi-step "move these files around" task, but
-  auto-approving a click-capable agent is obviously too risky. Needs real
-  design — maybe a preview/dry-run of what's about to happen, a narrower
-  default tool set that expands deliberately, something in that shape. Not
-  designed yet.
+  auto-approving a click-capable agent is obviously too risky. **Resolved
+  for now**: only `click_at`/`look_at_screen`/`read_selection`/
+  `list_open_windows` are pre-authorized (`--allowedTools`, no prompt).
+  Everything that can redirect to an app the user didn't already have on
+  screen (`insert_text`, `activate_app`) or that's destructive
+  (`clear_focused_field`/`replace_focused_field`) is left off that list,
+  so the CLI's native prompt still gates it — caught during a post-commit
+  security review that the first pass over-included `insert_text` and
+  `activate_app` here, which would have let injected on-screen content
+  autonomously pivot to an unrelated app with no human gate at all. This
+  is a per-tool-call approval split, not the preview/dry-run idea floated
+  here — good enough for today's tool set, but a true multi-step agent
+  chaining many small non-destructive actions toward one risky end state,
+  entirely *within* one already-consented app, isn't covered by per-call
+  gating alone. Still not designed.
 - General class of risk is different from anything currently in the app:
   irreversible real-world actions (sending a message, deleting something,
-  buying something) triggered by the model's read of a screenshot.
+  buying something) triggered by the model's read of a screenshot. Today's
+  tools don't have a "send"/"submit"/"purchase" primitive of their own —
+  `insert_text`/`replace_focused_field` only ever populate a field, never
+  submit it — but a model could still chain a pre-authorized `click_at`
+  onto a Send button already visible in the app the user had open. Unlike
+  the cross-app pivot above, this residual risk is accepted rather than
+  gated — the user explicitly asked that ordinary clicks not require
+  approval, and a click landing on a button within the app already on
+  screen is the risk that trade-off accepts.
 
 ## Where things stand — solved vs. open, one list
 
@@ -235,12 +267,21 @@ build from scratch for the highest-stakes actions in the whole app.
 **Decided (recommendation, not yet implemented):**
 - [ ] Quick Ask hotkey, SDK-backed, scoped to read-only Q&A + `insert_text`
 - [ ] Escalation via seed-a-new-real-session, never hand-rolled JSONL
-- [ ] Riskier/broader tool use (including any future computer-use tools)
-  stays on the CLI-terminal backend, not the SDK
+- [x] Riskier/broader tool use stays on the CLI-terminal backend, not the
+  SDK — moot point now that the computer-use tools below shipped there
+  directly; never any SDK involvement to begin with.
 
 **Genuinely open:**
-- [ ] Safety/approval UX for autonomous screen actions (click, file move) —
-  no design yet, flagged as real product work
+- [x] Safety/approval UX for the concrete tool set that shipped
+  (`look_at_screen`/`read_selection`/`list_open_windows`/`click_at`
+  auto-allowed; `insert_text`/`activate_app` left to the CLI's native
+  prompt since both can redirect to an app the user never named; the two
+  field-overwrite tools left to it for being destructive) — see "Resolved
+  2026-09-12" above. Still open: a true multi-step computer-use agent
+  chaining many non-destructive actions toward one risky end state within
+  one already-open app (e.g. clicking a Send/Delete/Buy button already on
+  screen) isn't covered by this per-call gating — accepted, not solved,
+  per the user's explicit ask that ordinary clicks not need approval.
 - [ ] Whether Anthropic's API supports true real-time duplex audio/video
   streaming at all today — unverified, don't assume yes
 - [ ] Local speech-to-text engine for dictation (pre-existing open question,
