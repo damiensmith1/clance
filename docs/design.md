@@ -952,12 +952,12 @@ Clance-specific is the window chrome and which session gets opened:
   `cleanupIfAbandoned()` always nulls `currentAgentId` too (stopping the
   agent outright if it never got a real user turn) — the widget is
   supposed to be gone, forgotten by `popupWindow.ts` as much as by the
-  user. Hide (`popup:hide` IPC → `hideWidgetKeepAlive()`) just calls
-  `popup.hide()` and leaves both untouched, since the window itself is
-  only ever hidden, never reloaded, so its terminal is still fully live
-  underneath. `toggleClancePopup()` — reached from both the global hotkey
-  and the tray icon — checks for exactly that state (`!popup.isVisible() &&
-  currentMode === "new" && currentAgentId`) before falling through to its
+  user. Hide (`popup:hide` IPC → `hideWidgetKeepAlive()`) leaves both
+  untouched, since the window itself is only ever hidden, never reloaded,
+  so its terminal is still fully live underneath. `toggleClancePopup()` —
+  reached from both the global hotkey and the tray icon — checks for
+  exactly that state (`!popup.isVisible() && currentMode === "new"`, no
+  `currentAgentId` requirement — see below) before falling through to its
   usual pool-claim/mint path, so the next hotkey press reveals the same
   widget instead of abandoning it for a new one. Loading-state widgets
   aren't offered the Hide button (nothing to keep alive yet, same reason
@@ -966,6 +966,24 @@ Clance-specific is the window chrome and which session gets opened:
   check goes the other way — `currentMode` never got reset off `"loading"`
   by a bare hide, so the in-flight mint finishes normally and lands in
   the same "hidden but live" state.
+  - **Hides via `app.hide()`, not `popup.hide()`.** A bare
+    `BrowserWindow.hide()` hands focus to whatever macOS considers next
+    for the app — its own main window, if one happens to be open, the
+    same quirk `refreshContext` above works around with `setOpacity(0)`
+    instead of `hide()`. The point of Hide is to drop straight back to
+    whatever the user was doing in some other app, not surface a Clance
+    window they didn't ask for; `app.hide()` (macOS's Cmd+H) deactivates
+    Clance entirely and lets the OS restore whatever was frontmost before,
+    on its own.
+  - **The reveal check doesn't require `currentAgentId`.** It's tempting
+    to read that field as "is there a live session to reveal," but
+    `openPopupWithArgs` (the main window's "Open in Widget" button,
+    described further down) deliberately never sets it — see its own
+    comment. Gating the reveal on it too meant a tab exported to the
+    widget would hide fine but never come back on the next hotkey press,
+    since `currentAgentId` stayed null the whole time; `currentMode`
+    alone is already "new" for every live conversation regardless of how
+    it got there, so that's the one to check.
 - **A fourth entry point, in reverse — "Open in App":** the toolbar's other
   button (only shown once a session is live, i.e. `#app.has-messages`)
   moves the widget's current conversation into a main window tab and hides

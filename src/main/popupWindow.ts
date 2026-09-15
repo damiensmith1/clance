@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, screen } from "electron";
+import { app, BrowserWindow, ipcMain, screen } from "electron";
 import { join } from "path";
 import { captureFrontmostWindow, captureSelectedText } from "./frontApp";
 import { captureAndSaveActiveDisplay } from "./screenCapture";
@@ -95,8 +95,17 @@ export function hidePopup(): void {
 // toggleClancePopup's own "already have a hidden live widget" check below
 // is what brings it back on the next hotkey press instead of claiming a
 // pool spare or minting a new session.
+//
+// app.hide() (macOS's own Cmd+H "hide app"), not popup.hide(): a bare
+// BrowserWindow.hide() hands focus to whatever macOS considers next for
+// *this app* — its own main window, if one happens to be open — same
+// quirk refreshContext works around below with setOpacity(0) instead of
+// hide(). The point of a quick tuck-away is to drop straight back to
+// whatever the user was doing in some other app, not surface a Clance
+// window they didn't ask for; app.hide() deactivates Clance entirely and
+// lets the OS restore whatever was frontmost before, on its own.
 export function hideWidgetKeepAlive(): void {
-  if (popup && !popup.isDestroyed()) popup.hide();
+  if (popup && !popup.isDestroyed()) app.hide();
 }
 
 // If the session that's about to close was minted/claimed by this popup
@@ -494,7 +503,12 @@ export async function toggleClancePopup(): Promise<void> {
   // hidden but its conversation still fully live and attached — reopen the
   // same window instead of falling through to claim/mint below, which
   // would otherwise abandon it in favor of a brand-new session every time.
-  if (popup && !popup.isDestroyed() && !popup.isVisible() && currentMode === "new" && currentAgentId) {
+  // currentMode alone (not currentAgentId, which openPopupWithArgs below
+  // deliberately never sets — see its comment) is the right signal here:
+  // it's "new" for every live conversation showing in the widget regardless
+  // of how it got there, including one exported from a main-window tab via
+  // "Open in Widget", which has no currentAgentId of its own to check.
+  if (popup && !popup.isDestroyed() && !popup.isVisible() && currentMode === "new") {
     revealPopupWindow();
     return;
   }
