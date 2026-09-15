@@ -974,7 +974,17 @@ Clance-specific is the window chrome and which session gets opened:
     whatever the user was doing in some other app, not surface a Clance
     window they didn't ask for; `app.hide()` (macOS's Cmd+H) deactivates
     Clance entirely and lets the OS restore whatever was frontmost before,
-    on its own.
+    on its own. That deactivation is also why `index.ts`'s
+    `app.on("activate", ...)` handler had to change from an unconditional
+    `openMainWindow()` to `if (BrowserWindow.getAllWindows().length === 0)
+    openMainWindow()` — showing the popup again after `app.hide()`
+    reactivates the whole app, which fires `activate` same as clicking the
+    dock icon would, and the old unconditional handler popped the main
+    window open right alongside the widget every time. The popup window is
+    never destroyed (only hidden), so it already counts toward "not zero
+    windows" once created, correctly skipping that once guarded — the
+    guard only actually changes behavior for the fresh-launch/dock-icon
+    case the standard Electron macOS template guards the same way.
   - **The reveal check doesn't require `currentAgentId`.** It's tempting
     to read that field as "is there a live session to reveal," but
     `openPopupWithArgs` (the main window's "Open in Widget" button,

@@ -93,7 +93,19 @@ app.whenReady().then(async () => {
   if (process.env.CLANCE_FORCE_MAIN_WINDOW) openMainWindow();
 });
 
-app.on("activate", openMainWindow);
+// Only reopens the main window for a "no windows at all" activation — a
+// fresh launch, or clicking the dock icon with nothing open — the standard
+// macOS convention. Unconditionally calling openMainWindow() here also
+// fired whenever the *popup* was reactivated: hiding it via app.hide()
+// (see popupWindow.ts's hideWidgetKeepAlive) deactivates the whole app, so
+// showing it again on the next hotkey press re-activates Clance and would
+// otherwise pop the main window open right alongside it — exactly the
+// "this is supposed to be a quiet overlay" bug this guard exists to avoid.
+// The popup window itself is never destroyed (only hidden), so it already
+// counts toward "not zero windows" once created, correctly skipping this.
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) openMainWindow();
+});
 
 app.on("will-quit", unregisterAllHotkeys);
 
