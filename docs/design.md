@@ -946,6 +946,26 @@ Clance-specific is the window chrome and which session gets opened:
   `#session-header`, which only existed inside the terminal view) carries a
   close button (`popup:close` IPC → `hidePopup()`) as the only way the
   widget goes away on its own initiative.
+- **A second, non-destructive way to dismiss it: the toolbar's Hide
+  button** (`#hide-btn`, same `#app.has-messages` gating as "Open in App"
+  below). Close (`hidePopup()`) always nulls `currentMode`, and
+  `cleanupIfAbandoned()` always nulls `currentAgentId` too (stopping the
+  agent outright if it never got a real user turn) — the widget is
+  supposed to be gone, forgotten by `popupWindow.ts` as much as by the
+  user. Hide (`popup:hide` IPC → `hideWidgetKeepAlive()`) just calls
+  `popup.hide()` and leaves both untouched, since the window itself is
+  only ever hidden, never reloaded, so its terminal is still fully live
+  underneath. `toggleClancePopup()` — reached from both the global hotkey
+  and the tray icon — checks for exactly that state (`!popup.isVisible() &&
+  currentMode === "new" && currentAgentId`) before falling through to its
+  usual pool-claim/mint path, so the next hotkey press reveals the same
+  widget instead of abandoning it for a new one. Loading-state widgets
+  aren't offered the Hide button (nothing to keep alive yet, same reason
+  "Open in App" is gated the same way), and if it somehow still fires
+  mid-mint, `toggleClancePopupInner`'s own `currentMode !== "loading"`
+  check goes the other way — `currentMode` never got reset off `"loading"`
+  by a bare hide, so the in-flight mint finishes normally and lands in
+  the same "hidden but live" state.
 - **A fourth entry point, in reverse — "Open in App":** the toolbar's other
   button (only shown once a session is live, i.e. `#app.has-messages`)
   moves the widget's current conversation into a main window tab and hides

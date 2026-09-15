@@ -10,6 +10,7 @@ const openInListEl = document.getElementById("open-in-list");
 const openInBrowseBtn = document.getElementById("open-in-browse-btn");
 const openInRecentDirsEl = document.getElementById("open-in-recent-dirs");
 const closeBtn = document.getElementById("close-btn");
+const hideBtn = document.getElementById("hide-btn");
 const openInAppBtn = document.getElementById("open-in-app-btn");
 const contextLinkEl = document.getElementById("context-link");
 const contextDialogEl = document.getElementById("context-dialog");
@@ -471,6 +472,12 @@ contextLinkEl.addEventListener("mouseenter", () => {
 });
 
 closeBtn.addEventListener("click", () => window.clance.closeWidget());
+
+// Unlike closeWidget, this doesn't detach/teardown the terminal — the
+// window is only ever hidden, not reloaded, so leaving it fully wired up
+// is exactly what lets ⌥Space bring back the same conversation instead of
+// starting a new one (see toggleClancePopup in popupWindow.ts).
+hideBtn.addEventListener("click", () => window.clance.hideWidget());
 
 openInAppBtn.addEventListener("click", () => {
   if (!activeTerminalId) return;

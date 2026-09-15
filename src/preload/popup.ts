@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("clance", {
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   copyDroppedFile: (sourcePath: string) => ipcRenderer.invoke("files:copy-dropped", sourcePath),
   closeWidget: () => ipcRenderer.send("popup:close"),
+  hideWidget: () => ipcRenderer.send("popup:hide"),
   openInApp: (terminalId: string, args: string[]) =>
     ipcRenderer.invoke("popup:open-in-app", { terminalId, args }),
   listChatSessions: () => ipcRenderer.invoke("chatHistory:list-sessions"),

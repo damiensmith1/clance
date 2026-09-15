@@ -102,6 +102,15 @@
       #app.has-messages #open-in-app-btn {
         display: flex;
       }
+      /* Same gating as #open-in-app-btn — hiding an empty/loading widget is
+         indistinguishable from closing it, so only offer it once there's an
+         actual conversation worth keeping alive. */
+      #hide-btn {
+        display: none;
+      }
+      #app.has-messages #hide-btn {
+        display: flex;
+      }
 
       /* "Open in…" — a plain toolbar button (unlike #context-link, this one
          actually does something on click) that opens an anchored dropdown
@@ -386,6 +395,11 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M19 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6" />
             <path d="M20 4L10 14M10 8v6h6" />
+          </svg>
+        </button>
+        <button id="hide-btn" class="toolbar-btn" title="Hide (⌥Space to reopen)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14" />
           </svg>
         </button>
         <button id="close-btn" class="toolbar-btn" title="Close">

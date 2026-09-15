@@ -87,6 +87,18 @@ export function hidePopup(): void {
   currentMode = null;
 }
 
+// The toolbar's Hide button. Unlike hidePopup() (the close button, and the
+// hotkey's own toggle-while-visible), this deliberately leaves currentMode
+// and currentAgentId untouched — the conversation isn't being abandoned,
+// just tucked away. The window itself is only ever hide()'d here, never
+// reloaded, so its terminal/xterm state stays fully alive underneath;
+// toggleClancePopup's own "already have a hidden live widget" check below
+// is what brings it back on the next hotkey press instead of claiming a
+// pool spare or minting a new session.
+export function hideWidgetKeepAlive(): void {
+  if (popup && !popup.isDestroyed()) popup.hide();
+}
+
 // If the session that's about to close was minted/claimed by this popup
 // and never got a single real user turn, there's no reason to keep it
 // running — or even keep it around as a stopped-but-resumable session,
@@ -175,6 +187,8 @@ ipcMain.on("popup:close", () => {
   hidePopup();
   cleanupIfAbandoned();
 });
+
+ipcMain.on("popup:hide", () => hideWidgetKeepAlive());
 
 // Creates/positions the window but never shows it — safe to run concurrently
 // with screen-context capture (captureContextText below), since it has no
@@ -474,6 +488,14 @@ export async function toggleClancePopup(): Promise<void> {
   if (popup && !popup.isDestroyed() && popup.isVisible() && currentMode === "new") {
     hidePopup();
     cleanupIfAbandoned();
+    return;
+  }
+  // The toolbar's Hide button (hideWidgetKeepAlive above) leaves the widget
+  // hidden but its conversation still fully live and attached — reopen the
+  // same window instead of falling through to claim/mint below, which
+  // would otherwise abandon it in favor of a brand-new session every time.
+  if (popup && !popup.isDestroyed() && !popup.isVisible() && currentMode === "new" && currentAgentId) {
+    revealPopupWindow();
     return;
   }
   if (opening) return;
