@@ -1,6 +1,6 @@
-import { app, BrowserWindow, ipcMain, screen } from "electron";
+import { BrowserWindow, ipcMain, screen } from "electron";
 import { join } from "path";
-import { captureFrontmostWindow, captureSelectedText } from "./frontApp";
+import { captureFrontmostWindow, captureSelectedText, focusTarget } from "./frontApp";
 import { captureAndSaveActiveDisplay } from "./screenCapture";
 import { checkPermissions } from "./permissions";
 import { ensureLocalToolsServer, listLocalTools } from "./localToolsServer";
@@ -96,16 +96,23 @@ export function hidePopup(): void {
 // is what brings it back on the next hotkey press instead of claiming a
 // pool spare or minting a new session.
 //
-// app.hide() (macOS's own Cmd+H "hide app"), not popup.hide(): a bare
-// BrowserWindow.hide() hands focus to whatever macOS considers next for
-// *this app* — its own main window, if one happens to be open — same
-// quirk refreshContext works around below with setOpacity(0) instead of
-// hide(). The point of a quick tuck-away is to drop straight back to
-// whatever the user was doing in some other app, not surface a Clance
-// window they didn't ask for; app.hide() deactivates Clance entirely and
-// lets the OS restore whatever was frontmost before, on its own.
-export function hideWidgetKeepAlive(): void {
-  if (popup && !popup.isDestroyed()) app.hide();
+// A plain BrowserWindow.hide() leaves Clance itself as the active app —
+// hiding one of its windows doesn't hand the OS's "frontmost app" status
+// back to whatever the user was in before, so focus was just landing
+// wherever macOS defaults to next for the still-active app (its own main
+// window, if one happens to be open). app.hide() "fixed" that but broke
+// something worse: it's a native, app-wide deactivation, not a per-window
+// thing, so showing the popup again reactivated the whole app (the same
+// "activate" event a Dock click fires) and the main window came back right
+// alongside it. The actual fix is to stay entirely off Electron/macOS
+// app-activation machinery and target one specific external window
+// directly: focusTarget() (frontApp.ts, shared with insert_text/
+// activate_app's own app-targeting) re-focuses whatever was captured as
+// frontmost right before this widget last took focus — a plain OS-level
+// window activation with no notion of "Clance" as an app at all.
+export async function hideWidgetKeepAlive(): Promise<void> {
+  if (popup && !popup.isDestroyed()) popup.hide();
+  await focusTarget();
 }
 
 // If the session that's about to close was minted/claimed by this popup
@@ -509,6 +516,12 @@ export async function toggleClancePopup(): Promise<void> {
   // of how it got there, including one exported from a main-window tab via
   // "Open in Widget", which has no currentAgentId of its own to check.
   if (popup && !popup.isDestroyed() && !popup.isVisible() && currentMode === "new") {
+    // Re-capture before this steals focus, same as a fresh open — without
+    // this, capturedWindow (and so the *next* hide's focusTarget()) would
+    // stay stuck on whatever was frontmost when the widget was originally
+    // opened, not wherever the user actually is right now if they switched
+    // apps while it sat hidden.
+    await captureFrontmostWindow();
     revealPopupWindow();
     return;
   }

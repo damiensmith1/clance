@@ -966,25 +966,35 @@ Clance-specific is the window chrome and which session gets opened:
   check goes the other way — `currentMode` never got reset off `"loading"`
   by a bare hide, so the in-flight mint finishes normally and lands in
   the same "hidden but live" state.
-  - **Hides via `app.hide()`, not `popup.hide()`.** A bare
-    `BrowserWindow.hide()` hands focus to whatever macOS considers next
-    for the app — its own main window, if one happens to be open, the
-    same quirk `refreshContext` above works around with `setOpacity(0)`
-    instead of `hide()`. The point of Hide is to drop straight back to
-    whatever the user was doing in some other app, not surface a Clance
-    window they didn't ask for; `app.hide()` (macOS's Cmd+H) deactivates
-    Clance entirely and lets the OS restore whatever was frontmost before,
-    on its own. That deactivation is also why `index.ts`'s
-    `app.on("activate", ...)` handler had to change from an unconditional
-    `openMainWindow()` to `if (BrowserWindow.getAllWindows().length === 0)
-    openMainWindow()` — showing the popup again after `app.hide()`
-    reactivates the whole app, which fires `activate` same as clicking the
-    dock icon would, and the old unconditional handler popped the main
-    window open right alongside the widget every time. The popup window is
-    never destroyed (only hidden), so it already counts toward "not zero
-    windows" once created, correctly skipping that once guarded — the
-    guard only actually changes behavior for the fresh-launch/dock-icon
-    case the standard Electron macOS template guards the same way.
+  - **Refocuses the previously-frontmost window explicitly, rather than
+    reaching for any native app-level hide/show.** A bare
+    `BrowserWindow.hide()` leaves Clance itself as the active app, so
+    focus just lands wherever macOS defaults to next for it — its own
+    main window, if one happens to be open — instead of going back to
+    whatever the user was actually doing (the same quirk `refreshContext`
+    above works around with `setOpacity(0)` instead of `hide()`). A first
+    attempt reached for `app.hide()` (macOS's Cmd+H) to fix that, and it
+    does correctly restore the right app on *hide* — but it's a native,
+    app-wide deactivation, not a per-window thing, so showing the popup
+    again on the next hotkey press reactivates the whole app (the same
+    `activate` event a Dock click fires) and pops the main window back
+    open right alongside the widget, exactly the "this is supposed to be
+    a quiet overlay" bug all over again, just moved to the reveal side.
+    `index.ts`'s `app.on("activate", ...)` handler still got hardened
+    (`if (BrowserWindow.getAllWindows().length === 0) openMainWindow()`,
+    the standard Electron macOS template's own guard) since it was wrong
+    on its own terms regardless, but that alone doesn't fix this — the
+    real fix is staying off Electron/macOS app-activation machinery
+    entirely. `hideWidgetKeepAlive()` now does a plain `popup.hide()` and
+    then explicitly calls `focusTarget()` (`frontApp.ts`, exported for
+    this — the same targeted, one-specific-external-window activation
+    `insert_text`/`activate_app` already use, no notion of "Clance" as an
+    app involved at all) to hand focus back to whatever `capturedWindow`
+    holds. The reveal path (just below) now also re-runs
+    `captureFrontmostWindow()` before showing the popup again, so that
+    target stays accurate to wherever the user actually is if they
+    switched apps while the widget sat hidden, rather than staying stuck
+    on whatever was frontmost back when the widget was first opened.
   - **The reveal check doesn't require `currentAgentId`.** It's tempting
     to read that field as "is there a live session to reveal," but
     `openPopupWithArgs` (the main window's "Open in Widget" button,

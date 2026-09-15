@@ -130,8 +130,12 @@ async function findWindowByTitleHint(hint: string): Promise<Window | null> {
 // — falls back to the captured window if no hint is given or no match is
 // found. Best-effort: a focus failure just means the action lands wherever
 // focus actually is instead, same trade-off `typeIntoCapturedWindow` always
-// accepted.
-async function focusTarget(appHint?: string): Promise<void> {
+// accepted. Exported for popupWindow.ts's hide button — refocusing the
+// captured window (no appHint) is exactly "give the user back whatever they
+// were doing before this popup took focus," a plain OS-level window
+// activation targeted at one specific external window, not anything
+// Electron/app-lifecycle-level.
+export async function focusTarget(appHint?: string): Promise<void> {
   const target = (appHint && (await findWindowByTitleHint(appHint))) || capturedWindow;
   if (!target) return;
   try {
