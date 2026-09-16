@@ -1,3 +1,4 @@
+import { checkPermissions } from "./permissions";
 import { createServer } from "http";
 import type { AddressInfo } from "net";
 import { randomBytes, timingSafeEqual } from "crypto";
@@ -257,12 +258,27 @@ function createMcpServer(): McpServer {
       inputSchema: {},
     },
     withLogging("look_at_screen", async () => {
+      // Screen Recording is optional, so a user declining it is a supported
+      // state rather than a misconfiguration — say so plainly, in words the
+      // model can pass on, instead of a guess.
+      if (!checkPermissions().screenRecording) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text:
+                "Screen Recording isn't enabled for Clance, so the screen can't be read. " +
+                "The user can turn it on in System Settings → Privacy & Security → Screen Recording " +
+                "(Clance needs a restart after enabling it).",
+            },
+          ],
+          isError: true,
+        };
+      }
       const base64 = await captureActiveDisplay();
       if (!base64) {
         return {
-          content: [
-            { type: "text" as const, text: "Couldn't capture the screen (Screen Recording permission?)." },
-          ],
+          content: [{ type: "text" as const, text: "Couldn't capture the screen." }],
           isError: true,
         };
       }

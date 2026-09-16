@@ -2,12 +2,17 @@ import { h, html, useState } from "../../shared/vendor/preact-htm-standalone.mod
 import { ConnectClaudeStep } from "./ConnectClaudeStep.js";
 import { PermissionsStep } from "./PermissionsStep.js";
 import { ShortcutsStep } from "./ShortcutsStep.js";
+import { DictationStep } from "./DictationStep.js";
 
-const STEP_ORDER = ["claude", "permissions", "shortcuts"];
+// Dictation is last and optional: it never counts toward setup being
+// complete (see setupStatus.ts), so it can be skipped, and someone who quits
+// during it lands straight in the app next launch — it lives in Settings too.
+const STEP_ORDER = ["claude", "permissions", "shortcuts", "dictation"];
 
 function firstIncompleteStep(status) {
   if (!(status.claude.installed && status.claude.loggedIn)) return "claude";
-  if (!(status.permissions.screenRecording && status.permissions.accessibility)) {
+  // Accessibility only — Screen Recording is optional (see setupStatus.ts).
+  if (!status.permissions.accessibility) {
     return "permissions";
   }
   if (!status.shortcutsConfigured) return "shortcuts";
@@ -40,6 +45,7 @@ export function SetupWizard({ initialStatus }) {
       ${step === "claude" && html`<${ConnectClaudeStep} onComplete=${advance} />`}
       ${step === "permissions" && html`<${PermissionsStep} onComplete=${advance} />`}
       ${step === "shortcuts" && html`<${ShortcutsStep} onComplete=${advance} />`}
+      ${step === "dictation" && html`<${DictationStep} onComplete=${advance} />`}
     </div>
   `;
 }

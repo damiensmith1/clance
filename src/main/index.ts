@@ -74,6 +74,7 @@ import {
   cancelInstall,
   removeModel,
   isModelInstalled,
+  getActiveInstalls,
   MODEL_CATALOG,
   DownloadProgress,
 } from "./whisperModels";
@@ -101,9 +102,33 @@ async function handleTrayPopupClick(): Promise<void> {
 // getSetupStatus().isComplete means) would disable a working feature for
 // no reason.
 function registerAllHotkeys(shortcuts: Record<string, string>, claudeReady: boolean): void {
+  // While the settings UI is recording a new shortcut, hotkeys stay down
+  // even if something else asks to re-register — a model install finishing
+  // mid-capture would otherwise bring ⌥D back and fire dictation instead of
+  // recording the keypress. set-shortcut-capture(false) re-registers.
+  if (capturingShortcut) return;
   unregisterAllHotkeys();
   if (claudeReady) registerHotkey(toggleClancePopup, shortcuts.togglePopup);
-  registerHotkey(() => void toggleDictation(), shortcuts.dictate);
+  // Dictation's hotkey is only claimed once a speech model is installed.
+  // Registered unconditionally it took ⌥D system-wide from first launch for
+  // everyone — kill-word in a terminal with Option-as-Meta, ∂ in a text
+  // field — including users who never set dictation up. Keyed off *any*
+  // installed model rather than the active one, so it can't race
+  // reconcileActiveModel, which settles the active model asynchronously.
+  if (dictationHotkeyReady()) registerHotkey(() => void toggleDictation(), shortcuts.dictate);
+}
+
+let capturingShortcut = false;
+
+function dictationHotkeyReady(): boolean {
+  return MODEL_CATALOG.some((model) => isModelInstalled(model.id));
+}
+
+// Re-applies hotkeys after dictation becomes usable (or stops being), so
+// installing the first model enables ⌥D immediately, without a relaunch.
+async function refreshHotkeys(): Promise<void> {
+  const status = await getSetupStatus();
+  registerAllHotkeys(readConfig().shortcuts, status.isComplete);
 }
 
 app.whenReady().then(async () => {
@@ -207,11 +232,12 @@ ipcMain.handle("setup:get-shortcut-actions", () => SHORTCUT_ACTIONS);
 // instead of reaching the renderer that's listening for it.
 ipcMain.handle("setup:set-shortcut-capture", async (_event, capturing: boolean) => {
   if (capturing) {
+    capturingShortcut = true;
     unregisterAllHotkeys();
     return;
   }
-  const status = await getSetupStatus();
-  registerAllHotkeys(readConfig().shortcuts, status.isComplete);
+  capturingShortcut = false;
+  await refreshHotkeys();
 });
 
 ipcMain.handle(
@@ -258,7 +284,20 @@ ipcMain.handle(
 ipcMain.handle("setup:complete", async () => {
   const status = await getSetupStatus();
   registerAllHotkeys(readConfig().shortcuts, status.isComplete);
+  // Startup only warms the agent pool when setup was *already* complete, so
+  // someone finishing the wizard mid-session had a cold first ⌥Space. Warm
+  // it here too, now that minting can actually work.
+  if (status.isComplete) warmAgentPool().catch(() => {});
   return status;
+});
+
+// macOS applies a newly granted Screen Recording permission only after the
+// app restarts ("…won't be able to record until it is quit"), so the
+// permissions step needs a way to restart rather than leaving the user
+// pressing Recheck on a permission they've already granted.
+ipcMain.handle("setup:relaunch", () => {
+  app.relaunch();
+  app.exit(0);
 });
 
 ipcMain.handle("chatHistory:list-sessions", () => listSessions());
@@ -527,26 +566,43 @@ ipcMain.handle("dictation:list-models", () => listModels(readConfig().dictation.
 
 // Progress is pushed to the requesting window rather than broadcast: the
 // install UI lives in the main window, and a 500MB download reports often.
-ipcMain.handle("dictation:install-model", async (event, modelId: string) => {
-  await installModel(modelId, (progress: DownloadProgress) => {
-    if (!event.sender.isDestroyed()) event.sender.send("dictation:install-progress", progress);
+ipcMain.handle("dictation:install-model", async (_event, modelId: string) => {
+  // Broadcast rather than replying only to the requesting window: a
+  // download outlives the view that started it, so any window that opens
+  // mid-install needs the updates too.
+  const outcome = await installModel(modelId, (progress: DownloadProgress) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send("dictation:install-progress", progress);
+    }
   });
 
-  // First installed model becomes active automatically — otherwise the user
-  // would finish a download and still have a feature that says it isn't
-  // set up.
   const config = readConfig();
-  if (!config.dictation.activeModel || !isModelInstalled(config.dictation.activeModel)) {
+  // Only on a real install. A cancel used to land here too and would set a
+  // model active with no file on disk, leaving dictation reporting "no
+  // model installed" while the config claimed otherwise.
+  if (
+    outcome === "installed" &&
+    (!config.dictation.activeModel || !isModelInstalled(config.dictation.activeModel))
+  ) {
     config.dictation.activeModel = modelId;
     writeConfig(config);
   }
-  return config.dictation;
+  // The first installed model is what makes ⌥D worth claiming.
+  if (outcome === "installed") await refreshHotkeys();
+  return { outcome, dictation: config.dictation };
 });
+
+// Lets a freshly-opened settings view re-attach to a download already in
+// flight, instead of showing an Install button that then errors with
+// "already downloading".
+ipcMain.handle("dictation:active-installs", () => getActiveInstalls());
 
 ipcMain.handle("dictation:cancel-install", (_event, modelId: string) => cancelInstall(modelId));
 
-ipcMain.handle("dictation:remove-model", (_event, modelId: string) => {
+ipcMain.handle("dictation:remove-model", async (_event, modelId: string) => {
   removeModel(modelId);
+  // Removing the last model gives ⌥D back to the rest of the system.
+  await refreshHotkeys();
   const config = readConfig();
   if (config.dictation.activeModel === modelId) {
     // Fall back to any other installed model rather than leaving a dangling

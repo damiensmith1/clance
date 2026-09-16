@@ -10,8 +10,7 @@
     "dev": "npm run build && npm start",
     "package": "npm run build && electron-builder --mac --dir",
     "dist": "npm run build && electron-builder --mac",
-    "dev:packaged": "npm run build && sh scripts/dev-packaged.sh",
-    "fetch:whisper": "sh scripts/fetch-whisper-binary.sh"
+    "dev:packaged": "npm run build && sh scripts/dev-packaged.sh"
   },
   "build": {
     "appId": "dev.damiensmith.clance",
@@ -33,17 +32,10 @@
       ],
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Clance needs the microphone to transcribe your speech into text on this Mac."
-      }
-    },
-    "extraResources": [
-      {
-        "from": "vendor/whisper",
-        "to": "whisper",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ]
+      },
+      "identity": "-",
+      "hardenedRuntime": false
+    }
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

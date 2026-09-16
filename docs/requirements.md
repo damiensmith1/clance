@@ -53,12 +53,24 @@ status: draft
   Clance-launched session is a real CLI process reading `~/.claude/`
   conventions natively; Clance's own toggle UI over this is a real gap,
   see §"Extensibility layer"
-- **Packaged and signed** (supersedes "no notarization/permission-hardening
-  yet") — `electron-builder` produces a stable-identity signed `.app`,
-  installed to `/Applications` even for dev use, because the raw dev
-  Electron binary's TCC permission flakiness made manual-grant-during-dev
-  unworkable in practice. Full notarization for real distribution is still
-  out of scope.
+- **Packaged, ad-hoc signed, and distributed as a Homebrew cask** from a
+  personal tap (`brew install --cask damiensmith1/tap/clance`). Changed
+  2026-09-16:
+  - **No notarization** — it needs a paid Apple Developer membership,
+    which is out of scope. Homebrew quarantines every cask download, so the
+    cask removes the quarantine flag after install; see `design.md`
+    §"Distribution".
+  - **Never signed with a certificate belonging to an organisation.**
+    `package.json` sets `mac.identity: "-"` explicitly so electron-builder
+    can't auto-discover one from the keychain.
+  - **Releases are signed with a self-signed certificate** ("Clance Code
+    Signing", free) so users keep Accessibility, Screen Recording and
+    Microphone permissions across upgrades. Ad-hoc signing identifies an
+    app by a hash of its contents, which would reset those permissions on
+    every update.
+  - Installed to `/Applications` even for dev use, because the raw dev
+    Electron binary's TCC permission flakiness made manual-grant-during-dev
+    unworkable in practice.
 
 **Explicitly out of scope for v1:**
 
@@ -471,13 +483,23 @@ the toggle-managed path above) no Clance-specific wiring needed at all.
 
 ### First-run setup
 
-- The app is fully gated behind a first-run setup wizard — no global
-  hotkey, no popup functionality — until three sequential steps are
-  satisfied: connecting the user's Claude plan, granting macOS Screen
-  Recording + Accessibility permissions, and confirming a keyboard
-  shortcut. The main window opens itself automatically on launch whenever
-  setup is incomplete, rather than requiring the user find their way to
-  the Dock icon or tray item first.
+- The app is gated behind a first-run setup wizard — no popup hotkey, no
+  popup functionality — until three required steps are satisfied:
+  connecting the user's Claude plan, granting macOS **Accessibility**, and
+  confirming the keyboard shortcuts. A fourth step, **dictation**, is
+  offered last and is skippable. The main window opens itself
+  automatically on launch whenever setup is incomplete, rather than
+  requiring the user find their way to the Dock icon or tray item first.
+- **Screen Recording is optional** (changed 2026-09-16; it used to be
+  required). Nothing is captured automatically, so declining it only means
+  a session can't look at the screen — `look_at_screen` says so plainly,
+  and ⌘⇧R degrades to window title and selection. Requiring it meant a
+  privacy-minded user who declined an optional capability couldn't use
+  Clance at all. Granting it needs an app restart, which the step offers.
+- The installed Claude CLI must be found when Clance is launched from
+  Finder, the Dock or Launchpad — not only from a terminal, where it
+  inherits the shell `PATH`. See `design.md` §"First-run setup, as a new
+  user sees it".
 - Connecting a Claude plan requires the `claude` CLI to be installed
   separately (the wizard links to install instructions if it's missing)
   — Clance does not bundle or reimplement Claude's OAuth login itself,

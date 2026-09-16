@@ -58,6 +58,7 @@ export function DictationStep({ onComplete } = {}) {
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState(null);
   const [promptDraft, setPromptDraft] = useState(null);
+  const [showAllModels, setShowAllModels] = useState(false);
 
   function refresh() {
     return Promise.all([
@@ -76,6 +77,21 @@ export function DictationStep({ onComplete } = {}) {
 
   useEffect(() => {
     refresh();
+    // A download keeps running after this view is closed, so on mount ask
+    // what's in flight rather than assuming nothing is. Without this,
+    // reopening Settings mid-download showed an Install button that then
+    // failed with "already downloading".
+    // Guarded: one missing bridge method shouldn't stop the whole pane
+    // rendering. Re-attaching to a download in progress is a nicety, and
+    // losing it is far better than an empty Settings screen.
+    if (typeof window.clanceApp.activeDictationInstalls === "function") {
+      window.clanceApp
+        .activeDictationInstalls()
+        .then((running) => {
+          if (running && running.length > 0) setProgress(running[0]);
+        })
+        .catch(() => {});
+    }
     return window.clanceApp.onDictationInstallProgress((p) => {
       setProgress(p);
       if (p.phase === "done" || p.phase === "error") {
@@ -89,10 +105,22 @@ export function DictationStep({ onComplete } = {}) {
 
   function handleInstall(modelId) {
     setError(null);
-    setProgress({ modelId, phase: "downloading", receivedBytes: 0, totalBytes: 0 });
+    const model = models.find((m) => m.id === modelId);
+    // Seeded with the real total so the bar is proportioned from the first
+    // frame rather than starting at a bogus 0-of-0.
+    setProgress({
+      modelId,
+      phase: "downloading",
+      receivedBytes: 0,
+      totalBytes: model ? model.bytes : 0,
+    });
     window.clanceApp
       .installDictationModel(modelId)
-      .then(refresh)
+      .then((result) => {
+        // A cancelled install is not a failure; just drop the bar.
+        if (result && result.outcome === "cancelled") setProgress(null);
+        return refresh();
+      })
       .catch((err) => {
         setError(err && err.message ? err.message : "Install failed.");
         setProgress(null);
@@ -141,12 +169,18 @@ export function DictationStep({ onComplete } = {}) {
   const { models, recommendation, binaryAvailable } = data;
   const anyInstalled = models.some((m) => m.installed);
 
+  // Written for someone who installed Clance from the command line, not a
+  // developer running a dev build — it previously said "In a dev build, …".
+  // "Check again" re-resolves the binary, which isn't cached until it's
+  // found, so installing it and pressing the button is enough.
   const engineCard = !binaryAvailable
     ? html`
         <${StatusCard}
           ok=${false}
-          title="Speech engine missing"
-          description="whisper-cli wasn't found. In a dev build, install it with 'brew install whisper.cpp'."
+          title="Speech engine not installed"
+          description="Dictation runs on whisper.cpp. Install it with brew install whisper.cpp, then check again."
+          actionLabel="Check again"
+          onAction=${refresh}
         />
       `
     : null;
@@ -163,9 +197,7 @@ export function DictationStep({ onComplete } = {}) {
     />
   `;
 
-  const modelList = html`
-    <div class="list-group">
-      ${models.map((model) => {
+  function renderModelRow(model) {
         const isRecommended = model.id === recommendation.modelId;
         const installing = progress && progress.modelId === model.id && progress.phase !== "done";
         return html`
@@ -184,6 +216,22 @@ export function DictationStep({ onComplete } = {}) {
               </span>
               <span class="item-card-description">${model.note}</span>
               <span class="item-card-meta">${metaLine(model, installing, progress)}</span>
+              ${installing
+                ? html`
+                    <span class="install-bar" role="progressbar">
+                      <span
+                        class="install-bar-fill ${progress.phase !== "downloading"
+                          ? "install-bar-fill-indeterminate"
+                          : ""}"
+                        style=${`width: ${
+                          progress.phase === "downloading" && progress.totalBytes
+                            ? Math.min(100, (progress.receivedBytes / progress.totalBytes) * 100)
+                            : 100
+                        }%`}
+                      ></span>
+                    </span>
+                  `
+                : null}
             </span>
             <span class="item-card-actions">
               ${installing
@@ -213,9 +261,9 @@ export function DictationStep({ onComplete } = {}) {
             </span>
           </div>
         `;
-      })}
-    </div>
-  `;
+  }
+
+  const modelList = html`<div class="list-group">${models.map(renderModelRow)}</div>`;
 
   const modelSection = html`
     <div class="dictation-subsection">
@@ -294,18 +342,45 @@ export function DictationStep({ onComplete } = {}) {
     `;
   }
 
+  // Onboarding leads with a single recommended model rather than the full
+  // catalog: a new user shouldn't have to weigh four speech models to try
+  // the feature. The rest are one click away for anyone who wants to choose.
+  const recommended = models.find((m) => m.id === recommendation.modelId);
+  const downloading = Boolean(progress && progress.phase !== "done" && progress.phase !== "error");
+
+  let finishLabel = "Skip for now";
+  if (anyInstalled) finishLabel = "Finish setup";
+  else if (downloading) finishLabel = "Finish — download continues in the background";
+
   return html`
     <div class="setup-step">
-      <h2>Set up dictation</h2>
+      <h2>Set up dictation <span class="setup-optional">Optional</span></h2>
       <p>
-        Install a speech model and Clance can type what you say into any app, entirely on
-        this Mac. You can skip this and come back later from Settings.
+        Press your dictation shortcut anywhere, talk, and Clance types it where your cursor
+        is. It runs entirely on this Mac, using a speech model you download once.
       </p>
-      ${engineCard} ${micCard} ${modelSection}
+      ${engineCard}
+      ${recommended
+        ? html`
+            <p class="preference-description dictation-recommendation">
+              ${recommendation.reason}
+            </p>
+            <div class="list-group">${renderModelRow(recommended)}</div>
+          `
+        : null}
+      <button class="btn-link" onClick=${() => setShowAllModels(!showAllModels)}>
+        ${showAllModels ? "Hide other models" : "Choose a different model"}
+      </button>
+      ${showAllModels
+        ? html`<div class="list-group">
+            ${models.filter((m) => m.id !== recommendation.modelId).map(renderModelRow)}
+          </div>`
+        : null}
+      ${micCard}
       ${error && html`<p class="setup-error">${error}</p>`}
       <div class="setup-step-actions">
-        <button class="btn-secondary" onClick=${onComplete}>
-          ${anyInstalled ? "Continue" : "Skip for now"}
+        <button class=${anyInstalled ? "" : "btn-secondary"} onClick=${onComplete}>
+          ${finishLabel}
         </button>
       </div>
     </div>

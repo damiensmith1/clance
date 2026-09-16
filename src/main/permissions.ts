@@ -66,7 +66,15 @@ export function openScreenRecordingSettings(): Promise<void> {
   );
 }
 
+// Prompts first, then opens the pane. Everything else in the app only ever
+// *checks* trust (isTrustedAccessibilityClient(false)), which never adds the
+// app to System Settings' Accessibility list — so a fresh install opened
+// the pane to find Clance simply wasn't listed, and the user had to know to
+// click "+" and dig it out of /Applications. Passing true registers the app
+// in that list (and shows macOS's own prompt, once), so there's a switch
+// to flip when the pane opens.
 export function openAccessibilitySettings(): Promise<void> {
+  systemPreferences.isTrustedAccessibilityClient(true);
   return shell.openExternal(
     "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
   );

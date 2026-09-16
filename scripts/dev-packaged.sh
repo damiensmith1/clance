@@ -1,5 +1,5 @@
 #!/bin/sh
-# Relaunches the signed Clance.app with the latest dist/ build, without
+# Relaunches the packaged Clance.app with the latest dist/ build, without
 # going through electron-builder's full pipeline (Electron re-download,
 # native module rebuild) on every iteration. Falls back to `npm run
 # package` once if the app hasn't been built yet.
@@ -21,19 +21,28 @@ fi
 
 rsync -a --delete dist/ "$BUILT_APP/Contents/Resources/app/dist/"
 
-IDENTITY=$(codesign -dvvv "$BUILT_APP" 2>&1 | sed -n 's/^Authority=//p' | head -1)
-if [ -z "$IDENTITY" ]; then
-  echo "Could not determine the app's existing signing identity — re-run npm run package."
-  exit 1
-fi
-
+# Signed with Clance's self-signed certificate when it's set up (sh
+# scripts/create-signing-cert.sh), so macOS keeps Accessibility and Screen
+# Recording across rebuilds. It used to copy whatever identity the build
+# already carried, which meant silently re-signing with any Developer ID that
+# happened to be installed; Clance is never signed with a certificate
+# belonging to an organisation. Without the certificate this falls back to
+# ad-hoc, which works but resets those permissions on every rebuild.
+#
 # No --options runtime here: hardened runtime requires an entitlements
 # file (JIT, unsigned executable memory, disabled library validation for
 # unsigned native .node addons like node-pty) that electron-builder embeds
 # automatically but a bare resign doesn't — without it the app crashes on
-# launch with EXC_BREAKPOINT/SIGTRAP. Not needed for local, unnotarized use
-# anyway; only matters for real distribution.
-codesign --force --deep --sign "$IDENTITY" "$BUILT_APP"
+# launch with EXC_BREAKPOINT/SIGTRAP.
+SIGN_IDENTITY="Clance Code Signing"
+if security find-identity -v -p codesigning | grep -q "\"$SIGN_IDENTITY\""; then
+  codesign --force --deep --sign "$SIGN_IDENTITY" "$BUILT_APP"
+else
+  echo "warning: '$SIGN_IDENTITY' not set up — signing ad-hoc, so macOS will forget"
+  echo "         Accessibility / Screen Recording for this build. Fix once with:"
+  echo "         sh scripts/create-signing-cert.sh"
+  codesign --force --deep --sign - "$BUILT_APP"
+fi
 
 pkill -f "$INSTALLED_APP/Contents/MacOS/Clance" 2>/dev/null || true
 rm -rf "$INSTALLED_APP"

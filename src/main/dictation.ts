@@ -116,14 +116,14 @@ export async function checkAvailability(): Promise<DictationAvailability> {
     return {
       ready: false,
       reason: "no-binary",
-      message: "The speech-to-text engine isn't available in this build.",
+      message: "Speech engine not found — install it with: brew install whisper.cpp",
     };
   }
   if (!dictation.activeModel || !isModelInstalled(dictation.activeModel)) {
     return {
       ready: false,
       reason: "no-model",
-      message: "No speech model installed yet — open Clance's Dictation tab to install one.",
+      message: "No speech model installed yet — install one in Settings → Dictation.",
     };
   }
   if (!checkPermissions().microphone) {

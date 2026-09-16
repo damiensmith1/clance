@@ -3,6 +3,9 @@ import { StatusCard } from "../components/StatusCard.js";
 
 export function PermissionsStep({ onComplete } = {}) {
   const [status, setStatus] = useState(null);
+  // The restart hint only appears once the user has actually been sent to
+  // System Settings — before that it would just be noise.
+  const [openedScreenSettings, setOpenedScreenSettings] = useState(false);
 
   function refresh() {
     return window.clanceApp.recheckPermissions().then((s) => {
@@ -19,14 +22,18 @@ export function PermissionsStep({ onComplete } = {}) {
     return html`<p class="empty-note">Checking…</p>`;
   }
 
-  const bothGranted = status.screenRecording && status.accessibility;
+  // Accessibility is the only hard requirement — it's what lets Clance type
+  // and click for you. Screen Recording is optional (see setupStatus.ts).
+  const canContinue = status.accessibility;
 
   if (!onComplete) {
     return html`
       <${StatusCard}
         ok=${status.screenRecording}
-        title="Screen Recording"
-        description="Required so Clance can read on-screen context when invoked."
+        title="Screen Recording (optional)"
+        description=${status.screenRecording
+          ? "Clance can read your screen when a session asks to."
+          : "Off. Sessions can't look at your screen — everything else works."}
         actionLabel=${status.screenRecording ? null : "Grant Access"}
         onAction=${() => window.clanceApp.requestScreenRecordingAccess()}
       />
@@ -43,14 +50,10 @@ export function PermissionsStep({ onComplete } = {}) {
   return html`
     <div class="setup-step">
       <h2>Grant permissions</h2>
-      <p>Clance needs a couple of macOS permissions to read your screen and act on your behalf.</p>
-      <${StatusCard}
-        ok=${status.screenRecording}
-        title="Screen Recording"
-        description="Lets Clance read on-screen context when invoked."
-        actionLabel=${status.screenRecording ? null : "Open Settings"}
-        onAction=${() => window.clanceApp.requestScreenRecordingAccess()}
-      />
+      <p>
+        Clance needs Accessibility to type and click on your behalf. Screen Recording is
+        optional — without it, everything works except letting a session look at your screen.
+      </p>
       <${StatusCard}
         ok=${status.accessibility}
         title="Accessibility"
@@ -58,9 +61,34 @@ export function PermissionsStep({ onComplete } = {}) {
         actionLabel=${status.accessibility ? null : "Open Settings"}
         onAction=${() => window.clanceApp.openAccessibilitySettings()}
       />
+      <${StatusCard}
+        ok=${status.screenRecording}
+        title="Screen Recording (optional)"
+        description="Lets a session look at your screen when it needs to."
+        actionLabel=${status.screenRecording ? null : "Open Settings"}
+        onAction=${() => {
+          setOpenedScreenSettings(true);
+          window.clanceApp.requestScreenRecordingAccess();
+        }}
+      />
+      ${!status.screenRecording && openedScreenSettings
+        ? html`
+            <p class="setup-hint">
+              Already switched it on? macOS only applies Screen Recording after Clance
+              restarts.
+              <button class="btn-link" onClick=${() => window.clanceApp.relaunchApp()}>
+                Restart Clance
+              </button>
+            </p>
+          `
+        : null}
       <div class="setup-step-actions">
         <button class="btn-secondary" onClick=${refresh}>Recheck</button>
-        ${bothGranted && onComplete && html`<button onClick=${onComplete}>Continue</button>`}
+        ${canContinue &&
+        onComplete &&
+        html`<button onClick=${onComplete}>
+          ${status.screenRecording ? "Continue" : "Continue without Screen Recording"}
+        </button>`}
       </div>
     </div>
   `;

@@ -20,7 +20,8 @@ status: draft
 | Session storage | JSONL files under `~/.claude/projects/...`, written entirely by the CLI itself | Clance no longer writes session files — every session is a real CLI process, so this is the CLI's own format, not something Clance needs to keep byte-compatible with by hand |
 | Dictation speech-to-text | `whisper.cpp` (`whisper-cli`) + ggml weights, Metal-accelerated, spawned per utterance | on-device only; weights downloaded on demand into `~/.clance/models/` and SHA-256 verified. Model tier is recommended from GPU core count — see `docs/dictation.md` |
 | Dictation history | `node:sqlite` (Node's built-in SQLite) + FTS5 | deliberately *not* `better-sqlite3`: no second native addon to rebuild against Electron's ABI alongside `node-pty`. All access via `src/main/dictationStore.ts` |
-| Packaging | `electron-builder`, ad-hoc/Developer-ID signed, installed to `/Applications` in dev too | see "Packaging & macOS permissions" below — fixes TCC (Screen Recording/Accessibility) permission flakiness that plagued the raw dev Electron binary |
+| Packaging | `electron-builder`, **ad-hoc signed** (never an organisation's certificate), installed to `/Applications` in dev too | see "Packaging & macOS permissions" below |
+| Distribution | Homebrew cask in a personal tap, not notarized | see "Distribution" below — `packaging/homebrew/clance.rb`, `scripts/release.sh` |
 
 ## Terminal-embedding architecture (supersedes the Claude Agent SDK design)
 
@@ -744,16 +745,56 @@ Both go through the same underlying mechanism:
   every Electron project on the machine — and lost that grant on every
   rebuild anyway, since the binary's hash changes each time.
 - **Fix:** `electron-builder` (package.json `build` config) produces a
-  properly signed `Clance.app` with its own stable bundle ID
-  (`dev.damiensmith.clance`), signed with a real Developer ID cert already
-  present in the dev keychain (ad-hoc signing also works if none is
-  available — just a louder first-run Gatekeeper prompt). `npm run
+  `Clance.app` with its own bundle ID (`dev.damiensmith.clance`), so it no
+  longer shares grants with every other Electron project. `npm run
   package`/`npm run dist` run the full pipeline (native module rebuild,
   Electron download, signing).
+- **Signing is ad-hoc (`mac.identity: "-"`, `hardenedRuntime: false`),
+  changed 2026-09-16.** Builds had been signed with a Developer ID
+  certificate that belonged to an organisation, picked up implicitly:
+  electron-builder auto-discovers any valid certificate in the keychain
+  when `identity` is unset, and `dev-packaged.sh` re-signed with whatever
+  identity the build already carried. Both are now explicit ad-hoc, and no
+  organisation's certificate is used anywhere. Ad-hoc needs hardened
+  runtime off — the native addons aren't signed by the same identity, so
+  library validation would refuse them and the app wouldn't launch
+  (documented by electron-builder).
+- **The cost: permissions don't survive a rebuild.** An ad-hoc signature's
+  designated requirement is `cdhash H"…"`, a hash of the contents —
+  verified to change when the app changes — whereas the Developer ID
+  signature's was `identifier … and certificate leaf[subject.OU] = <team>`,
+  stable across builds. TCC stores that requirement at grant time, so each
+  `npm run dev:packaged` (and each user upgrade) produces an app macOS no
+  longer recognises, even though its entry may still look switched on in
+  System Settings; toggling it off and on again, or removing and re-adding
+  it, restores it.
+- **Decided 2026-09-16: sign with a self-signed certificate** ("Clance Code
+  Signing"), which gives a stable requirement for free — the identity
+  becomes the bundle ID plus that certificate's hash, the same for every
+  build. One-time setup is `scripts/create-signing-cert.sh`: it creates the
+  certificate and key in the login keychain (key usable by `codesign` only,
+  never left on disk), trusts it for code signing (a password prompt — the
+  step that has to be the user's), and test-signs to surface the key-access
+  prompt up front. It refuses to create a second certificate, since a new
+  one has a different hash and would be exactly the identity change this
+  avoids — so **the certificate must be backed up** (Keychain Access →
+  Export Items → `.p12`). `release.sh` defaults to this identity and
+  **refuses to fall back to ad-hoc silently**, because that would reset
+  every user's permissions on upgrade; `CLANCE_SIGN_IDENTITY=-` opts in
+  explicitly. `dev-packaged.sh` uses it when present and falls back to
+  ad-hoc with a warning. electron-builder accepts it: after failing to find
+  an Apple-issued name it falls back to any *valid* non-Apple identity
+  matching the qualifier. **Verified 2026-09-16** after the one-time setup:
+  the designated requirement became `identifier "dev.damiensmith.clance"
+  and certificate leaf = H"…"` and stayed byte-identical after changing the
+  app's contents and re-signing — where ad-hoc's `cdhash` changed. Release
+  builds are signed with it end to end, native addons included. (Until the
+  certificate is trusted, `codesign` reports `no identity found`, which is
+  why the trust step can't be skipped.)
 - **`npm run dev:packaged`** (`scripts/dev-packaged.sh`) is the fast dev
   loop: rebuilds `dist/`, `rsync`s it into the already-packaged app
   (skipping electron-builder's Electron re-download and native-module
-  rebuild), re-signs with the same identity, installs to
+  rebuild), re-signs ad-hoc, installs to
   `/Applications/Clance.app`, and relaunches. **Installing to
   `/Applications` (not running in place from `release/`) turned out to
   matter**: macOS's TCC permission list is unreliable for an app bundle
@@ -779,6 +820,125 @@ Both go through the same underlying mechanism:
   wired to the wizard's "Grant Access" button so it only fires on an
   explicit user press, never automatically.
  
+## Distribution
+
+Clance ships as a **Homebrew cask in a personal tap** — the cask source is
+`packaging/homebrew/clance.rb`, copied into a `homebrew-tap` repo on
+release. Users install with the fully qualified name:
+
+```
+brew install --cask damiensmith1/tap/clance
+```
+
+The full name matters: Homebrew 7 ignores third-party taps unless trusted,
+and naming a cask explicitly at install trusts that one cask.
+
+**Why a cask, not a formula.** A formula installs into a versioned
+`Cellar/clance/<version>/` path. macOS ties Accessibility and Screen
+Recording grants to the app, and the path changing on every `brew upgrade`
+compounds the permission problems above. A cask installs `Clance.app` into
+the Applications folder like any other app.
+
+**Not notarized, and why that needs handling.** Notarization requires a
+paid Apple Developer membership, which is out of scope. Homebrew 7
+quarantines *every* cask download — `download.rb` calls `quarantine()` with
+no opt-out, and `--no-quarantine` has been removed — so an unnotarized app
+would be blocked by Gatekeeper on first launch ("Apple could not verify
+Clance is free of malware"). The cask removes the attribute in
+`postflight_steps`, so Gatekeeper never assesses it; installing from the
+tap is the trust decision. It could never go into the official
+`homebrew/cask` for exactly this reason.
+
+**Two Homebrew 7 specifics the cask depends on**, both found by running
+Homebrew's own tools rather than writing from memory:
+
+- **`postflight do … end` is no longer allowed**; casks must use the
+  declarative `postflight_steps` DSL, with `{{appdir}}` as a template token
+  for the install location.
+- **Install steps run in a sandbox**, and a `run` step must declare
+  `writable_paths`. The sandbox grants write access to the Applications
+  directory but not *read* access to anything under the user's home, so
+  without the declaration `xattr` fails with "Operation not permitted" for
+  a home-relative appdir (`--appdir=~/Applications`) and Homebrew rolls the
+  install back. That exact failure was hit in testing before the fix.
+
+**Verified end to end** (2026-09-16) by installing from a local tap, with
+the zip served over local HTTP, into a scratch appdir under the home folder
+(the harder case): `brew style` clean; Homebrew quarantined the download
+(agent `Homebrew Cask`); the installed bundle had zero quarantine
+attributes; `codesign --verify --deep --strict` still passed afterwards;
+`whisper.cpp` resolved as a dependency. `brew audit` fails until the first
+release exists (the release URL 404s and livecheck finds no version), which
+is expected.
+
+**Releasing:** `sh scripts/release.sh` builds
+`release/Clance-<version>-arm64.zip`, signed with the self-signed "Clance
+Code Signing" certificate (see "Packaging & macOS permissions"), and
+rewrites the cask's `version` and `sha256`. It deliberately stops there and prints the
+publishing commands — creating the GitHub release and pushing the tap are
+both public.
+
+## First-run setup, as a new user sees it
+
+Audited 2026-09-16 by walking a fresh install end to end rather than
+running the wizard from a dev terminal, which hides most of what follows.
+
+**Distribution: a Homebrew cask, not notarized** — see "Distribution"
+below. (An earlier note here said command-line distribution took
+notarization off the table. That holds for a `curl` install, which never
+sets the quarantine flag, but not for Homebrew, which quarantines every cask
+download; the cask handles that itself.)
+
+Fixed:
+
+- **Claude was reported as not installed for any app opened from Finder,
+  the Dock or Launchpad.** `checkClaudeAuth` ran a bare
+  `execFile("claude")` against the inherited `PATH`, and a GUI-launched app
+  gets launchd's minimal `/usr/bin:/bin:/usr/sbin:/sbin` — the native
+  installer's `~/.local/bin` isn't on it. The wizard then said *"it looks
+  like it isn't installed yet"*, and its "I've installed it" button re-ran
+  the same failing check forever: an unrecoverable loop at step one for
+  most real users. It only ever worked from a terminal, which is how it had
+  been tested. Sessions never had the problem because `agentSessions.ts`
+  already spawns `claude` with the login-shell `PATH`. The auth checks now
+  try standard install locations first (instant), fall back to the
+  login-shell `PATH` (catches nvm/npm installs, and supplies `node` for an
+  npm-installed `claude` script), and bound that fallback at 8s because
+  startup awaits this check before opening any window. Verified in a real
+  Electron main process launched with launchd's exact `PATH`.
+- **Clance never appeared in the Accessibility list.** Trust was only ever
+  *checked* (`isTrustedAccessibilityClient(false)`), which doesn't register
+  the app, so a fresh install opened System Settings to find nothing to
+  switch on. The Open Settings action now calls it with `true` first.
+- **Screen Recording had no way past macOS's restart requirement.** A newly
+  granted permission only applies after the app is quit, so a user who'd
+  already granted it was left pressing Recheck. After they've been sent to
+  System Settings, the step offers "Restart Clance" (`app.relaunch()`).
+- **Setup could not complete with the default shortcuts** — see the
+  shortcut recorder section.
+- **The agent pool wasn't warmed when the wizard finished**, only at startup
+  when setup was already complete, so the first `⌥Space` after onboarding
+  paid a cold mint.
+- **Dictation copy written for a developer.** "In a dev build, install it
+  with…" and a pointer to a Dictation-tab setup pane that no longer exists.
+  Now user-facing, with a Check again action; `whisper-cli` is also
+  resolved from standard Homebrew locations before the slow login-shell
+  lookup.
+
+Decided the same day, after the audit:
+
+- **Screen Recording is optional.** Removed from `isComplete`; the wizard
+  leads with Accessibility (the one hard requirement, since it's what lets
+  Clance type and click) and offers "Continue without Screen Recording".
+  `look_at_screen` now states that the permission is off and how to enable
+  it, instead of guessing.
+- **`⌥D` is claimed only once a speech model is installed** — see
+  `dictation.md`.
+- **Dictation is an optional final wizard step**, leading with the one
+  recommended model.
+- **The speech engine is Homebrew's `whisper.cpp`**, not a bundled binary —
+  see `dictation.md` §"Engine distribution".
+
 ## Shortcut recorder
 
 Global shortcuts are set by pressing the keys, not by typing an accelerator
@@ -1507,6 +1667,20 @@ see `docs/background-agent-architecture.md`.
   - Custom tools, hooks, and subagents remain deferred as before.
 
 ## Open questions (resolve before building)
+
+- [x] **Should Screen Recording be required to finish setup?** **Resolved
+      2026-09-16: no.** Since nothing is captured automatically, declining
+      it only costs `look_at_screen` and the screenshot in ⌘⇧R; requiring
+      it cost a privacy-minded user the entire app.
+- [x] **Should `⌥D` be registered before dictation is set up?** **Resolved
+      2026-09-16: no** — only once a speech model is installed, so users who
+      never enable dictation keep ⌥D for their terminal and editor.
+- [x] **Should dictation be offered in the first-run wizard?** **Resolved
+      2026-09-16: yes, as an optional last step** leading with the
+      recommended model.
+- [x] **How does the speech engine ship?** **Resolved 2026-09-16:
+      Homebrew's `whisper.cpp` as a dependency.** Bundling is removed; see
+      `dictation.md` §"Engine distribution".
 
 - [ ] Exact Claude Code CLI JSONL schema — need to inspect a real session
       file to confirm event/message structure before writing compatible

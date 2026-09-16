@@ -90,12 +90,22 @@ Considered and rejected:
 - **Cloud STT.** Violates the local-first principle in
   `requirements.md`. Non-starter; audio never leaves the device.
 
-**Binary distribution: bundle a prebuilt `arm64` `whisper-cli` as an
-`extraResources` entry; download only model weights at runtime.** This
-keeps the "install" the user presses to a weights download (which is what
-they actually expect to wait on) and keeps executable code inside the
-signed app bundle rather than fetched at runtime. A build-time script
-compiles or fetches the binary; it is not committed to the repo.
+**Engine distribution: Homebrew's `whisper.cpp`, not bundled.** Decided
+2026-09-16, superseding an earlier plan to ship a static `arm64`
+`whisper-cli` inside the app via `extraResources`. Clance is distributed
+as a Homebrew cask, which declares `depends_on formula: "whisper.cpp"`, so
+Homebrew installs the engine and model weights are the only thing
+downloaded at runtime.
+
+Why the change: the bundling path needed `cmake` and a from-source static
+build before every release, and was fragile in a way that went unnoticed —
+electron-builder only *warns* `file source doesn't exist` when the
+resource directory is missing, so `npm run dist` silently produced an app
+whose dictation was dead. It would also have meant signing a second native
+executable inside the bundle. `resolveWhisperBinary` checks the standard
+Homebrew locations first (instant) and then the login-shell `PATH`. The
+bundling script, `extraResources` entry and `fetch:whisper` npm script are
+removed.
 
 Downloading weights *is* a network call, and this doc should not pretend
 otherwise — it's a one-time fetch from Hugging Face over HTTPS, verified
@@ -143,10 +153,19 @@ wrapper module — swapping engines later is a one-file change.
 - Auto-stop on sustained silence (default ~1.5s of sub-threshold RMS), and
   a hard cap on utterance length (default 5 min) so a forgotten recording
   can't grow unbounded in memory.
-- Dictation's shortcut **must not be gated on Claude auth.** Today
-  `registerAllHotkeys` only runs when `getSetupStatus().isComplete`, which
-  requires `claude` installed *and* logged in. Dictation touches nothing
-  Claude-related; gating it that way would be wrong.
+- Dictation's shortcut **must not be gated on Claude auth** — dictation
+  touches nothing Claude-related.
+- **It is gated on a speech model being installed** (2026-09-16). Claimed
+  unconditionally, `⌥D` was taken system-wide from first launch for every
+  user — kill-word in a terminal with Option-as-Meta, ∂ in a text field —
+  including people who never set dictation up. It's now registered once any
+  model is installed, re-registered the moment an install completes, and
+  released when the last model is removed. Keyed off *any* installed model
+  rather than the active one so it can't race `reconcileActiveModel`, and
+  held down while a shortcut is being recorded.
+- **Offered during onboarding** as an optional last wizard step, leading
+  with the single recommended model rather than the whole catalog, with the
+  microphone permission alongside and a "Skip for now".
 
 ### Recording HUD
 
@@ -458,10 +477,9 @@ much the above is worth:
   lacks the /t/. Real-voice validation is still outstanding — the only
   Phase 0 question not closed.
 - `whisper.cpp` from Homebrew links shared `ggml`/`llama.cpp` libraries.
-  Fine for measurement; the shipped binary needs to be self-contained, so
-  Phase 1's build script must produce a static `whisper-cli`, and its
-  timings should be re-confirmed once (no reason to expect a change, but
-  it's a different binary).
+  That was a problem for the original plan to bundle a static binary; it
+  isn't one now that Homebrew's `whisper.cpp` *is* the shipped engine, and
+  it means these measurements were taken on the exact binary users run.
 
 Reproduce: `bench.sh` / `bench2.sh` from this spike are scratch scripts,
 deliberately not committed. Models are cached in `~/.clance/models/`,
@@ -471,8 +489,9 @@ which is already the path Phase 1 will read from.
 
 The goal was one working path: shortcut → speak → text appears.
 
-- `scripts/fetch-whisper-binary.sh` — build/fetch `whisper-cli` arm64;
-  wire into `package.json` `build.extraResources`.
+- ~~`scripts/fetch-whisper-binary.sh` — build/fetch a static `whisper-cli`
+  into `build.extraResources`~~ — built, then **removed 2026-09-16** in
+  favour of Homebrew's `whisper.cpp` (see "Engine distribution" above).
 - `src/main/whisperModels.ts` — catalog, spec detection, recommendation,
   download + SHA-256 verify + atomic install, removal, "what's installed".
   **Ends every install with a throwaway inference to force the 18.2 s
@@ -671,6 +690,47 @@ recording now opens the main window, which takes focus, so the transcript
 pastes there rather than into the app you started in. Deliberate — the
 Dock click is an explicit request for the app — but worth knowing.
 
+### Setup and model-install cleanup (2026-09-16)
+
+Four defects in the setup and download paths, found by auditing them rather
+than by hitting them:
+
+- **Setup could never complete with the default shortcuts.**
+  `shortcutsConfigured` is set only by `setup:save-shortcuts`, and
+  `setupStatus.isComplete` depends on it — but the rewritten
+  `ShortcutsStep` wizard called `onComplete()` directly, so a user who
+  accepted the defaults never set the flag and the wizard reappeared on
+  every launch. Continue now persists the current values first. (A
+  regression introduced by the shortcut-recorder rewrite.)
+- **Cancelling an install left a dangling active model.** `installModel`
+  swallowed the abort and resolved exactly like a success, so the handler
+  went on to set `activeModel` to a model with no file on disk — dictation
+  then reported "no model installed" while the config claimed one was
+  active. It now returns `"installed" | "cancelled"` and activation is
+  gated on the former.
+- **Install progress was lost if the view went away.** Progress was pushed
+  only to the requesting window, so reopening Settings mid-download showed
+  an Install button that then failed with "already downloading". Progress
+  is now broadcast to all windows, and `getActiveInstalls()` /
+  `dictation:active-installs` lets a freshly-mounted pane re-attach to a
+  download already running.
+- **No disk pre-flight.** The *recommendation* accounts for free space, but
+  a model chosen by hand didn't, so a 574MB download onto a nearly-full
+  volume failed partway with a vague error. Checked up front against the
+  remaining bytes plus a 200MB margin.
+
+Also added a real progress bar — a percentage buried in the metadata line
+doesn't read as "working" for a half-gigabyte download — which pulses at
+full width during the verify and Metal warm-up phases, since neither has
+measurable progress.
+
+Resumability was claimed in comments but never verified. It does work:
+seeding a partial file and re-installing resumes from that offset (Range
+honoured), and an oversized — therefore corrupt — partial is discarded and
+restarted rather than Range-requested from. Both now covered by a check,
+since a mid-download cancel turned out to be an unreliable way to produce a
+partial (tiny.en finishes in under four seconds).
+
 ### No emoji in the UI (2026-09-16)
 
 A speaker glyph was appearing in dictation history, as "into New Tab 🔊".
@@ -823,20 +883,16 @@ promoted the seeding itself into Phase 1). The rest below is untouched.
       synthesized with `say`, so absolute accuracy is unverified — this is
       the one Phase 0 question still open, and it needs a human to record
       a few utterances.
-- [ ] Ship the `whisper-cli` binary prebuilt in the bundle, or build it on
-      first use? Bundling is the better UX and keeps code inside the signed
-      bundle, but adds a build-time dependency and grows the app; it also
-      forces the hardened-runtime question below. Phase 0 adds a
-      constraint either way: the Homebrew build links shared `ggml` and
-      `llama.cpp` libraries, so whatever path is chosen must produce a
-      **statically linked** `whisper-cli` rather than one that assumes
-      Homebrew is present on the user's machine. (`cmake` is also not
-      installed on this dev machine — a from-source build adds that too.)
-- [ ] Hardened runtime and entitlements. `scripts/dev-packaged.sh`
-      deliberately signs without `--options runtime` today. A bundled
-      native binary plus mic access will eventually need
-      `com.apple.security.device.audio-input` and a real entitlements
-      file. Worth deciding before Phase 1 ships, not after.
+- [x] Ship the `whisper-cli` binary prebuilt in the bundle, or build it on
+      first use? **Resolved 2026-09-16: neither — Homebrew's
+      `whisper.cpp` is a dependency.** Command-line distribution makes that
+      the simplest path, and it removes the static-build, `cmake` and
+      second-signed-binary problems this question was weighing.
+- [x] Hardened runtime and entitlements. **Moot for now (2026-09-16):**
+      with command-line distribution there's no notarization, so hardened
+      runtime isn't required, and no native engine binary is bundled.
+      `com.apple.security.device.audio-input` becomes necessary only if the
+      app is ever notarized.
 - [ ] History retention: unbounded, or a configurable cap / auto-prune?
 - [ ] Should a dictated transcript be *editable* in the HUD before it's
       inserted (a confirm step), or always inserted immediately with

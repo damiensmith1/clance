@@ -181,6 +181,7 @@ export function ShortcutsStep({ onComplete } = {}) {
   const [liveGlyphs, setLiveGlyphs] = useState([]);
   const [error, setError] = useState(null);
   const [savedId, setSavedId] = useState(null);
+  const [confirming, setConfirming] = useState(false);
   const recordingRef = useRef(null);
 
   useEffect(() => {
@@ -311,6 +312,26 @@ export function ShortcutsStep({ onComplete } = {}) {
     window.clanceApp.setShortcutCapture(true);
   }
 
+  // The wizard's Continue has to *save*, even when nothing was changed:
+  // `shortcutsConfigured` is only set by setup:save-shortcuts, and
+  // setupStatus.isComplete depends on it. Calling onComplete() directly
+  // meant a user who accepted the defaults never set that flag, so setup
+  // never completed and the wizard reappeared on every launch.
+  function confirmAndContinue() {
+    setConfirming(true);
+    setError(null);
+    window.clanceApp
+      .saveShortcuts(values)
+      .then(() => {
+        setConfirming(false);
+        onComplete();
+      })
+      .catch((err) => {
+        setConfirming(false);
+        setError(err && err.message ? err.message : "Couldn't save those shortcuts.");
+      });
+  }
+
   if (actions === null) {
     return html`<p class="empty-note">Loading…</p>`;
   }
@@ -370,7 +391,9 @@ export function ShortcutsStep({ onComplete } = {}) {
       ${rows}
       ${!recordingId && error && html`<p class="setup-error">${error}</p>`}
       <div class="setup-step-actions">
-        <button onClick=${onComplete}>Continue</button>
+        <button disabled=${confirming} onClick=${confirmAndContinue}>
+          ${confirming ? "Saving…" : "Continue"}
+        </button>
       </div>
     </div>
   `;

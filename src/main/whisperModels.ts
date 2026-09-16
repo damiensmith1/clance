@@ -14,7 +14,6 @@ import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 import { join } from "path";
 import { promisify } from "util";
-import { app } from "electron";
 import { SESSION_CWD } from "./paths";
 import { getLoginShellPath } from "./ptyManager";
 
@@ -226,25 +225,32 @@ export async function recommendModel(): Promise<Recommendation> {
 let cachedBinary: string | undefined;
 
 /**
- * The `whisper-cli` binary. Prefers the copy bundled into the app (see
- * scripts/fetch-whisper-binary.sh and package.json's extraResources),
- * falling back to one on the user's login-shell PATH — which is how a dev
- * build finds a Homebrew install. Returns undefined if neither exists, so
- * callers can surface "not installed" instead of a spawn error.
+ * The `whisper-cli` binary, provided by Homebrew's `whisper.cpp`.
+ *
+ * Not bundled into the app. Clance is distributed from the command line, so
+ * the engine is a Homebrew dependency rather than a static binary built
+ * with cmake and shipped inside the bundle (decided 2026-09-16 — see
+ * docs/dictation.md). Returns undefined when it isn't installed, so callers
+ * can surface that instead of a spawn error.
  */
 export async function resolveWhisperBinary(): Promise<string | undefined> {
   if (cachedBinary) return cachedBinary;
 
-  const bundled = join(process.resourcesPath ?? "", "whisper", "whisper-cli");
-  if (existsSync(bundled)) {
-    cachedBinary = bundled;
-    return cachedBinary;
+  // Standard Homebrew locations first. Found here, there's no need to wait
+  // on the login-shell PATH below — which runs an interactive shell and can
+  // take many seconds on a first launch — just to locate a binary that lives
+  // somewhere entirely predictable.
+  for (const candidate of ["/opt/homebrew/bin/whisper-cli", "/usr/local/bin/whisper-cli"]) {
+    if (existsSync(candidate)) {
+      cachedBinary = candidate;
+      return cachedBinary;
+    }
   }
 
-  // Dev fallback. GUI-launched apps inherit launchd's minimal PATH, so this
+  // Anything else. GUI-launched apps inherit launchd's minimal PATH, so this
   // has to go through the same resolved login-shell PATH that ptyManager
   // uses to find `claude` — plain `which` against process.env.PATH would
-  // miss a Homebrew install in a packaged-but-unsigned dev run.
+  // miss it.
   try {
     const path = await getLoginShellPath();
     const { stdout } = await execFileAsync("/usr/bin/which", ["whisper-cli"], {
@@ -273,6 +279,16 @@ export type DownloadProgress = {
 };
 
 const activeDownloads = new Map<string, AbortController>();
+// Last progress emitted per in-flight download. Progress arrives as IPC
+// pushes, which a renderer that wasn't mounted at the time never saw — so
+// a UI opening mid-download needs to be able to *ask* what's happening
+// rather than infer "not installed, show Install".
+const inFlightProgress = new Map<string, DownloadProgress>();
+
+/** Snapshot of every download currently running. */
+export function getActiveInstalls(): DownloadProgress[] {
+  return [...inFlightProgress.values()];
+}
 
 function sha256File(path: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -292,10 +308,12 @@ function sha256File(path: string): Promise<string> {
  * from zero. Verified by SHA-256 *before* being moved into place, and moved
  * with a rename, so `isModelInstalled` can never see a partial file.
  */
+export type InstallOutcome = "installed" | "cancelled";
+
 export async function installModel(
   modelId: string,
   onProgress: (p: DownloadProgress) => void
-): Promise<void> {
+): Promise<InstallOutcome> {
   const model = findModel(modelId);
   if (!model) throw new Error(`Unknown model: ${modelId}`);
   if (activeDownloads.has(modelId)) throw new Error(`${model.label} is already downloading.`);
@@ -306,6 +324,13 @@ export async function installModel(
 
   const controller = new AbortController();
   activeDownloads.set(modelId, controller);
+
+  // Wraps the caller's callback so the latest progress is always queryable
+  // via getActiveInstalls, not just pushed once and forgotten.
+  const report = (progress: DownloadProgress) => {
+    inFlightProgress.set(modelId, progress);
+    onProgress(progress);
+  };
 
   try {
     let alreadyHave = 0;
@@ -319,6 +344,20 @@ export async function installModel(
       // Range request from there would hang or 416 rather than recover.
       rmSync(partial, { force: true });
       alreadyHave = 0;
+    }
+
+    // Pre-flight the disk before pulling hundreds of megabytes. The
+    // recommendation already accounts for free space, but a model chosen
+    // by hand doesn't go through that, and running out mid-download leaves
+    // a partial file and a vague network-ish error.
+    const remaining = model.bytes - alreadyHave;
+    const { freeDiskBytes } = await detectMachine();
+    if (freeDiskBytes > 0 && freeDiskBytes < remaining + 200 * 1024 * 1024) {
+      throw new Error(
+        `Not enough free disk space — ${model.label} needs ` +
+          `${Math.ceil(remaining / 1024 ** 2)} MB and only ` +
+          `${Math.floor(freeDiskBytes / 1024 ** 2)} MB is available.`
+      );
     }
 
     if (alreadyHave < model.bytes) {
@@ -338,7 +377,7 @@ export async function installModel(
       const resuming = response.status === 206;
       let received = resuming ? alreadyHave : 0;
 
-      onProgress({
+      report({
         modelId,
         receivedBytes: received,
         totalBytes: model.bytes,
@@ -353,7 +392,7 @@ export async function installModel(
         // report crosses an IPC boundary into the renderer.
         if (received - lastReport > 2_000_000) {
           lastReport = received;
-          onProgress({
+          report({
             modelId,
             receivedBytes: received,
             totalBytes: model.bytes,
@@ -365,7 +404,7 @@ export async function installModel(
       await pipeline(source, createWriteStream(partial, { flags: resuming ? "a" : "w" }));
     }
 
-    onProgress({ modelId, receivedBytes: model.bytes, totalBytes: model.bytes, phase: "verifying" });
+    report({ modelId, receivedBytes: model.bytes, totalBytes: model.bytes, phase: "verifying" });
     const digest = await sha256File(partial);
     if (digest !== model.sha256) {
       rmSync(partial, { force: true });
@@ -378,22 +417,30 @@ export async function installModel(
     // machine compiles shaders for ~18s. Paying that here, while the
     // install UI is still on screen and the user expects to be waiting,
     // means the first real dictation doesn't look like a 18-second hang.
-    onProgress({ modelId, receivedBytes: model.bytes, totalBytes: model.bytes, phase: "warming" });
+    report({ modelId, receivedBytes: model.bytes, totalBytes: model.bytes, phase: "warming" });
     await warmUpModel(modelId);
 
-    onProgress({ modelId, receivedBytes: model.bytes, totalBytes: model.bytes, phase: "done" });
+    report({ modelId, receivedBytes: model.bytes, totalBytes: model.bytes, phase: "done" });
+    return "installed";
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    onProgress({
+    const cancelled = controller.signal.aborted;
+    report({
       modelId,
       receivedBytes: 0,
       totalBytes: model.bytes,
       phase: "error",
-      message: controller.signal.aborted ? "Download cancelled." : message,
+      message: cancelled ? "Download cancelled." : message,
     });
-    if (!controller.signal.aborted) throw error;
+    // A cancel is a normal outcome, not a failure — but the caller has to
+    // be able to tell the difference. It previously resolved exactly like a
+    // successful install, so cancelling the first-ever download still made
+    // that model "active" with no file on disk.
+    if (!cancelled) throw error;
+    return "cancelled";
   } finally {
     activeDownloads.delete(modelId);
+    inFlightProgress.delete(modelId);
   }
 }
 
@@ -470,7 +517,6 @@ export async function listModels(activeModelId: string | null): Promise<{
   models: ModelStatus[];
   recommendation: Recommendation;
   binaryAvailable: boolean;
-  packaged: boolean;
 }> {
   const [recommendation, binary] = await Promise.all([recommendModel(), resolveWhisperBinary()]);
   return {
@@ -481,6 +527,5 @@ export async function listModels(activeModelId: string | null): Promise<{
     })),
     recommendation,
     binaryAvailable: Boolean(binary),
-    packaged: app.isPackaged,
   };
 }

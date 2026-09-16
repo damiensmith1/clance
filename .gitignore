@@ -5,4 +5,3 @@ release/
 .DS_Store
 .env
 .claude/settings.local.json
-vendor/

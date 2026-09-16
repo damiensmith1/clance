@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld("clanceApp", {
   setShortcutCapture: (capturing: boolean) =>
     ipcRenderer.invoke("setup:set-shortcut-capture", capturing),
   completeSetup: () => ipcRenderer.invoke("setup:complete"),
+  // Screen Recording only takes effect after a restart.
+  relaunchApp: () => ipcRenderer.invoke("setup:relaunch"),
   listChatSessions: () => ipcRenderer.invoke("chatHistory:list-sessions"),
   resolveOpenArgs: (sessionId: string, name: string) =>
     ipcRenderer.invoke("chatHistory:resolve-open-args", sessionId, name),
@@ -99,6 +101,9 @@ contextBridge.exposeInMainWorld("clanceApp", {
   listDictationModels: () => ipcRenderer.invoke("dictation:list-models"),
   installDictationModel: (modelId: string) =>
     ipcRenderer.invoke("dictation:install-model", modelId),
+  // Downloads outlive the view that started them; this is how a remounted
+  // settings pane finds one already running.
+  activeDictationInstalls: () => ipcRenderer.invoke("dictation:active-installs"),
   cancelDictationInstall: (modelId: string) =>
     ipcRenderer.invoke("dictation:cancel-install", modelId),
   removeDictationModel: (modelId: string) =>

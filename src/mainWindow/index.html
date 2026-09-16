@@ -711,6 +711,35 @@
         white-space: pre-wrap;
         overflow-wrap: anywhere;
       }
+      /* Model download progress. A 500MB download needs a real bar — the
+         percentage in the metadata line alone doesn't read as "working". */
+      .install-bar {
+        display: block;
+        width: 100%;
+        max-width: 260px;
+        height: 3px;
+        margin-top: 6px;
+        background: var(--surface-border);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+      .install-bar-fill {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+        border-radius: 2px;
+        transition: width 200ms linear;
+      }
+      /* Verifying and the Metal warm-up have no measurable progress, so the
+         bar pulses at full width rather than sitting frozen at 100%. */
+      .install-bar-fill-indeterminate {
+        animation: install-pulse 1.4s ease-in-out infinite;
+      }
+      @keyframes install-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.35; }
+      }
+
       /* Copy is the only per-row action, so it's an icon rather than a text
          button — it doesn't need to compete with the transcript for
          attention. */
@@ -1299,6 +1328,24 @@
       }
       .setup-step .btn-secondary:hover {
         background: var(--surface-hover);
+      }
+      .setup-optional {
+        margin-left: 8px;
+        font-family: var(--font-sans);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+        vertical-align: middle;
+        color: var(--text-secondary);
+      }
+      .setup-hint {
+        font-size: 12.5px;
+        color: var(--text-secondary);
+        margin: 6px 0 2px;
+      }
+      .setup-hint .btn-link {
+        margin-left: 4px;
       }
       .setup-error {
         color: var(--danger);
