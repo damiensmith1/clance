@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld("clanceApp", {
   completeSetup: () => ipcRenderer.invoke("setup:complete"),
   // Screen Recording only takes effect after a restart.
   relaunchApp: () => ipcRenderer.invoke("setup:relaunch"),
+  getAppVersion: () => ipcRenderer.invoke("app:get-version"),
+  checkForUpdates: () => ipcRenderer.invoke("app:check-for-updates"),
+  openReleasePage: (url: string) => ipcRenderer.invoke("app:open-release-page", url),
   listChatSessions: () => ipcRenderer.invoke("chatHistory:list-sessions"),
   resolveOpenArgs: (sessionId: string, name: string) =>
     ipcRenderer.invoke("chatHistory:resolve-open-args", sessionId, name),

@@ -902,6 +902,28 @@ rewrites the cask's `version` and `sha256`. It deliberately stops there and prin
 publishing commands — creating the GitHub release and pushing the tap are
 both public.
 
+**Updates: Clance checks, Homebrew installs** (decided 2026-09-16). The
+Settings footer's Check for Updates (`src/main/updates.ts`) asks GitHub's
+`/releases/latest` for the newest tag and compares it with
+`app.getVersion()`, which also replaced the footer's hardcoded "v0.1.0". A
+newer release shows the version, `brew upgrade --cask clance` with a Copy
+button, and a link to the release notes. Opening a link is restricted to
+this repo's releases pages. Clance deliberately doesn't install updates
+itself — no electron-updater, no running `brew` in the background:
+- **An app that replaces itself desyncs Homebrew.** Homebrew's install
+  record still names the old version, so the next `brew upgrade` or
+  `brew install` fails with "It seems the App source
+  '/Applications/Clance.app' is not there" — hit twice on 2026-09-16 after
+  trashing the app by hand.
+- **Running `brew upgrade` from inside Clance** would work (Homebrew quits
+  the app, swaps it and reopens it), but Clance has already quit by the
+  time anything can fail, so the user couldn't see why.
+The check is manual only. It's unauthenticated, so GitHub allows 60
+requests an hour, which a button can't realistically exceed; a rate-limit
+response gets its own message. Verified against the live release with the
+app version set to 0.1.1 (reports 0.1.2 available), 0.1.2 and 0.2.0 (both
+up to date).
+
 ## First-run setup, as a new user sees it
 
 Audited 2026-09-16 by walking a fresh install end to end rather than

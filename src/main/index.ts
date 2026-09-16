@@ -11,6 +11,7 @@ import {
   sessionMcpArgs,
 } from "./popupWindow";
 import { openMainWindow, openSessionInMainWindow } from "./mainWindow";
+import { checkForUpdates, openReleasePage } from "./updates";
 import { createAppMenu } from "./appMenu";
 import { ensureSessionCwd, SESSION_CWD } from "./paths";
 import { getSetupStatus } from "./setupStatus";
@@ -299,6 +300,12 @@ ipcMain.handle("setup:relaunch", () => {
   app.relaunch();
   app.exit(0);
 });
+
+// The version electron-builder stamped into the bundle (package.json's
+// "version"), so the Settings footer can't drift from the release.
+ipcMain.handle("app:get-version", () => app.getVersion());
+ipcMain.handle("app:check-for-updates", () => checkForUpdates());
+ipcMain.handle("app:open-release-page", (_event, url: string) => openReleasePage(url));
 
 ipcMain.handle("chatHistory:list-sessions", () => listSessions());
 

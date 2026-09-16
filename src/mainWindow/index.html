@@ -760,14 +760,27 @@
          on one row beneath the search box. */
       .dictation-filters {
         display: flex;
-        align-items: center;
+        /* Baseline, not center: the chips carry underline padding below
+           their text, so centring put "Delete all" visibly lower than them. */
+        align-items: baseline;
         flex-wrap: wrap;
         gap: 12px;
         margin: 14px 0 6px;
       }
+      /* The filters belong to the search box, so they sit close under it
+         rather than after the Chats page's full section gap. */
+      .search-row:has(+ .dictation-filters) {
+        margin-bottom: 0;
+      }
+      /* The "isn't ready" notice is its own block above the history. */
+      .dictation-notice {
+        margin-bottom: 32px;
+      }
       /* Lighter than the page-level .segmented: these are filters, not
-         navigation, so they shouldn't carry a full-width underline. */
-      .segmented-compact {
+         navigation, so they shouldn't carry a full-width underline. Two
+         classes because .segmented is declared later in this sheet and
+         would otherwise win, restoring its underline, 24px margin and gap. */
+      .segmented.segmented-compact {
         gap: 14px;
         border-bottom: none;
         margin-bottom: 0;
@@ -1266,6 +1279,28 @@
         font-size: 12px;
         font-style: italic;
         color: var(--text-secondary);
+      }
+
+      .update-check {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+      .update-available {
+        font-style: normal;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+      .update-command {
+        font-style: normal;
+        font-size: 11.5px;
+        padding: 2px 6px;
+        border-radius: var(--radius-sm);
+        background: var(--surface-hover);
+        color: var(--text-primary);
+      }
+      .settings-footer .btn-link {
+        font-style: normal;
       }
 
       /* ---- Setup wizard (first-run flow, distinct from Settings) ---- */

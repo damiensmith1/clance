@@ -235,7 +235,7 @@ export function DictationSection({ onOpenSettings }) {
 
       ${availability && !availability.ready
         ? html`
-            <div class="status-card status-card-warn">
+            <div class="status-card status-card-warn dictation-notice">
               <span class="status-card-icon">${Icon.warningTriangle(18)}</span>
               <span class="status-card-body">
                 <span class="status-card-title">Dictation isn't ready yet</span>
