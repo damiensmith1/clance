@@ -6,6 +6,7 @@ export function PermissionsStep({ onComplete } = {}) {
   // The restart hint only appears once the user has actually been sent to
   // System Settings — before that it would just be noise.
   const [openedScreenSettings, setOpenedScreenSettings] = useState(false);
+  const [openedAccessibilitySettings, setOpenedAccessibilitySettings] = useState(false);
 
   function refresh() {
     return window.clanceApp.recheckPermissions().then((s) => {
@@ -59,8 +60,20 @@ export function PermissionsStep({ onComplete } = {}) {
         title="Accessibility"
         description="Lets Clance type, click, or edit fields in other apps on your behalf."
         actionLabel=${status.accessibility ? null : "Open Settings"}
-        onAction=${() => window.clanceApp.openAccessibilitySettings()}
+        onAction=${() => {
+          setOpenedAccessibilitySettings(true);
+          window.clanceApp.openAccessibilitySettings();
+        }}
       />
+      ${!status.accessibility && openedAccessibilitySettings
+        ? html`
+            <p class="setup-hint">
+              Already switched on but still showing here? After Clance is reinstalled, macOS
+              can keep an old entry that no longer applies. Select Clance in that list, remove
+              it with the − button, then click Open Settings again.
+            </p>
+          `
+        : null}
       <${StatusCard}
         ok=${status.screenRecording}
         title="Screen Recording (optional)"

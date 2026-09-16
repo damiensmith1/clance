@@ -867,9 +867,23 @@ the zip served over local HTTP, into a scratch appdir under the home folder
 (the harder case): `brew style` clean; Homebrew quarantined the download
 (agent `Homebrew Cask`); the installed bundle had zero quarantine
 attributes; `codesign --verify --deep --strict` still passed afterwards;
-`whisper.cpp` resolved as a dependency. `brew audit` fails until the first
-release exists (the release URL 404s and livecheck finds no version), which
-is expected.
+`whisper.cpp` resolved as a dependency.
+
+**Published 2026-09-16:** release `v0.1.0` on `damiensmith1/clance` carries
+the zip, and the tap is `github.com/damiensmith1/homebrew-tap`
+(`Casks/clance.rb`). Against the live setup, `brew style` is clean and
+`brew audit --cask --online` passes — it failed before the release existed,
+on the 404 and on livecheck finding no version. The anonymously downloaded
+asset's SHA-256 matches the cask.
+
+**Publishing was preceded by a security review**, since both repos are
+public: the staged diff, the entire git history (API keys, GitHub/AWS/Slack
+tokens, private keys — zero hits), and the release zip itself (no
+credential files, no personal paths, no organisation references; the one
+"BEGIN PRIVATE KEY" string is a prefix check inside the `jose` library).
+The signing scripts are safe to publish: they expose the method, not the
+key, and anyone reusing them gets a certificate with a different hash, so
+their builds can't match Clance's identity or inherit users' permissions.
 
 **Releasing:** `sh scripts/release.sh` builds
 `release/Clance-<version>-arm64.zip`, signed with the self-signed "Clance
@@ -938,6 +952,27 @@ Decided the same day, after the audit:
   recommended model.
 - **The speech engine is Homebrew's `whisper.cpp`**, not a bundled binary —
   see `dictation.md` §"Engine distribution".
+
+Found on the first real `brew install` (2026-09-16):
+
+- **Permissions granted to an earlier build look on but don't apply.** The
+  machine still had Accessibility / Screen Recording / Microphone entries
+  from builds signed with the old organisation certificate; the self-signed
+  release fails that stored requirement, so System Settings showed Clance
+  switched on while every check read it as off. Resetting the entries
+  (`tccutil reset Accessibility dev.damiensmith.clance`, likewise
+  `ScreenCapture` and `Microphone`) and granting again fixed it. A user
+  can't be expected to know `tccutil`, so once they've been sent to
+  Accessibility settings the step now says to remove Clance's entry with
+  the − button and click Open Settings again. This is a one-time cost of
+  the certificate change; later releases keep the same identity.
+- **Link buttons and hints in the wizard rendered as filled orange buttons
+  and body-size text.** `.setup-step button` / `.setup-step p` (element +
+  class) outrank a lone component class like `.btn-link`, `.shortcut-field`
+  or `.setup-hint`. Those classes now have `.setup-step`-scoped rules. Each
+  permission hint also sits inside its card's row — indented under the
+  title, divider below it — instead of floating between two cards with no
+  space before the next one.
 
 ## Shortcut recorder
 
