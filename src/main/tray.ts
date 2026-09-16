@@ -1,10 +1,14 @@
 import { Tray, Menu, app, nativeImage } from "electron";
+import { join } from "path";
 
 export function createTray(onTogglePopup: () => void, onOpenMainWindow: () => void): Tray {
-  // No app icon asset yet — empty image + a text title renders as a plain
-  // menu-bar label until real artwork lands.
-  const tray = new Tray(nativeImage.createEmpty());
-  tray.setTitle("Clance");
+  // The logo as a template image: black on transparent, which macOS recolours
+  // for light/dark menu bars and the highlighted state. Loading the 1x file
+  // picks up trayTemplate@2x.png automatically on Retina displays. Strokes
+  // are heavier than the full-size logo so it stays legible at 18pt.
+  const icon = nativeImage.createFromPath(join(__dirname, "../shared/brand/trayTemplate.png"));
+  icon.setTemplateImage(true);
+  const tray = new Tray(icon);
   tray.setToolTip("Clance");
 
   const menu = Menu.buildFromTemplate([
@@ -25,5 +29,5 @@ let trayRef: Tray | null = null;
 // user can see the microphone is live regardless of which display the HUD
 // opened on, or whether a full-screen app is covering it.
 export function setTrayRecording(recording: boolean): void {
-  trayRef?.setTitle(recording ? "● Clance" : "Clance");
+  trayRef?.setTitle(recording ? "●" : "");
 }

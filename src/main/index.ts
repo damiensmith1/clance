@@ -1,4 +1,5 @@
 import { app, ipcMain, Menu, BrowserWindow } from "electron";
+import { join } from "path";
 import { createTray } from "./tray";
 import { registerHotkey, unregisterAllHotkeys, isValidAccelerator } from "./hotkey";
 import {
@@ -87,6 +88,11 @@ import {
 } from "./dictationStore";
 
 app.dock?.show();
+// A packaged build gets its Dock icon from the bundle (build.mac.icon); a dev
+// run is Electron's own bundle, so set it at runtime.
+if (!app.isPackaged) {
+  app.dock?.setIcon(join(__dirname, "../../packaging/icon.png"));
+}
 
 async function handleTrayPopupClick(): Promise<void> {
   const status = await getSetupStatus();

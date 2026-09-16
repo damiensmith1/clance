@@ -166,3 +166,31 @@ export const Icon = {
 
   arrowUp: (size = 16) => svg(size, html`<path d="M12 19V5M5 12l7-7 7 7" />`),
 };
+
+// The Clance mark (packaging/clance-logo.svg), cropped to its bounds and
+// coloured with currentColor so it follows the surrounding text in both
+// themes. Filled/stroked shapes rather than a <text> "C", so it renders the
+// same without any particular font installed.
+export function Logo(size = 24) {
+  return html`
+    <svg
+      class="clance-logo"
+      width=${size}
+      height=${size}
+      viewBox="12 29 416 416"
+      fill="currentColor"
+      stroke="currentColor"
+      role="img"
+      aria-label="Clance"
+    >
+      <rect x="31.5" y="48.5" width="377" height="294" rx="28" fill="none" stroke-width="19.5" />
+      <path d="M80.75 145.75L129.25 194.25L80.25 243.25" fill="none" stroke-width="19.5" />
+      <rect x="137.75" y="257.75" width="75" height="18" stroke="none" />
+      <path
+        d="M366.26 168.25A71.5 81 0 1 0 366.26 218.25H333.6A40 54.5 0 1 1 333.98 168.25Z"
+        stroke="none"
+      />
+      <path d="M135.75 391.25H303.75" fill="none" stroke-width="19.5" stroke-linecap="round" />
+    </svg>
+  `;
+}

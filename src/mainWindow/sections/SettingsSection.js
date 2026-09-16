@@ -4,6 +4,7 @@ import { ConnectClaudeStep } from "../setup/ConnectClaudeStep.js";
 import { PermissionsStep } from "../setup/PermissionsStep.js";
 import { ShortcutsStep } from "../setup/ShortcutsStep.js";
 import { DictationStep } from "../setup/DictationStep.js";
+import { Logo } from "../../shared/icons.js";
 
 // Reports whether a newer release exists and hands the user the Homebrew
 // command to install it; see src/main/updates.ts for why Clance doesn't
@@ -95,7 +96,10 @@ export function SettingsSection() {
       </section>
 
       <footer class="settings-footer">
-        <span>${version ? `Clance v${version} · Built for macOS` : "Clance · Built for macOS"}</span>
+        <span class="settings-footer-brand">
+          ${Logo(16)}
+          <span>${version ? `Clance v${version} · Built for macOS` : "Clance · Built for macOS"}</span>
+        </span>
         <${UpdateCheck} />
       </footer>
     </div>

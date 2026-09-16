@@ -924,6 +924,34 @@ response gets its own message. Verified against the live release with the
 app version set to 0.1.1 (reports 0.1.2 available), 0.1.2 and 0.2.0 (both
 up to date).
 
+## Logo and icons
+
+Added 2026-09-16. The mark is a monitor with a `>_C` prompt, drawn as plain
+shapes (no `<text>`, so no font dependency). The master is
+`packaging/clance-logo.svg`, traced from the source artwork by measuring its
+pixel edges (the C is a bold-grotesque bowl: 32px side stroke, 26px top,
+horizontal terminal cuts). Everything else derives from that geometry:
+
+- **App icon** — `packaging/icon.png`, 1024px on Apple's icon grid (824px
+  rounded tile inset 100px, cream gradient, soft shadow, slate mark).
+  `build.mac.icon` points at it and electron-builder generates
+  `icon.icns` with all sizes 16–1024. Dev runs are Electron's own bundle, so
+  `index.ts` calls `app.dock.setIcon()` with the same PNG when
+  `!app.isPackaged`.
+- **Menu bar** — replaces the old "Clance" text label.
+  `src/shared/brand/trayTemplate.png` (18px) and `@2x` (36px) are black on
+  transparent and loaded as a template image, so macOS recolours them for
+  light and dark menu bars. The strokes are heavier than the master (36 vs
+  19.5 units, thicker C) because the master's strokes fall below a pixel at
+  18pt. While recording, the tray title shows "●" beside the icon, where it
+  used to read "● Clance".
+- **In the UI** — `Logo(size)` in `src/shared/icons.js` is the master mark
+  using `currentColor`, so it follows the theme. It sits above each setup
+  wizard step (44px, aligned with the step heading) and beside the version
+  in the Settings footer (16px). The tab bar and popup were left alone: the
+  launcher icons already fill that space, and the Dock and menu bar carry the
+  brand there.
+
 ## First-run setup, as a new user sees it
 
 Audited 2026-09-16 by walking a fresh install end to end rather than

@@ -1281,6 +1281,14 @@
         color: var(--text-secondary);
       }
 
+      .settings-footer-brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .settings-footer-brand .clance-logo {
+        flex-shrink: 0;
+      }
       .update-check {
         display: flex;
         align-items: baseline;
@@ -1311,6 +1319,20 @@
         height: 100vh;
         padding: 32px;
         box-sizing: border-box;
+      }
+      /* Fixed-width column so the logo lines up with each step's left-aligned
+         heading, whichever step is showing. */
+      .setup-frame {
+        width: 440px;
+        max-width: 100%;
+      }
+      .setup-logo {
+        display: block;
+        margin-bottom: 20px;
+        color: var(--text-primary);
+      }
+      .setup-logo .clance-logo {
+        display: block;
       }
       .setup-step {
         max-width: 440px;

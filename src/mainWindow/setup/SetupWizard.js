@@ -3,6 +3,7 @@ import { ConnectClaudeStep } from "./ConnectClaudeStep.js";
 import { PermissionsStep } from "./PermissionsStep.js";
 import { ShortcutsStep } from "./ShortcutsStep.js";
 import { DictationStep } from "./DictationStep.js";
+import { Logo } from "../../shared/icons.js";
 
 // Dictation is last and optional: it never counts toward setup being
 // complete (see setupStatus.ts), so it can be skipped, and someone who quits
@@ -42,10 +43,13 @@ export function SetupWizard({ initialStatus }) {
 
   return html`
     <div class="setup-wizard">
-      ${step === "claude" && html`<${ConnectClaudeStep} onComplete=${advance} />`}
-      ${step === "permissions" && html`<${PermissionsStep} onComplete=${advance} />`}
-      ${step === "shortcuts" && html`<${ShortcutsStep} onComplete=${advance} />`}
-      ${step === "dictation" && html`<${DictationStep} onComplete=${advance} />`}
+      <div class="setup-frame">
+        <span class="setup-logo">${Logo(44)}</span>
+        ${step === "claude" && html`<${ConnectClaudeStep} onComplete=${advance} />`}
+        ${step === "permissions" && html`<${PermissionsStep} onComplete=${advance} />`}
+        ${step === "shortcuts" && html`<${ShortcutsStep} onComplete=${advance} />`}
+        ${step === "dictation" && html`<${DictationStep} onComplete=${advance} />`}
+      </div>
     </div>
   `;
 }
