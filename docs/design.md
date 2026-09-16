@@ -819,6 +819,16 @@ Both go through the same underlying mechanism:
   specifically to trigger that registration, then opens System Settings —
   wired to the wizard's "Grant Access" button so it only fires on an
   explicit user press, never automatically.
+  **That registration only happens once per app** (verified on macOS 26.2,
+  2026-09-16). It works by macOS showing its "would like to record this
+  computer's screen" alert, and `com.apple.universalaccessAuthWarning`
+  remembers that the alert was shown — by bundle ID and by path. Once
+  Clance's entry is gone (removed with −, or `tccutil reset ScreenCapture`),
+  a later request is refused without an alert (`tccd`: "Service
+  kTCCServiceScreenCapture does not allow prompting; returning denied") and
+  no entry is created, so Clance never reappears in the list. The only
+  way back is the list's + button. The wizard's Screen Recording hint says
+  so.
  
 ## Distribution
 
@@ -966,6 +976,9 @@ Found on the first real `brew install` (2026-09-16):
   Accessibility settings the step now says to remove Clance's entry with
   the − button and click Open Settings again. This is a one-time cost of
   the certificate change; later releases keep the same identity.
+  Screen Recording is different: after the reset, Clance didn't come back
+  to its list at all, because macOS only lists an app there the first time
+  it asks (see "Packaging & macOS permissions"). It has to be added with +.
 - **Link buttons and hints in the wizard rendered as filled orange buttons
   and body-size text.** `.setup-step button` / `.setup-step p` (element +
   class) outrank a lone component class like `.btn-link`, `.shortcut-field`

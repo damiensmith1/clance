@@ -87,6 +87,7 @@ export function PermissionsStep({ onComplete } = {}) {
       ${!status.screenRecording && openedScreenSettings
         ? html`
             <p class="setup-hint">
+              Clance not in the list? Click + below it and choose Clance from Applications.
               Already switched it on? macOS only applies Screen Recording after Clance
               restarts.
               <button class="btn-link" onClick=${() => window.clanceApp.relaunchApp()}>
