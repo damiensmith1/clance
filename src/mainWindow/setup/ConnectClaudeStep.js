@@ -86,10 +86,12 @@ export function ConnectClaudeStep({ onComplete } = {}) {
           Clance uses the Claude Code CLI to talk to Claude, and it looks
           like it isn't installed yet.
         </p>
-        <button onClick=${() => window.clanceApp.openInstallDocs()}>
-          See install instructions
-        </button>
-        <button onClick=${refresh}>I've installed it</button>
+        <div class="setup-step-actions">
+          <button onClick=${() => window.clanceApp.openInstallDocs()}>
+            See install instructions
+          </button>
+          <button onClick=${refresh}>I've installed it</button>
+        </div>
       </div>
     `;
   }
