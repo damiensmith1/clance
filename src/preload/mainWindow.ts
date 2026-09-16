@@ -106,13 +106,12 @@ contextBridge.exposeInMainWorld("clanceApp", {
     ipcRenderer.on("dictation:install-progress", listener);
     return () => ipcRenderer.removeListener("dictation:install-progress", listener);
   },
-  listTranscripts: (limit?: number, offset?: number) =>
-    ipcRenderer.invoke("dictation:list-transcripts", limit, offset),
-  searchTranscripts: (query: string) =>
-    ipcRenderer.invoke("dictation:search-transcripts", query),
-  deleteTranscript: (id: number) => ipcRenderer.invoke("dictation:delete-transcript", id),
-  clearTranscripts: () => ipcRenderer.invoke("dictation:clear-transcripts"),
-  dictationStats: () => ipcRenderer.invoke("dictation:stats"),
+  // `filter` is { query?, from?, to? } — see TranscriptFilter.
+  queryTranscripts: (filter: unknown, limit?: number, offset?: number) =>
+    ipcRenderer.invoke("dictation:query-transcripts", filter, limit, offset),
+  deleteTranscripts: (filter: unknown) =>
+    ipcRenderer.invoke("dictation:delete-transcripts", filter),
+  dictationStats: (filter: unknown) => ipcRenderer.invoke("dictation:stats", filter),
   requestMicrophone: () => ipcRenderer.invoke("dictation:request-microphone"),
   openMicrophoneSettings: () => ipcRenderer.invoke("dictation:open-microphone-settings"),
   onNewTranscript: (callback: (t: unknown) => void) => {

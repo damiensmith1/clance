@@ -129,72 +129,128 @@ export function addTranscript(entry: Omit<Transcript, "id">): Transcript {
   return { ...entry, id: Number(result.lastInsertRowid) };
 }
 
-export function listTranscripts(limit = 100, offset = 0): Transcript[] {
-  const database = open();
-  const rows = database
-    .prepare(
-      `SELECT * FROM transcripts ORDER BY created_at DESC LIMIT ? OFFSET ?`
-    )
-    .all(limit, offset) as Row[];
-  return rows.map(toTranscript);
-}
+export type TranscriptFilter = {
+  // Free-text search. Empty/absent means "no text filter".
+  query?: string;
+  // Inclusive epoch-ms bounds. Absent means unbounded on that side.
+  from?: number;
+  to?: number;
+};
+
+type QueryParts = { from: string; where: string; params: (string | number)[] };
 
 /**
- * Full-text search over history.
+ * Builds the FROM/WHERE shared by listing, counting, and bulk delete, so
+ * "delete everything I'm looking at" can never drift from what the list
+ * actually showed — they compile to the same predicate.
  *
- * The query is turned into a quoted prefix match per term rather than
- * passed through: FTS5's MATCH syntax treats characters users type all the
- * time (`-`, `"`, `*`, `:`, `NEAR`) as operators, so a raw query like
- * `node-pty` is a syntax error that would surface as a broken search box.
- * Quoting each term makes it a literal, and the trailing `*` keeps search
- * responsive as the user types.
+ * `fts` selects the text-matching strategy: FTS5 MATCH normally, or a LIKE
+ * scan when MATCH would throw on the user's raw input (see queryTranscripts).
  */
-export function searchTranscripts(query: string, limit = 100): Transcript[] {
-  const database = open();
-  const terms = query
-    .split(/\s+/)
-    .map((t) => t.replace(/"/g, ""))
-    .filter((t) => t.length > 0);
-  if (terms.length === 0) return listTranscripts(limit);
+function buildQuery(filter: TranscriptFilter, fts: boolean): QueryParts {
+  const clauses: string[] = [];
+  const params: (string | number)[] = [];
+  let fromSql = "transcripts t";
 
-  const matchExpr = terms.map((t) => `"${t}"*`).join(" ");
+  const terms = (filter.query ?? "")
+    .split(/\s+/)
+    .map((term) => term.replace(/"/g, ""))
+    .filter((term) => term.length > 0);
+
+  if (terms.length > 0) {
+    if (fts) {
+      fromSql = "transcripts t JOIN transcripts_fts f ON f.rowid = t.id";
+      clauses.push("transcripts_fts MATCH ?");
+      // Quoted so FTS5 treats each term as a literal — users type `-`, `"`,
+      // `*` and `NEAR` constantly and those are MATCH operators. Trailing
+      // `*` keeps search responsive while typing.
+      params.push(terms.map((term) => `"${term}"*`).join(" "));
+    } else {
+      clauses.push("t.text LIKE ?");
+      params.push(`%${filter.query}%`);
+    }
+  }
+
+  if (typeof filter.from === "number") {
+    clauses.push("t.created_at >= ?");
+    params.push(filter.from);
+  }
+  if (typeof filter.to === "number") {
+    clauses.push("t.created_at <= ?");
+    params.push(filter.to);
+  }
+
+  return {
+    from: fromSql,
+    where: clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "",
+    params,
+  };
+}
+
+// Runs `attempt` against FTS5 and falls back to a LIKE scan if MATCH
+// rejects the input, so a search box can never break on punctuation — the
+// same guard the previous searchTranscripts had, now shared by every
+// filtered operation including delete.
+function withFtsFallback<T>(filter: TranscriptFilter, attempt: (parts: QueryParts) => T): T {
   try {
-    const rows = database
-      .prepare(
-        `SELECT t.* FROM transcripts t
-           JOIN transcripts_fts f ON f.rowid = t.id
-          WHERE transcripts_fts MATCH ?
-          ORDER BY t.created_at DESC
-          LIMIT ?`
-      )
-      .all(matchExpr, limit) as Row[];
-    return rows.map(toTranscript);
+    return attempt(buildQuery(filter, true));
   } catch {
-    // Any residual MATCH-syntax surprise degrades to a plain substring
-    // scan rather than an empty result the user can't explain.
-    const rows = database
-      .prepare(
-        `SELECT * FROM transcripts WHERE text LIKE ? ORDER BY created_at DESC LIMIT ?`
-      )
-      .all(`%${query}%`, limit) as Row[];
-    return rows.map(toTranscript);
+    return attempt(buildQuery(filter, false));
   }
 }
 
-export function deleteTranscript(id: number): void {
-  open().prepare("DELETE FROM transcripts WHERE id = ?").run(id);
+/** Newest-first page of transcripts matching `filter`. */
+export function queryTranscripts(
+  filter: TranscriptFilter = {},
+  limit = 200,
+  offset = 0
+): Transcript[] {
+  const database = open();
+  return withFtsFallback(filter, ({ from, where, params }) => {
+    const rows = database
+      .prepare(
+        `SELECT t.* FROM ${from} ${where} ORDER BY t.created_at DESC LIMIT ? OFFSET ?`
+      )
+      .all(...params, limit, offset) as Row[];
+    return rows.map(toTranscript);
+  });
 }
 
-export function clearTranscripts(): void {
+/**
+ * Deletes every transcript matching `filter` and returns how many went.
+ *
+ * Deliberately filter-based rather than taking a list of ids from the
+ * renderer: the list is paginated, so "delete all of these" has to mean
+ * everything matching the filter, not just the page in view. Sharing
+ * buildQuery with queryTranscripts is what guarantees those agree.
+ *
+ * The AFTER DELETE trigger keeps the FTS index in sync, so removed
+ * transcripts stop matching searches immediately — which matters, because
+ * this is a log of things the user said out loud.
+ */
+export function deleteTranscripts(filter: TranscriptFilter = {}): number {
   const database = open();
-  database.exec("DELETE FROM transcripts");
+  return withFtsFallback(filter, ({ from, where, params }) => {
+    // Subselect rather than DELETE...JOIN: SQLite has no DELETE with a
+    // join, and the FTS virtual table can only be reached through one.
+    const result = database
+      .prepare(`DELETE FROM transcripts WHERE id IN (SELECT t.id FROM ${from} ${where})`)
+      .run(...params);
+    return Number(result.changes);
+  });
 }
 
 export type DictationStats = { count: number; totalDurationMs: number };
 
-export function transcriptStats(): DictationStats {
-  const row = open()
-    .prepare("SELECT COUNT(*) AS count, COALESCE(SUM(duration_ms), 0) AS total FROM transcripts")
-    .get() as { count: number; total: number };
-  return { count: row.count, totalDurationMs: row.total };
+/** Count and total spoken duration for whatever `filter` selects. */
+export function transcriptStats(filter: TranscriptFilter = {}): DictationStats {
+  const database = open();
+  return withFtsFallback(filter, ({ from, where, params }) => {
+    const row = database
+      .prepare(
+        `SELECT COUNT(*) AS count, COALESCE(SUM(t.duration_ms), 0) AS total FROM ${from} ${where}`
+      )
+      .get(...params) as { count: number; total: number };
+    return { count: row.count, totalDurationMs: row.total };
+  });
 }

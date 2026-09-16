@@ -78,11 +78,10 @@ import {
   DownloadProgress,
 } from "./whisperModels";
 import {
-  listTranscripts,
-  searchTranscripts,
-  deleteTranscript,
-  clearTranscripts,
+  queryTranscripts,
+  deleteTranscripts,
   transcriptStats,
+  TranscriptFilter,
 } from "./dictationStore";
 
 app.dock?.show();
@@ -554,21 +553,24 @@ ipcMain.handle("dictation:set-active-model", (_event, modelId: string) => {
   return config.dictation;
 });
 
-ipcMain.handle("dictation:list-transcripts", (_event, limit?: number, offset?: number) =>
-  listTranscripts(limit, offset)
+// One filtered query rather than separate list/search handlers: the text
+// filter and the date range are the same predicate, and the bulk delete
+// below has to be able to reuse it exactly.
+ipcMain.handle(
+  "dictation:query-transcripts",
+  (_event, filter: TranscriptFilter = {}, limit?: number, offset?: number) =>
+    queryTranscripts(filter, limit, offset)
 );
 
-ipcMain.handle("dictation:search-transcripts", (_event, query: string) =>
-  searchTranscripts(query)
+// Deletes exactly what the current filter selects, and reports the count so
+// the UI can confirm what actually went.
+ipcMain.handle("dictation:delete-transcripts", (_event, filter: TranscriptFilter = {}) =>
+  deleteTranscripts(filter)
 );
 
-ipcMain.handle("dictation:delete-transcript", (_event, id: number) => {
-  deleteTranscript(id);
-});
-
-ipcMain.handle("dictation:clear-transcripts", () => clearTranscripts());
-
-ipcMain.handle("dictation:stats", () => transcriptStats());
+ipcMain.handle("dictation:stats", (_event, filter: TranscriptFilter = {}) =>
+  transcriptStats(filter)
+);
 
 ipcMain.handle("dictation:request-microphone", () => requestMicrophoneAccess());
 ipcMain.handle("dictation:open-microphone-settings", () => openMicrophoneSettings());

@@ -711,6 +711,128 @@
         white-space: pre-wrap;
         overflow-wrap: anywhere;
       }
+      /* Copy is the only per-row action, so it's an icon rather than a text
+         button — it doesn't need to compete with the transcript for
+         attention. */
+      .dictation-copy {
+        background: none;
+        border: none;
+        padding: 4px;
+        margin: -4px;
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+      }
+      .dictation-copy:hover {
+        color: var(--text-primary);
+        background: var(--surface-hover);
+      }
+
+      /* Date-range chips, custom range inputs, and the bulk-delete control,
+         on one row beneath the search box. */
+      .dictation-filters {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin: 14px 0 6px;
+      }
+      /* Lighter than the page-level .segmented: these are filters, not
+         navigation, so they shouldn't carry a full-width underline. */
+      .segmented-compact {
+        gap: 14px;
+        border-bottom: none;
+        margin-bottom: 0;
+      }
+      .segmented-compact .segmented-item {
+        font-size: 11.5px;
+      }
+      .dictation-custom-range {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .dictation-range-sep {
+        font-size: 11.5px;
+        color: var(--text-secondary);
+      }
+      /* Native date inputs arrive as a chunky grey Chromium control with a
+         boxed calendar glyph, which reads as a foreign widget next to the
+         flat filter chips. Stripped back to a plain underlined field in the
+         app's own type.
+
+         Both fields get the same explicit width: left to size themselves
+         they came out visually mismatched, with the digits in one colliding
+         with its calendar glyph and the other left with a wide gap. */
+      .dictation-date {
+        font-family: var(--font-sans);
+        font-size: 11.5px;
+        /* Explicit and identical, because Chromium's intrinsic width for a
+           date input isn't stable between two otherwise identical fields
+           (measured 84px vs 92px), which left the pair visibly misaligned.
+           84px of content box against ~65px of text leaves room to spare:
+           an earlier, tighter value clipped the last digit, and Chromium
+           clips inside the input's shadow DOM *without* reporting overflow,
+           so nothing catches that automatically — the test measures the
+           text with canvas measureText instead. */
+        width: 84px;
+        box-sizing: content-box;
+        color: var(--text-primary);
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid var(--surface-border);
+        border-radius: 0;
+        padding: 2px 0 3px;
+        /* Text, not pointer: with the picker button hidden (below), the
+           field is edited in place rather than opened. */
+        cursor: text;
+      }
+      .dictation-date:hover {
+        border-bottom-color: var(--text-secondary);
+      }
+      .dictation-date:focus {
+        outline: none;
+        border-bottom-color: var(--accent);
+      }
+      /* Hidden deliberately. The glyph is the only thing that opens
+         Chromium's native calendar popover, and that popover is browser
+         chrome — rendered outside the page and completely unstyleable, so
+         it arrives with its own blue/orange highlights that clash with
+         everything around it. Removing the button means it can never open,
+         while the field stays fully editable: clicking a segment and typing
+         digits, or arrow keys, are native date-input behaviour and
+         unaffected. */
+      .dictation-date::-webkit-calendar-picker-indicator {
+        display: none;
+      }
+      /* Kills the grey inset field Chromium draws around the editable date
+         parts, and tightens the separators — the default padding around
+         each "-" made the date read as spaced-out digits. */
+      .dictation-date::-webkit-datetime-edit {
+        padding: 0;
+      }
+      .dictation-date::-webkit-datetime-edit-fields-wrapper {
+        padding: 0;
+        background: transparent;
+      }
+      .dictation-date::-webkit-datetime-edit-text {
+        color: var(--text-secondary);
+        padding: 0;
+      }
+      /* Pushed to the far end so a destructive action never sits directly
+         beside the filter chips it would act on. */
+      .dictation-bulk {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-left: auto;
+      }
+      .dictation-danger {
+        color: var(--danger);
+      }
+      .dictation-danger:disabled {
+        opacity: 0.5;
+      }
+
       /* The transcription prompt is long-form text, so it gets a full-width
          block rather than the label-left/control-right .preference-row
          layout used by the toggles. */

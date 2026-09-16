@@ -242,13 +242,79 @@ wrapper module — swapping engines later is a one-file change.
   It's stateless, so layout rehydration needs no special handling.
 - Reverse-chronological list of every transcript: text, timestamp,
   duration, target app, model used, transcription wall time.
-- Per row: copy and delete. **Editing and re-insert were built and then
-  removed (2026-09-16)** on use: editing a transcript of something you
-  actually said has no purpose once the text has already been pasted, and
-  re-insert needed a minimise-and-wait-400ms dance that never felt
-  trustworthy. The FTS update trigger stays in the schema regardless, since
-  dropping it would need a migration for no benefit.
-- Full-text search across history (SQLite FTS5).
+- Per row: a single copy icon, nothing else. **Edit, re-insert, and
+  per-row delete were each built and then removed (2026-09-16)** on use:
+  editing a transcript of something you actually said has no purpose once
+  the text is already pasted, re-insert needed a minimise-and-wait-400ms
+  dance that never felt trustworthy, and per-row delete became redundant
+  once bulk delete could be scoped by filter. Copy became an icon so it
+  doesn't compete with the transcript text for attention. The FTS update
+  trigger stays in the schema regardless, since dropping it would need a
+  migration for no benefit.
+- Full-text search across history (SQLite FTS5), combined with a date
+  filter (All time / Today / 7 days / 30 days / a custom from-to range).
+  Presets rather than a date picker by default: dictation history is
+  browsed by recency, not absolute date. Ranges resolve at query time, so
+  "Today" stays correct across midnight, and a custom end date covers the
+  whole day rather than stopping at its midnight.
+  - The custom range **prefills to the last 30 days** when first opened.
+    That's partly UX (a useful window beats a filter that does nothing
+    until both fields are set) and partly cosmetic: an empty
+    `input[type=date]` renders Chromium's `yyyy-mm-dd` placeholder, which
+    CSS cannot restyle. Keeping the fields populated is the only way to
+    never show it.
+  - The native control is stripped to a plain underlined field in the app's
+    own sans; stock, it's a grey boxed Chromium widget that reads as a
+    foreign control beside the flat filter chips.
+  - **The calendar button is hidden outright** (`display: none` on
+    `::-webkit-calendar-picker-indicator`). It is the only thing that opens
+    Chromium's native date popover, and that popover is browser chrome —
+    rendered outside the page and completely unstyleable, arriving with its
+    own blue/orange highlights. Removing the button means it can never
+    open, while the field stays fully editable: clicking a segment and
+    typing digits, or arrow keys, are native date-input behaviour. A
+    `title` supplies the affordance the glyph used to. Decided 2026-09-16
+    over the alternatives of building a themed calendar (~150 lines) or
+    dropping custom ranges for more presets.
+  - Both fields carry the **same explicit width**. Chromium's intrinsic
+    width for a date input turned out not to be stable between two
+    otherwise identical fields (measured 84px vs 92px), leaving the pair
+    visibly misaligned.
+  - Two testing traps this surfaced, both of which produced passing
+    assertions over broken UI:
+    - **Chromium clips inside the date input's shadow DOM without
+      reporting overflow**, so a `scrollWidth <= clientWidth` check passes
+      while the last digit is visibly cut off. The test measures the text
+      with canvas `measureText` and asserts the box can hold it.
+    - `getComputedStyle` cannot read a `-webkit-` shadow pseudo-element, so
+      asserting the picker button is hidden that way is meaningless. The
+      test checks the shipped stylesheet text instead.
+  - `min`/`max` are wired across the pair so the picker itself can't
+    produce an inverted range.
+  - Date values are formatted from local components, never
+    `toISOString()`, which converts to UTC first and would show the wrong
+    day for most of the evening west of Greenwich.
+- **Bulk delete of whatever the filter currently selects** — always
+  labelled "Delete all N", where N is the filtered count, behind an inline
+  two-step confirm that names the count and says it can't be undone. The
+  confirm sentence adds "matching" when a filter is active, so "Delete all"
+  can't be misread as wiping the whole history.
+  - Scoped by *filter*, not by the ids on screen: the list is paginated, so
+    "delete all of these" has to mean everything matching, not just the
+    visible page. `deleteTranscripts` and `queryTranscripts` share one
+    `buildQuery` helper precisely so the two can never disagree about what
+    "these" means.
+  - The confirm sends the filter the visible list was built from (held in a
+    ref), not a freshly recomputed one, so editing the search box while the
+    confirm is open can't redirect the delete at a different set of rows.
+  - Since this is now the *only* way to delete, the confirm carries the
+    weight: it states the count and irreversibility rather than relying on
+    the button label alone.
+
+Note on building these strings: user-facing sentences here are assembled in
+JS and interpolated once, not composed from several adjacent template
+expressions. htm collapses the whitespace between adjacent expressions
+inside a flex container, which shipped as "Delete 48matchingtranscripts?".
 - The tab is also where dictation is configured — model management, mic
   permission, shortcut, preferences — surfaced as a `DictationStep`
   component reused in Settings, matching how `SettingsSection` already
@@ -295,6 +361,7 @@ CREATE TABLE transcripts (
 );
 
 CREATE INDEX idx_transcripts_created_at ON transcripts(created_at DESC);
+-- also serves the date-range filter, which orders and bounds on the same column
 
 CREATE VIRTUAL TABLE transcripts_fts USING fts5(
   text, content='transcripts', content_rowid='id'
