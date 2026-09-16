@@ -3,6 +3,7 @@ import { Icon } from "../shared/icons.js";
 import { ChatsListSection } from "./sections/ChatsSection.js";
 import { SkillsSection } from "./sections/SkillsSection.js";
 import { SettingsSection } from "./sections/SettingsSection.js";
+import { DictationSection } from "./sections/DictationSection.js";
 import { TerminalSection, nextTerminalId, destroyTerminal } from "./sections/TerminalSection.js";
 import {
   getState,
@@ -21,6 +22,7 @@ import {
 
 const LAUNCHER_ITEMS = [
   { id: "chats", label: "Sessions", icon: "chat" },
+  { id: "dictation", label: "Dictation", icon: "mic" },
   { id: "skills", label: "Skills & Plugins", icon: "puzzle" },
   { id: "settings", label: "Settings", icon: "gear" },
 ];
@@ -96,6 +98,8 @@ function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut) {
       return html`<${SkillsSection} />`;
     case "settings":
       return html`<${SettingsSection} />`;
+    case "dictation":
+      return html`<${DictationSection} />`;
     case "terminal":
       return html`<${TerminalSection} terminalId=${tab.terminalId} args=${tab.args} shell=${tab.shell} onPopOut=${onPopOut} />`;
     default:

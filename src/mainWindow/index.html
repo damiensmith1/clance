@@ -650,6 +650,100 @@
         font-size: 12px;
         color: var(--text-secondary);
       }
+
+      /* Dictated transcripts are prose, often several sentences, so unlike
+         the single-line titles elsewhere in .item-card they wrap and keep
+         their own line spacing. */
+      /* Model rows carry three stacked lines, so they need to be tighter
+         than the default .item-card or the list reads as very loose. */
+      .dictation-model {
+        padding: 12px 2px;
+      }
+      .dictation-model .item-card-body {
+        gap: 3px;
+      }
+      .dictation-model .item-card-title {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        font-size: 14.5px;
+      }
+
+      /* Deliberately not .pill: a bordered box at this size fought the
+         serif title next to it and read as a button. This is the same
+         information as plain weighted text. */
+      .dictation-badge {
+        font-family: var(--font-sans);
+        font-size: 9.5px;
+        font-weight: 700;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+      .dictation-badge-muted {
+        color: var(--text-secondary);
+      }
+
+      /* Groups the dictation settings pane into labelled blocks. Without
+         these the recommendation sentence floated between the microphone
+         card and the model list, and the preference toggles ran straight on
+         from the model rows as if they were more models. */
+      .dictation-subsection {
+        margin-top: 26px;
+      }
+      .dictation-subsection:first-child {
+        margin-top: 0;
+      }
+      .dictation-subsection .list-group-label {
+        margin-bottom: 6px;
+      }
+      .dictation-subsection .list-group {
+        margin-bottom: 0;
+      }
+      .dictation-recommendation {
+        margin: 0 0 10px;
+      }
+
+      .dictation-text {
+        font-size: 13.5px;
+        color: var(--text-primary);
+        line-height: 1.5;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      /* The transcription prompt is long-form text, so it gets a full-width
+         block rather than the label-left/control-right .preference-row
+         layout used by the toggles. */
+      .dictation-prompt-row {
+        padding: 14px 0;
+        border-bottom: 1px solid var(--surface-border);
+      }
+      .dictation-prompt {
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: 10px;
+        padding: 9px 11px;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        line-height: 1.55;
+        color: var(--text-primary);
+        background: var(--surface-bg);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-sm);
+        resize: vertical;
+      }
+      .dictation-prompt:focus {
+        /* Explicit: the platform default focus ring is a heavy amber box
+           that doesn't belong in this palette. */
+        outline: none;
+        border-color: var(--accent);
+      }
+      .dictation-prompt-actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 8px;
+      }
       .item-card-description {
         font-size: 12.5px;
         font-style: italic;

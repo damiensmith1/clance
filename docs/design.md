@@ -18,6 +18,8 @@ status: draft
 | Frontmost-app read (window title, keystroke injection) | `@nut-tree-fork/nut-js` | captures the frontmost window at invocation — since 2026-09-14, purely to back `insert_text`/`click_at`/etc.'s default target, not as context text (see "Context injection" below) — the SDK-era `proposeText` accept/reject *UI* is gone with the custom chat UI, but the underlying keystroke-injection capability is back, now surfaced as an MCP tool the CLI decides to call itself |
 | Local tools transport | `@modelcontextprotocol/sdk` (Streamable HTTP, stateful sessions) | local-only MCP server run inside Electron's main process — see "Local tools server" below |
 | Session storage | JSONL files under `~/.claude/projects/...`, written entirely by the CLI itself | Clance no longer writes session files — every session is a real CLI process, so this is the CLI's own format, not something Clance needs to keep byte-compatible with by hand |
+| Dictation speech-to-text | `whisper.cpp` (`whisper-cli`) + ggml weights, Metal-accelerated, spawned per utterance | on-device only; weights downloaded on demand into `~/.clance/models/` and SHA-256 verified. Model tier is recommended from GPU core count — see `docs/dictation.md` |
+| Dictation history | `node:sqlite` (Node's built-in SQLite) + FTS5 | deliberately *not* `better-sqlite3`: no second native addon to rebuild against Electron's ABI alongside `node-pty`. All access via `src/main/dictationStore.ts` |
 | Packaging | `electron-builder`, ad-hoc/Developer-ID signed, installed to `/Applications` in dev too | see "Packaging & macOS permissions" below — fixes TCC (Screen Recording/Accessibility) permission flakiness that plagued the raw dev Electron binary |
 
 ## Terminal-embedding architecture (supersedes the Claude Agent SDK design)
@@ -1523,8 +1525,15 @@ see `docs/background-agent-architecture.md`.
       dissolved the terminal-input problem rather than solving it:
       dictation is system-wide, pasting into whatever app is frontmost via
       the `insert_text` machinery in `frontApp.ts` that already exists, so
-      Clance's own terminals need no special path. **Specced, not yet
-      implemented** — `docs/dictation.md` carries the phased build plan.
+      Clance's own terminals need no special path. **Implemented
+      2026-09-16** (Phases 0-2 of `docs/dictation.md`): the Phase 0 spike
+      measured `small.en` at 737 ms on this M2 against a 1.5 s bar, with
+      greedy decoding plus `--prompt` vocabulary seeding as the shipping
+      config, and the feature now ships as a second global shortcut, a
+      non-focusable recording HUD, spawn-per-utterance `whisper-cli`, and a
+      Dictation tab over a `node:sqlite` history. Hold-to-talk remains out
+      of reach without a native key listener (Electron `globalShortcut`
+      has no key-up event).
 - [x] Exact folder/config conventions for skills, tools, and MCP servers —
       **moot for skills/MCP.** A Clance-launched CLI process reads
       `~/.claude/skills/` and its own project/user `.mcp.json` exactly as

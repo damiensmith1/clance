@@ -1,0 +1,135 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Dictation</title>
+    <link rel="stylesheet" href="../shared/theme.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        font-family: var(--font-sans);
+        -webkit-font-smoothing: antialiased;
+        /* The window is non-focusable, but a stray text selection or drag
+           inside it would still look broken, and there is nothing here to
+           select. */
+        user-select: none;
+        cursor: default;
+        overflow: hidden;
+      }
+
+      /* A compact pill rather than a card. While recording it shows only a
+         dot, the level meter and elapsed time — the meter is the actual
+         signal the user needs (is it hearing me?), and prose would just
+         make the window bigger for no gain. Text appears only in the
+         states that genuinely need words. */
+      #hud {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        box-sizing: border-box;
+        height: 100%;
+        padding: 0 13px;
+        border-radius: 999px;
+        background: var(--surface-card);
+        border: 1px solid var(--surface-border);
+        box-shadow: 0 4px 18px rgba(51, 44, 34, 0.16);
+      }
+
+      #dot {
+        flex: 0 0 auto;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--danger);
+        animation: pulse 1.4s ease-in-out infinite;
+      }
+      #hud.state-transcribing #dot {
+        background: var(--accent);
+        animation: pulse 0.9s ease-in-out infinite;
+      }
+      #hud.state-done #dot {
+        background: var(--success);
+        animation: none;
+      }
+      #hud.state-error #dot,
+      #hud.state-unavailable #dot {
+        background: var(--warning);
+        animation: none;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.25;
+        }
+      }
+
+      /* Live input level. Bars rather than one meter so it reads as a
+         microphone at a glance, and because the most common dictation
+         failure is talking into a muted or wrong input device. */
+      #meter {
+        flex: 1 1 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        height: 16px;
+        min-width: 0;
+      }
+      #meter span {
+        width: 2.5px;
+        min-height: 2.5px;
+        border-radius: 2px;
+        background: var(--accent-soft);
+        transition: height 80ms linear, background 120ms linear;
+      }
+      #meter span.hot {
+        background: var(--accent);
+      }
+      #hud:not(.state-recording) #meter {
+        display: none;
+      }
+
+      #label {
+        flex: 1 1 auto;
+        min-width: 0;
+        font-size: 11.5px;
+        font-weight: 600;
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      /* Hidden while recording: the meter says everything a label would. */
+      #hud.state-recording #label {
+        display: none;
+      }
+
+      #elapsed {
+        flex: 0 0 auto;
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        color: var(--text-secondary);
+        font-variant-numeric: tabular-nums;
+      }
+      #hud:not(.state-recording) #elapsed {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud" class="state-recording">
+      <div id="dot"></div>
+      <div id="label">Listening…</div>
+      <div id="meter"></div>
+      <div id="elapsed">0:00</div>
+    </div>
+    <script type="module" src="./hud.js"></script>
+  </body>
+</html>

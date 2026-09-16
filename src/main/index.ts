@@ -14,7 +14,13 @@ import { openMainWindow, openSessionInMainWindow } from "./mainWindow";
 import { createAppMenu } from "./appMenu";
 import { ensureSessionCwd, SESSION_CWD } from "./paths";
 import { getSetupStatus } from "./setupStatus";
-import { readConfig, writeConfig, getDefaultDirectory, addRecentDirectory } from "./config";
+import {
+  readConfig,
+  writeConfig,
+  getDefaultDirectory,
+  addRecentDirectory,
+  DEFAULT_VOCABULARY,
+} from "./config";
 import { pickDirectory } from "./directoryPicker";
 import { connectClaude, disconnectClaude, openInstallDocs } from "./claudeAuth";
 import {
@@ -22,6 +28,8 @@ import {
   requestScreenRecordingAccess,
   openScreenRecordingSettings,
   openAccessibilitySettings,
+  requestMicrophoneAccess,
+  openMicrophoneSettings,
 } from "./permissions";
 import { SHORTCUT_ACTIONS } from "./shortcuts";
 import { getSession, listSessions, hasRealUserMessage } from "./chatHistory";
@@ -49,6 +57,33 @@ import { resolveOpenArgs, spawnBackgroundAgent, stopAgent, listAgents } from "./
 import { isPoolSpareId } from "./agentPool";
 import { copyDroppedFile } from "./dropFiles";
 import { readWindowLayout, writeWindowLayout } from "./windowLayout";
+import { getHud } from "./dictationWindow";
+import {
+  toggleDictation,
+  cancelDictation,
+  reconcileActiveModel,
+  warmDictation,
+  handleAudio,
+  checkAvailability,
+  getDictationState,
+  onTranscript,
+} from "./dictation";
+import {
+  listModels,
+  installModel,
+  cancelInstall,
+  removeModel,
+  isModelInstalled,
+  MODEL_CATALOG,
+  DownloadProgress,
+} from "./whisperModels";
+import {
+  listTranscripts,
+  searchTranscripts,
+  deleteTranscript,
+  clearTranscripts,
+  transcriptStats,
+} from "./dictationStore";
 
 app.dock?.show();
 
@@ -61,9 +96,15 @@ async function handleTrayPopupClick(): Promise<void> {
   }
 }
 
-function registerAllHotkeys(shortcuts: Record<string, string>): void {
+// `claudeReady` gates only the hotkeys that actually need a working
+// `claude` CLI. Dictation is registered either way: it never touches
+// Claude, so holding it behind claude-installed-and-logged-in (what
+// getSetupStatus().isComplete means) would disable a working feature for
+// no reason.
+function registerAllHotkeys(shortcuts: Record<string, string>, claudeReady: boolean): void {
   unregisterAllHotkeys();
-  registerHotkey(toggleClancePopup, shortcuts.togglePopup);
+  if (claudeReady) registerHotkey(toggleClancePopup, shortcuts.togglePopup);
+  registerHotkey(() => void toggleDictation(), shortcuts.dictate);
 }
 
 app.whenReady().then(async () => {
@@ -78,9 +119,20 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(createAppMenu());
   createTray(handleTrayPopupClick, openMainWindow);
 
+  // Picks up models already on disk that the config doesn't know about, so
+  // dictation doesn't claim to be unconfigured next to installed weights.
+  void reconcileActiveModel();
+
+  // Moves dictation's ~1s of cold-start work off the first hotkey press —
+  // see warmDictation. Unconditional: dictation doesn't depend on Claude
+  // being set up, same reasoning as its hotkey registration.
+  warmDictation();
+
   const status = await getSetupStatus();
+  // Unconditional: this registers the dictation hotkey even before setup
+  // is finished, and the popup hotkey only when Claude is ready.
+  registerAllHotkeys(readConfig().shortcuts, status.isComplete);
   if (status.isComplete) {
-    registerAllHotkeys(readConfig().shortcuts);
     // Pre-warms the popup's spare background agent so the first hotkey
     // press of the session doesn't have to wait on a cold mint — see
     // agentPool.ts. Only meaningful once setup's done (minting needs a
@@ -104,7 +156,21 @@ app.whenReady().then(async () => {
 // The popup window itself is never destroyed (only hidden), so it already
 // counts toward "not zero windows" once created, correctly skipping this.
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) openMainWindow();
+  // The dictation HUD is excluded from this count on purpose. It's a real
+  // BrowserWindow that outlives its first use (kept alive, just hidden, so
+  // the next dictation appears instantly rather than reloading a page), so
+  // counting it meant that after a single dictation there was always "1
+  // window open" and clicking the dock icon silently did nothing — with no
+  // main window ever having been opened, the app looked dead.
+  //
+  // The popup still counts, deliberately: revealing it reactivates the app
+  // (hideWidgetKeepAlive uses app.hide(), see popupWindow.ts) and that
+  // fires this same event, which must not pop the main window open
+  // alongside the overlay. The HUD can never cause that — it's
+  // `focusable: false` and only ever shown with showInactive(), so it
+  // never activates the app in the first place.
+  const windows = BrowserWindow.getAllWindows().filter((win) => win !== getHud());
+  if (windows.length === 0) openMainWindow();
 });
 
 app.on("will-quit", unregisterAllHotkeys);
@@ -146,14 +212,32 @@ ipcMain.handle(
     }
 
     const config = readConfig();
-    config.shortcuts = { ...config.shortcuts, ...shortcuts };
+    const merged = { ...config.shortcuts, ...shortcuts };
+
+    // Two actions bound to the same accelerator can't both work —
+    // globalShortcut.register simply returns false for the second one, so
+    // without this the save would "succeed" and one hotkey would silently
+    // stop responding. Unreachable while there was only one action; adding
+    // dictation made it reachable.
+    const seen = new Map<string, string>();
+    for (const [id, accelerator] of Object.entries(merged)) {
+      const existing = seen.get(accelerator);
+      if (existing) {
+        const label = (actionId: string) =>
+          SHORTCUT_ACTIONS.find((a) => a.id === actionId)?.label ?? actionId;
+        throw new Error(
+          `"${accelerator}" is already used by ${label(existing)} — pick a different shortcut for ${label(id)}.`
+        );
+      }
+      seen.set(accelerator, id);
+    }
+
+    config.shortcuts = merged;
     config.shortcutsConfigured = true;
     writeConfig(config);
 
     const status = await getSetupStatus();
-    if (status.isComplete) {
-      registerAllHotkeys(config.shortcuts);
-    }
+    registerAllHotkeys(config.shortcuts, status.isComplete);
 
     return config;
   }
@@ -161,9 +245,7 @@ ipcMain.handle(
 
 ipcMain.handle("setup:complete", async () => {
   const status = await getSetupStatus();
-  if (status.isComplete) {
-    registerAllHotkeys(readConfig().shortcuts);
-  }
+  registerAllHotkeys(readConfig().shortcuts, status.isComplete);
   return status;
 });
 
@@ -249,6 +331,9 @@ ipcMain.handle("config:get-recent-directories", () => readConfig().recentDirecto
 ipcMain.handle("settings:get-preferences", () => ({
   launchOnLogin: getLaunchOnLogin(),
   defaultDirectory: readConfig().defaultDirectory,
+  // The *configured* accelerators, so UI that shows a hotkey hint (the
+  // Dictation tab) can't drift from what the user actually rebound it to.
+  shortcuts: readConfig().shortcuts,
 }));
 
 ipcMain.handle("settings:set-launch-on-login", (_event, enabled: boolean) => {
@@ -380,3 +465,118 @@ ipcMain.handle("terminal:get-buffer", (_event, terminalId: string) => getPtyBuff
 ipcMain.handle("files:copy-dropped", (_event, sourcePath: string) =>
   copyDroppedFile(sourcePath)
 );
+
+// ---- dictation (see docs/dictation.md) ----
+
+// Audio arrives as a raw ArrayBuffer from the HUD renderer, which owns the
+// microphone (the main process has no getUserMedia).
+ipcMain.on("dictation:audio", (_event, pcm: ArrayBuffer) => {
+  void handleAudio(new Float32Array(pcm));
+});
+
+// Silence/limit auto-stop and Escape both come back through here so every
+// stop follows the same path through the state machine as a hotkey press.
+ipcMain.on("dictation:request-stop", () => void toggleDictation());
+ipcMain.on("dictation:request-cancel", () => void cancelDictation());
+
+ipcMain.on("dictation:level", () => {
+  // The meter is drawn in the HUD itself; this exists so the renderer has a
+  // channel to report level if anything outside the HUD ever needs it.
+});
+
+ipcMain.on("dictation:mic-error", (_event, message: string) => {
+  console.error("Dictation microphone error:", message);
+});
+
+ipcMain.handle("dictation:toggle", () => toggleDictation());
+ipcMain.handle("dictation:cancel", () => cancelDictation());
+ipcMain.handle("dictation:state", () => getDictationState());
+ipcMain.handle("dictation:availability", () => checkAvailability());
+
+ipcMain.handle("dictation:get-settings", () => readConfig().dictation);
+
+ipcMain.handle(
+  "dictation:save-settings",
+  (_event, patch: Partial<ReturnType<typeof readConfig>["dictation"]>) => {
+    const config = readConfig();
+    config.dictation = { ...config.dictation, ...patch };
+    // A null prompt means "reset to the shipped default" — the settings UI
+    // has a Reset button and this is how it asks, rather than the renderer
+    // needing its own copy of the default text to send back.
+    if (patch && patch.vocabulary === null) {
+      config.dictation.vocabulary = DEFAULT_VOCABULARY;
+    }
+    writeConfig(config);
+    return config.dictation;
+  }
+);
+
+ipcMain.handle("dictation:list-models", () => listModels(readConfig().dictation.activeModel));
+
+// Progress is pushed to the requesting window rather than broadcast: the
+// install UI lives in the main window, and a 500MB download reports often.
+ipcMain.handle("dictation:install-model", async (event, modelId: string) => {
+  await installModel(modelId, (progress: DownloadProgress) => {
+    if (!event.sender.isDestroyed()) event.sender.send("dictation:install-progress", progress);
+  });
+
+  // First installed model becomes active automatically — otherwise the user
+  // would finish a download and still have a feature that says it isn't
+  // set up.
+  const config = readConfig();
+  if (!config.dictation.activeModel || !isModelInstalled(config.dictation.activeModel)) {
+    config.dictation.activeModel = modelId;
+    writeConfig(config);
+  }
+  return config.dictation;
+});
+
+ipcMain.handle("dictation:cancel-install", (_event, modelId: string) => cancelInstall(modelId));
+
+ipcMain.handle("dictation:remove-model", (_event, modelId: string) => {
+  removeModel(modelId);
+  const config = readConfig();
+  if (config.dictation.activeModel === modelId) {
+    // Fall back to any other installed model rather than leaving a dangling
+    // active id that would read as "installed but broken" at record time.
+    const fallback = MODEL_CATALOG.find((m) => m.id !== modelId && isModelInstalled(m.id));
+    config.dictation.activeModel = fallback ? fallback.id : null;
+    writeConfig(config);
+  }
+  return config.dictation;
+});
+
+ipcMain.handle("dictation:set-active-model", (_event, modelId: string) => {
+  const config = readConfig();
+  if (!isModelInstalled(modelId)) throw new Error("That model isn't installed yet.");
+  config.dictation.activeModel = modelId;
+  writeConfig(config);
+  return config.dictation;
+});
+
+ipcMain.handle("dictation:list-transcripts", (_event, limit?: number, offset?: number) =>
+  listTranscripts(limit, offset)
+);
+
+ipcMain.handle("dictation:search-transcripts", (_event, query: string) =>
+  searchTranscripts(query)
+);
+
+ipcMain.handle("dictation:delete-transcript", (_event, id: number) => {
+  deleteTranscript(id);
+});
+
+ipcMain.handle("dictation:clear-transcripts", () => clearTranscripts());
+
+ipcMain.handle("dictation:stats", () => transcriptStats());
+
+ipcMain.handle("dictation:request-microphone", () => requestMicrophoneAccess());
+ipcMain.handle("dictation:open-microphone-settings", () => openMicrophoneSettings());
+
+// Keeps an open Dictation tab live as dictations happen elsewhere in the
+// OS, rather than only refreshing when the user reopens the tab.
+onTranscript((transcript) => {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send("dictation:new-transcript", transcript);
+  }
+});

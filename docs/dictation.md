@@ -1,9 +1,16 @@
 ---
 title: Dictation (speech-to-text)
 tags: [clance, design, requirements]
-status: proposed
+status: implemented
 ---
+Testing 1, 2, 3.This is a test. 1, 2, 3, 4, 5, 6, 1.Well, that's a bit faster.What about now?I feel like it's getting slower.Is it faster in the app so open?I think it's way faster.Test, testing.
+This is a test.I think it's so slow.Mmm.I think it's way faster now.This is buggy as fuck.This is the first.
 
+Testing, one, two, three.
+This is another test.
+I think it's a bit faster.Hello.
+Yeah. OK.
+How about now? This will be fast.Blah blah blah blah blah.Yes.
 # Dictation (speech-to-text)
 
 System-wide, on-device dictation: press a global shortcut anywhere in
@@ -13,9 +20,16 @@ transcript you've ever dictated, backed by SQLite on disk.
 
 This supersedes the terminal-scoped framing of dictation in
 `requirements.md` §"Dictation" and closes `design.md`'s open question
-"Which local speech-to-text engine for dictation". **Decided, not yet
-implemented** — this doc is the spec and build plan, not a record of
-shipped behavior.
+"Which local speech-to-text engine for dictation".
+
+**Status: Phases 0–2 built (2026-09-16); Phase 3 outstanding.** The feature
+works end to end — global shortcut, HUD, on-device transcription, insertion,
+SQLite history, model install with spec-based recommendation. Two things are
+deliberately still open: **hold-to-talk** (needs a native key listener, see
+Phase 3) and **real-voice accuracy validation**, since the Phase 0 numbers
+came from synthesized speech. Automated checks cover the store, the model
+catalog, the WAV round trip through `whisper-cli`, and both renderers;
+nothing automated can speak into a microphone.
 
 ## Problem
 
@@ -63,7 +77,9 @@ Considered and rejected:
   its own CoreML model format and its own signing story; whisper.cpp is a
   single self-contained binary invoked as a child process, which is
   exactly the shape this codebase already uses for `claude` and the local
-  tools server. Revisit if measured latency disappoints.
+  tools server. **Phase 0 closed this for good:** whisper.cpp hits 737 ms
+  on the recommended model against a 1.5 s bar, so there's no latency
+  deficit left for WhisperKit to recover.
 - **Apple's `Speech` framework** (`SpeechAnalyzer`/`SpeechTranscriber` on
   macOS 26, which is what system dictation itself uses). Free, no model
   download, no binary to ship. Rejected because it has no model selection
@@ -142,9 +158,13 @@ wrapper module — swapping engines later is a one-file change.
   into the wrong place. So: `focusable: false` + `showInactive()`. Done
   right, focus never leaves the user's app and no refocus step is needed
   at all.
-- Positioned bottom-center of the display under the cursor — not at the
+- Positioned bottom-centre of the display under the cursor — not at the
   cursor like the popup, so it doesn't cover the field being dictated
-  into.
+  into. Sits 8px above the bottom of the *work area*, which macOS has
+  already shrunk to exclude the Dock and menu bar; the original 120px
+  double-counted that clearance and left the HUD floating well up the
+  screen. Just above the Dock rather than over it — the HUD is at
+  screen-saver window level and would otherwise cover Dock icons.
 - Because it can't receive key events, `Escape`-to-cancel is implemented
   as a temporary `globalShortcut` registered for the duration of the
   recording and unregistered on stop.
@@ -177,20 +197,35 @@ wrapper module — swapping engines later is a one-file change.
   `~/.clance`.
 - The full catalog stays selectable. The recommendation is a default, not
   a restriction.
-- **Provisional** thresholds, to be calibrated by the Phase 0 spike rather
-  than shipped on the strength of this table:
+- **Thresholds key off GPU core count, not RAM.** This is the correction
+  Phase 0 forced — see "Phase 0 results" below. RAM turned out not to be
+  the binding constraint at all: `large-v3-turbo-q5_0` uses *less* peak
+  RSS than `small.en` (740 MB vs 760 MB, being quantized) while running
+  2.6× slower, because its encoder is far bigger. What decides whether a
+  tier is usable is GPU throughput, so that's what the recommendation
+  reads — via `system_profiler SPDisplaysDataType` ("Total Number of
+  Cores", ~170 ms), with RAM and free disk kept only as guards.
 
   | Detected machine | Recommended | Download |
   |---|---|---|
-  | ≤ 8 GB RAM | `small.en` | ~466 MB |
-  | 16 GB RAM | `large-v3-turbo-q5_0` | ~574 MB |
-  | ≥ 32 GB RAM | `large-v3-turbo` | ~1.6 GB |
-  | < 2× model size free on disk | step down one tier | |
-  | Intel Mac | `base.en` | ~142 MB |
+  | Apple Silicon, ≤ 10 GPU cores (base M1–M4) | `small.en` | 488 MB |
+  | Apple Silicon, > 10 GPU cores (Pro/Max/Ultra) | `large-v3-turbo-q5_0` | 574 MB |
+  | < 4 GB RAM, or < 2× model size free on disk | step down one tier | |
+  | Intel Mac (no Metal tier worth assuming) | `base.en` | 148 MB |
 
-  For reference, the development machine here (Apple M2, 8 GB, ~14.6 GB
-  free) resolves to `small.en` — so the common path is exercised by
-  default during development rather than only on paper.
+  The Pro/Max row is the one row still extrapolated rather than measured —
+  there's no such machine here to test on. It should be treated as
+  provisional until someone runs the spike on one; the fallback if it
+  disappoints is simply that every Mac gets `small.en`, which is already
+  known-good.
+- Verified download sizes and pinned hashes, as measured:
+
+  | Model | Bytes | SHA-256 (prefix) |
+  |---|---|---|
+  | `tiny.en` | 77,704,715 | `921e4cf8686fdd99…` |
+  | `base.en` | 147,964,211 | `a03779c86df33230…` |
+  | `small.en` | 487,614,201 | `c6138d6d58ecc832…` |
+  | `large-v3-turbo-q5_0` | 574,041,195 | `394221709cd5ad1f…` |
 - Install is a background download with visible progress, resumable,
   SHA-256 verified before being moved into place, cancellable, and
   atomically renamed so a partial file is never loadable. Models live in
@@ -207,7 +242,12 @@ wrapper module — swapping engines later is a one-file change.
   It's stateless, so layout rehydration needs no special handling.
 - Reverse-chronological list of every transcript: text, timestamp,
   duration, target app, model used, transcription wall time.
-- Per row: copy, re-insert into the frontmost app, edit, delete.
+- Per row: copy and delete. **Editing and re-insert were built and then
+  removed (2026-09-16)** on use: editing a transcript of something you
+  actually said has no purpose once the text has already been pasted, and
+  re-insert needed a minimise-and-wait-400ms dance that never felt
+  trustworthy. The FTS update trigger stays in the schema regardless, since
+  dropping it would need a migration for no benefit.
 - Full-text search across history (SQLite FTS5).
 - The tab is also where dictation is configured — model management, mic
   permission, shortcut, preferences — surfaced as a `DictationStep`
@@ -282,37 +322,96 @@ dictation: {
 
 ## Implementation plan
 
-### Phase 0 — measurement spike (no product code)
+### Phase 0 — measurement spike ✅ done 2026-09-16
 
-Answer the questions this doc is currently guessing at, before building UI
-on top of them.
+**Exit criterion met.** Target was stop→text under ~1.5 s for a 10 s
+utterance on the recommended model; `small.en` in the chosen configuration
+does it in **737 ms**. The WhisperKit decision stays closed.
 
-1. Build/obtain `whisper-cli` for `arm64`, run `small.en` and
-   `large-v3-turbo-q5_0` over sample utterances on the M2/8 GB dev
-   machine.
-2. Record: cold vs. warm start, real-time factor, peak RSS, and quality on
-   technical vocabulary (`tsconfig`, `npm`, file paths, identifiers) —
-   which is the vocabulary that actually matters for this app's users and
-   where the small models tend to fall down.
-3. Decide from data: the recommendation thresholds above; whether to keep
-   a warm `whisper-cli` process or spawn per utterance; whether
-   `--prompt` seeding with technical terms is worth it.
+Method: Homebrew `whisper.cpp` 1.9.4 (Metal, `COREML=0`), four ggml tiers,
+four ~7–11 s clips, 4 threads, each config run twice with the second
+(warm page cache) reported. Machine: Apple M2, 8 GPU cores, 8 GB.
 
-Exit criterion: stop→text under ~1.5s for a 10s utterance with the
-recommended model. If that fails, reopen the WhisperKit decision before
-writing any UI.
+Latency and memory, per ~11 s clip:
 
-### Phase 1 — end-to-end dictation, no history, no UI polish
+| Model | Beam (default) | Greedy | Peak RSS | Verdict |
+|---|---|---|---|---|
+| `tiny.en` | 361 ms | 288 ms | 250 MB | too inaccurate |
+| `base.en` | 460 ms | 380 ms | 360 MB | too inaccurate |
+| `small.en` | 1013 ms | **853 ms** | 760 MB | **recommended** |
+| `large-v3-turbo-q5_0` | 2440 ms | 2386 ms | 742 MB | misses the bar on this chip |
 
-The goal is one working path: shortcut → speak → text appears.
+Five findings, three of which changed the plan:
+
+1. **`small.en` is the first tier that gets technical vocabulary right,
+   and it beats `large-v3-turbo-q5_0` at it** while being 2.6× faster.
+   On the `node-pty` clip, `tiny.en` produced "no-PTY with a real ARG
+   Vare" and `base.en` "Node-PTY with a real ARG-Veray … context arrived
+   text", both unusable; `small.en` returned the sentence verbatim, while
+   large-turbo merged "argv array" into "argvarray". Accuracy is not
+   monotonic in model size here, so "bigger if it fits" would have been
+   the wrong rule.
+2. **`--prompt` seeding is a large accuracy win and nearly free — promoted
+   from Phase 3 to Phase 1.** Seeding a term list turned *"Grab for
+   register all hotkeys in source/main/index.ts … setup status as
+   complete"* into *"Grep for registerAllHotkeys in src/main/index.ts …
+   setupStatus is Complete"* — it recovers camelCase identifiers, fixes
+   `src` vs. `source`, and corrects near-homophone commands, for +91 ms.
+   Nothing else in the spike bought as much.
+3. **Greedy (`-bo 1 -bs 1`) is strictly better than the default beam
+   search here** — 646 ms vs 881 ms, 45 MB less resident, and *identical*
+   output on every clip tested. Combined: **greedy + prompt is the
+   shipping config at 737 ms / 723 MB**, still faster than default beam
+   with no prompt at all, and more accurate.
+4. **Recommend on GPU cores, not RAM** — the table above; large-turbo is
+   simultaneously lighter and much slower than `small.en`.
+5. **First-ever run pays an 18.2 s Metal shader compile** (`0.016 s` on
+   every run after, from the Metal cache). Unmitigated, the very first
+   dictation after install would appear to hang for 18 seconds. Phase 1
+   must run a throwaway inference at the end of model install, while the
+   progress UI is still on screen. This was the single most dangerous
+   thing the spike surfaced and it is invisible in any steady-state
+   benchmark.
+
+Two caveats on the accuracy numbers, stated plainly because they bound how
+much the above is worth:
+
+- Clips were generated with macOS `say`, not spoken. Latency, RSS and the
+  relative ordering of tiers are unaffected, but **the absolute word error
+  rates are not trustworthy** and one apparent failure is a TTS artifact:
+  every tier heard "tsconfig" as "sconfig" even with `tsconfig.json`
+  explicitly in the prompt, because the synthesized audio genuinely
+  lacks the /t/. Real-voice validation is still outstanding — the only
+  Phase 0 question not closed.
+- `whisper.cpp` from Homebrew links shared `ggml`/`llama.cpp` libraries.
+  Fine for measurement; the shipped binary needs to be self-contained, so
+  Phase 1's build script must produce a static `whisper-cli`, and its
+  timings should be re-confirmed once (no reason to expect a change, but
+  it's a different binary).
+
+Reproduce: `bench.sh` / `bench2.sh` from this spike are scratch scripts,
+deliberately not committed. Models are cached in `~/.clance/models/`,
+which is already the path Phase 1 will read from.
+
+### Phase 1 — end-to-end dictation ✅ done 2026-09-16
+
+The goal was one working path: shortcut → speak → text appears.
 
 - `scripts/fetch-whisper-binary.sh` — build/fetch `whisper-cli` arm64;
   wire into `package.json` `build.extraResources`.
 - `src/main/whisperModels.ts` — catalog, spec detection, recommendation,
   download + SHA-256 verify + atomic install, removal, "what's installed".
+  **Ends every install with a throwaway inference to force the 18.2 s
+  Metal shader compile while the progress UI is still up** (Phase 0
+  finding 5) — without this the first real dictation looks like a hang.
 - `src/main/dictation.ts` — orchestrator and state machine
-  (`idle → recording → transcribing → inserting`), spawns `whisper-cli`,
-  calls into `frontApp.ts` to insert.
+  (`idle → recording → transcribing → inserting`). **Spawns `whisper-cli`
+  per utterance** — resolved, see the open questions — with the Phase 0
+  shipping config: `-bo 1 -bs 1 --prompt <term list> -nt -l en -t 4`.
+  Calls into `frontApp.ts` to insert.
+- Vocabulary seeding ships here, not in Phase 3. A built-in term list
+  (the project's own idiom: `tsconfig`, `argv`, `src`, `dist`, camelCase
+  identifiers) is most of the win; user-editable comes later.
 - `src/main/dictationWindow.ts` — the non-focusable HUD window.
 - `src/dictationHud/{index.html,hud.js}` + `src/preload/dictationHud.ts` —
   `getUserMedia` + an `AudioWorklet` downsampling to 16 kHz mono, RMS
@@ -344,7 +443,7 @@ Two things to be careful about in this phase:
   reachable — the second `globalShortcut.register` silently fails. Add the
   collision check with the action.
 
-### Phase 2 — history and the Dictation tab
+### Phase 2 — history and the Dictation tab ✅ done 2026-09-16
 
 - `src/main/dictationStore.ts` — the `node:sqlite` wrapper: open,
   migrate, insert, list (paginated), FTS search, update text, delete.
@@ -361,19 +460,207 @@ Two things to be careful about in this phase:
 - Optionally offer the dictation step as a wizard step for new users;
   skippable, and it must not block `isComplete`.
 
-### Phase 3 — refinement (each independently droppable)
+### Fixes found by using it (2026-09-16)
+
+Three defects the automated checks couldn't have caught, all found in real use:
+
+- **The Dock icon vanished when the HUD appeared.** Cause:
+  `setVisibleOnAllWorkspaces` transforms the app between
+  `UIElementApplication` and `ForegroundApplication`, and Electron
+  documents that this "will hide the window and dock for a short time."
+  Fixed with `skipTransformProcessType: true`, which keeps the
+  all-workspaces/over-full-screen behaviour without touching activation
+  policy, plus an idempotent `app.dock.show()` after showing the HUD —
+  the isolated repro was flaky, so the guard doesn't rely on the primary
+  fix alone.
+- **A transcription couldn't be stopped.** The Escape hotkey was released
+  the moment recording ended, and pressing the dictate key during
+  transcription hit an early `return`, so a slow or wedged `whisper-cli`
+  could only be waited out. Escape now stays registered until the machine
+  reaches idle, the dictate key cancels from the transcribing state, and
+  the child process handle is held so `cancelDictation` can actually kill
+  it. A cancel that lands mid-transcription now also skips the paste and
+  the history write, instead of pasting text the user has just abandoned.
+  Consolidated into one `settleToIdle()` so no exit path can leave the
+  Escape hotkey, duration timer, or tray indicator dangling.
+- **No way to stop dictation from the menu bar.** The HUD is frameless and
+  non-focusable, so it has no close button and can't receive `⌘W`. Added a
+  Dictation menu with Start/Stop and Cancel. Its accelerators are display
+  only (`registerAccelerator: false`) — the real binding is the global
+  shortcut, which works with no window open. A live status line was
+  considered and dropped: the menu is built once at startup, so it would
+  have been stale more often than correct.
+
+### Why the HUD is faster when the main window is open (2026-09-16)
+
+Observed: the HUD appears noticeably quicker with the Clance app window
+open than with nothing open. Two macOS/Chromium behaviours explain it, and
+neither is in Clance's own code path:
+
+1. **Chromium throttles backgrounded renderers.** `backgroundThrottling`
+   defaults to true, so timers and animation frames in a page Chromium
+   considers background are deprioritised. A pre-warmed HUD sits *hidden*
+   between dictations — meaning the one renderer that must paint a live
+   level meter the instant the hotkey fires is exactly the one being
+   throttled. A visible main window keeps the app and its
+   GPU/compositor work active, and the HUD benefits from that.
+2. **macOS App Nap.** An app with no visible windows that isn't frontmost
+   can be suspended by the OS, which slows the *main* process too — the
+   side that calls `showInactive()`.
+
+Fixed (1) with `backgroundThrottling: false` on the HUD window, which is
+cheap and targeted: it applies to one small always-alive window, not the
+app.
+
+(2) is **not** addressed. Preventing App Nap needs a
+`powerSaveBlocker` with `prevent-app-suspension` held for the app's whole
+lifetime, which costs battery permanently to save a fraction of a second
+on an occasional interaction. Worth revisiting only if the HUD still feels
+sluggish from a cold, idle app.
+
+**Honest limitation: this fix is reasoned from documented behaviour, not
+from a before/after measurement, and it is unverified.** Three attempts to
+instrument it all hung, and the hangs turned out to be an artifact of the
+probe rather than evidence of anything: they occurred during *window
+setup*, before any measurement ran, on a transparent screen-saver-level
+all-workspaces window that was never shown. `hud-check.js` calls
+`executeJavaScript` on an ordinary hidden window without trouble, so the
+hangs say nothing about throttling either way. (An earlier version of this
+note claimed they corroborated the diagnosis — they don't.) Perceived
+speed from a cold, idle app is the only test that settles it.
+
+One incidental finding worth keeping: the level meter is driven directly
+by AudioWorklet messages setting styles, *not* `requestAnimationFrame`.
+That matters, because rAF is precisely what throttling suspends — an
+otherwise conventional rAF-driven meter would freeze whenever the app was
+inactive.
+
+### Fourth round: the HUD took seconds to appear (2026-09-16)
+
+Pressing the hotkey and waiting a beat before anything shows up undermines
+the whole feature, so this got measured rather than guessed at. Cold, the
+path from press to visible HUD was **~1.04s of strictly serial work**:
+
+| Step | Cold | Warm |
+|---|---|---|
+| `readFrontmostTitle()` — loads the nut-js native addon | 296 ms | 8 ms |
+| `checkAvailability()` — resolves the binary, stats the model | 398 ms | 44 ms |
+| `showHud()` — creates the window, loads its page | 345 ms | 1 ms |
+
+Everything in that list is cacheable and none of it depends on what the
+user does, so two changes:
+
+- **`warmDictation()` at startup** (`index.ts`, alongside the existing
+  `warmLoginShellPath` / `warmAgentPool`): pre-creates the HUD window and
+  loads its page, loads the nut-js addon, and caches the binary path and
+  machine specs. Fire-and-forget, so it never delays launch, and each
+  piece is independently best-effort. The HUD renderer only touches
+  `getUserMedia` on a `dictation:start` message, so pre-creating it does
+  **not** open the microphone.
+- **The frontmost-title read came off the critical path.** It's only
+  metadata for the history row, which isn't written until after
+  transcription, yet the HUD was sitting behind it. It now resolves in
+  parallel and `handleAudio` awaits it at the one point it's needed.
+
+Result: **first dictation 1039 ms → 101 ms**, subsequent ~45 ms.
+
+Pre-creating the HUD at launch also means it exists from startup rather
+than from first use, which makes the `activate`-handler fix below
+load-bearing from the first Dock click rather than only after a dictation.
+
+### Third round: the dock icon went dead after a dictation (2026-09-16)
+
+Launch Clance, never open the main window, dictate once (which works),
+then click the Dock icon — nothing happens, and the app looks dead.
+
+`index.ts`'s `activate` handler only reopens the main window when
+`BrowserWindow.getAllWindows().length === 0`. That guard is deliberate and
+must stay: revealing the popup reactivates the whole app (hiding it uses
+`app.hide()`, see `popupWindow.ts`'s `hideWidgetKeepAlive`), which fires
+the same `activate` event a Dock click does, and unconditionally opening
+the main window there defeats the point of a quiet overlay — that's
+commit bbae727.
+
+But the HUD is also a `BrowserWindow`, and it's kept alive (hidden) after
+its first use so the *next* dictation appears instantly instead of
+reloading a page. So after one dictation the count was permanently ≥ 1 and
+the Dock click was silently swallowed.
+
+Fixed by excluding *just the HUD* from that count. The popup still counts,
+preserving bbae727 exactly; the HUD can never be the cause of an
+activation anyway, since it's `focusable: false` and only ever shown via
+`showInactive()`. Note this same class of bug would have applied to any
+future always-alive utility window.
+
+Known remaining edge, not fixed: clicking the Dock icon *during* a
+recording now opens the main window, which takes focus, so the transcript
+pastes there rather than into the app you started in. Deliberate — the
+Dock click is an explicit request for the app — but worth knowing.
+
+### Second round of use-driven fixes (2026-09-16)
+
+- **Search box had a heavy amber focus ring.** `.search-input` is designed
+  as a *wrapper* around an `<input>`, with the outline reset scoped to the
+  descendant (`.search-input input { outline: none }`). It had been applied
+  to the `<input>` itself, so it picked up the border-bottom but never the
+  outline reset, leaving the platform default ring. Now matches
+  `ChatsSection`'s structure exactly.
+- **Insert / Edit row actions removed** — see the row-actions requirement
+  above. Their IPC handlers, preload methods, and
+  `updateTranscriptText` went with them rather than being left as dead
+  code.
+
+### What the build added beyond this plan
+
+Three things the plan didn't anticipate, all found by building it:
+
+- **`reconcileActiveModel()`** (`dictation.ts`). `activeModel` can be
+  null-but-installable — weights dropped into `~/.clance/models` by hand, a
+  config reset, or the active model removed while another remained — and
+  without this dictation reports "no model installed" while sitting next to
+  working weights. It prefers the machine's recommended model, then the
+  *best* other installed one. The first version took `MODEL_CATALOG.find`,
+  which silently adopted `tiny.en` — the one tier Phase 0 rejected as too
+  inaccurate — because the catalog is ordered smallest-first. Caught by the
+  smoke test asserting the recommendation, not by reading the code.
+- **Duplicate-accelerator rejection** in `setup:save-shortcuts`. The
+  handler validated each accelerator individually but never compared them,
+  so binding two actions to one key "saved" fine and then one hotkey
+  silently stopped responding (`globalShortcut.register` just returns
+  false for the loser). Unreachable with one action; adding dictation made
+  it reachable.
+- **`readFrontmostTitle()` / `pasteAtCursor()`** (`frontApp.ts`). The plan
+  flagged the `capturedWindow` race; the fix is two functions that don't
+  touch that slot at all. `pasteAtCursor` also deliberately skips
+  `focusTarget` — since the HUD never takes focus, refocusing would *cause*
+  the bug it was meant to prevent by pulling focus to whatever the popup
+  last captured.
+
+### Phase 3 — refinement (outstanding, each independently droppable)
+
+Two items landed early because they were a few lines each once the rest
+existed: the **menu-bar recording indicator** (`tray.ts`'s
+`setTrayRecording`, driven from the state machine — the only always-visible
+signal that the mic is live when the HUD is on another display) and the
+**vocabulary editor** (a plain field in `DictationStep`, since Phase 0
+promoted the seeding itself into Phase 1). The rest below is untouched.
 
 - Hold-to-talk via `uiohook-napi` (native dep; Accessibility already
   granted). The main thing standing between v1 and feature parity with
   Wispr Flow.
-- `--prompt` vocabulary seeding from a user-editable term list, if Phase 0
-  shows it helps.
+- ~~Making the `--prompt` term list user-editable~~ — **done**, and
+  promoted to a full multi-line editor with a reset-to-default in
+  `DictationStep`, labelled "Transcription prompt". The copy states
+  plainly that whisper's initial prompt primes *vocabulary* and is not an
+  instruction the model follows — "remove filler words" will not work, and
+  a user editing a box labelled "prompt" would otherwise reasonably assume
+  it would. (Instruction-following cleanup is the separate, still-deferred
+  LLM pass below.)
 - Optional LLM cleanup pass (strip filler words, punctuate) through the
   `claude` CLI that's already embedded. **Default off** — it adds latency
   and, unlike everything else here, sends the transcript to a model.
 - Streaming/partial transcripts in the HUD while speaking.
-- Menu-bar recording indicator via `tray.setTitle`/`setImage` (`tray.ts`
-  currently renders a plain "Clance" text label).
+- ~~Menu-bar recording indicator~~ — **done** (`setTrayRecording`).
 - Per-app insert-mode overrides.
 
 ## Out of scope
@@ -390,17 +677,32 @@ Two things to be careful about in this phase:
 
 ## Open questions
 
-- [ ] Does `small.en` clear the latency bar on an 8 GB M2, and is its
+- [x] Does `small.en` clear the latency bar on an 8 GB M2, and is its
       accuracy on technical vocabulary good enough to be the default
-      recommendation? (Phase 0 decides; it's the load-bearing assumption
-      in this whole plan.)
-- [ ] Warm `whisper-cli` process vs. spawn-per-utterance — a warm process
-      cuts model load time off every dictation but holds ~1 GB resident on
-      a machine that may only have 8 GB.
+      recommendation? **Yes to both, resolved 2026-09-16** — 737 ms in the
+      shipping config against a 1.5 s bar, and it's the *first* tier that
+      transcribes this project's own vocabulary correctly. The
+      load-bearing assumption held.
+- [x] Warm `whisper-cli` process vs. spawn-per-utterance — **resolved:
+      spawn per utterance.** Measured overhead is ~150 ms of process/Metal
+      init plus ~200 ms model load, so a warm process would save ~350 ms
+      of the 737 ms. Not worth holding 723 MB resident permanently on an
+      8 GB machine to get under a bar already being cleared. Revisit only
+      if the real-voice numbers come in much worse.
+- [ ] Real-voice validation of the accuracy findings. The tier ordering
+      and all timing/memory numbers are sound, but the spike's clips were
+      synthesized with `say`, so absolute accuracy is unverified — this is
+      the one Phase 0 question still open, and it needs a human to record
+      a few utterances.
 - [ ] Ship the `whisper-cli` binary prebuilt in the bundle, or build it on
       first use? Bundling is the better UX and keeps code inside the signed
       bundle, but adds a build-time dependency and grows the app; it also
-      forces the hardened-runtime question below.
+      forces the hardened-runtime question below. Phase 0 adds a
+      constraint either way: the Homebrew build links shared `ggml` and
+      `llama.cpp` libraries, so whatever path is chosen must produce a
+      **statically linked** `whisper-cli` rather than one that assumes
+      Homebrew is present on the user's machine. (`cmake` is also not
+      installed on this dev machine — a from-source build adds that too.)
 - [ ] Hardened runtime and entitlements. `scripts/dev-packaged.sh`
       deliberately signs without `--options runtime` today. A bundled
       native binary plus mic access will eventually need

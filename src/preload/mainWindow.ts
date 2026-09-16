@@ -85,4 +85,39 @@ contextBridge.exposeInMainWorld("clanceApp", {
   localToolsServerStatus: () => ipcRenderer.invoke("extensibility:local-tools-server-status"),
   checkLocalToolsServerHealth: () =>
     ipcRenderer.invoke("extensibility:check-local-tools-server-health"),
+
+  // ---- dictation (see docs/dictation.md) ----
+  dictationToggle: () => ipcRenderer.invoke("dictation:toggle"),
+  dictationAvailability: () => ipcRenderer.invoke("dictation:availability"),
+  getDictationSettings: () => ipcRenderer.invoke("dictation:get-settings"),
+  saveDictationSettings: (patch: unknown) =>
+    ipcRenderer.invoke("dictation:save-settings", patch),
+  listDictationModels: () => ipcRenderer.invoke("dictation:list-models"),
+  installDictationModel: (modelId: string) =>
+    ipcRenderer.invoke("dictation:install-model", modelId),
+  cancelDictationInstall: (modelId: string) =>
+    ipcRenderer.invoke("dictation:cancel-install", modelId),
+  removeDictationModel: (modelId: string) =>
+    ipcRenderer.invoke("dictation:remove-model", modelId),
+  setActiveDictationModel: (modelId: string) =>
+    ipcRenderer.invoke("dictation:set-active-model", modelId),
+  onDictationInstallProgress: (callback: (p: unknown) => void) => {
+    const listener = (_event: unknown, payload: unknown) => callback(payload);
+    ipcRenderer.on("dictation:install-progress", listener);
+    return () => ipcRenderer.removeListener("dictation:install-progress", listener);
+  },
+  listTranscripts: (limit?: number, offset?: number) =>
+    ipcRenderer.invoke("dictation:list-transcripts", limit, offset),
+  searchTranscripts: (query: string) =>
+    ipcRenderer.invoke("dictation:search-transcripts", query),
+  deleteTranscript: (id: number) => ipcRenderer.invoke("dictation:delete-transcript", id),
+  clearTranscripts: () => ipcRenderer.invoke("dictation:clear-transcripts"),
+  dictationStats: () => ipcRenderer.invoke("dictation:stats"),
+  requestMicrophone: () => ipcRenderer.invoke("dictation:request-microphone"),
+  openMicrophoneSettings: () => ipcRenderer.invoke("dictation:open-microphone-settings"),
+  onNewTranscript: (callback: (t: unknown) => void) => {
+    const listener = (_event: unknown, payload: unknown) => callback(payload);
+    ipcRenderer.on("dictation:new-transcript", listener);
+    return () => ipcRenderer.removeListener("dictation:new-transcript", listener);
+  },
 });

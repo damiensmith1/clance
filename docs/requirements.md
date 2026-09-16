@@ -118,8 +118,14 @@ status: draft
 
 ### Dictation
 
-- ❌ Not implemented, but **no longer an open design question** — specced
-  in full in `docs/dictation.md` (scope, decisions, phased build plan).
+- ✅ Implemented 2026-09-16 (Phases 0–2 of `docs/dictation.md`). Global
+  shortcut (`⌥D` by default) → non-focusable recording HUD → on-device
+  whisper.cpp transcription → pasted at the cursor in whatever app was
+  frontmost, with every transcript kept in a SQLite database and browsable,
+  searchable, and re-insertable from a new Dictation tab. **Two caveats:**
+  hold-to-talk isn't possible with Electron's `globalShortcut` (no key-up
+  event) so it's press-to-start/press-to-stop for now, and accuracy has
+  only been validated against synthesized speech so far.
 - **Scope decided 2026-09-16, and it widened:** dictation is not a
   terminal-input feature. It's a *system-wide* one — a global shortcut
   anywhere in macOS records, transcribes locally, and types the transcript
@@ -518,10 +524,9 @@ the toggle-managed path above) no Clance-specific wiring needed at all.
   `look_at_screen` tool call, as a real image either way
 - ~~Text injection works in at least one real target app~~ — **removed**,
   no longer an app-owned feature to validate
-- ❌ Dictation not yet implemented — still an open item, not yet a met
-  success criterion. Now specced rather than merely deferred, and scoped
-  wider than this criterion assumed (system-wide, not Clance-only):
-  `docs/dictation.md`
+- ✅ Dictation implemented 2026-09-16, and scoped wider than this
+  criterion assumed (system-wide, not Clance-only) — see
+  `docs/dictation.md`. Pending real-voice accuracy validation.
 - ✅ A session created via Clance is resumable in a bare `claude`
   terminal, and vice versa — structurally guaranteed now (every session
   is a real CLI process), not just "in a format that could support this"

@@ -22,16 +22,53 @@ export type ClanceConfig = {
   // disables one they specifically don't want rather than needing to opt
   // into what's already there.
   enabledLocalTools: string[] | "all";
+  dictation: DictationConfig;
+};
+
+// Dictation settings (see docs/dictation.md). `activeModel` null means no
+// model has been installed yet, which is what gates the feature — the
+// shortcut stays registered either way so pressing it can explain itself
+// rather than doing nothing.
+export type DictationConfig = {
+  activeModel: string | null;
+  // "paste" synthesizes Cmd+V into the frontmost app (needs Accessibility);
+  // "clipboard" only copies, for users who'd rather paste themselves or
+  // haven't granted it.
+  insertMode: "paste" | "clipboard";
+  autoStopSilenceMs: number;
+  maxDurationMs: number;
+  // Off by default: audio is a recording of the user, kept only when they
+  // explicitly want it for debugging.
+  keepAudio: boolean;
+  // Seeded into whisper's --prompt. Phase 0 found this recovers camelCase
+  // identifiers and fixes src-vs-source, for ~90ms.
+  vocabulary: string;
 };
 
 const CONFIG_PATH = join(SESSION_CWD, "config.json");
 
+export const DEFAULT_VOCABULARY =
+  "tsconfig.json, package.json, npm, npx, git, grep, ripgrep, src, dist, " +
+  "node-pty, argv, stdout, stderr, Electron, TypeScript, JavaScript, " +
+  "Python, xterm.js, SQLite, JSON, YAML, API, CLI, UI, IPC, repo, async, " +
+  "await, const, refactor, Claude, Clance.";
+
+const DEFAULT_DICTATION: DictationConfig = {
+  activeModel: null,
+  insertMode: "paste",
+  autoStopSilenceMs: 1500,
+  maxDurationMs: 5 * 60 * 1000,
+  keepAudio: false,
+  vocabulary: DEFAULT_VOCABULARY,
+};
+
 const DEFAULT_CONFIG: ClanceConfig = {
-  shortcuts: { togglePopup: "Alt+Space" },
+  shortcuts: { togglePopup: "Alt+Space", dictate: "Alt+D" },
   shortcutsConfigured: false,
   defaultDirectory: null,
   recentDirectories: [],
   enabledLocalTools: "all",
+  dictation: DEFAULT_DICTATION,
 };
 
 export function readConfig(): ClanceConfig {
@@ -47,6 +84,10 @@ export function readConfig(): ClanceConfig {
       // before a shortcut was *removed* — e.g. the old sessionPicker — just
       // carries a harmless, no-longer-read extra key here.)
       shortcuts: { ...DEFAULT_CONFIG.shortcuts, ...stored.shortcuts },
+      // Same shallow-merge hazard as `shortcuts` above: a config written
+      // before a dictation setting existed would otherwise replace the
+      // whole object and drop the new key's default.
+      dictation: { ...DEFAULT_DICTATION, ...stored.dictation },
     };
   } catch {
     return DEFAULT_CONFIG;

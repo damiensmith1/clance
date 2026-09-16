@@ -182,6 +182,48 @@ export async function typeIntoCapturedWindow(text: string, appHint?: string): Pr
   await pasteViaClipboard(text);
 }
 
+// Loads the nut-js native addon without querying anything, so the first
+// real call doesn't pay for it. The import itself is the expensive part
+// (~300ms for the native binary); deliberately reads no window title, so
+// this warms a module and captures nothing.
+export async function warmFrontAppModule(): Promise<void> {
+  try {
+    await import("@nut-tree-fork/nut-js");
+  } catch {
+    // Warming is best-effort; a failure just means the first real call
+    // pays the cost it always used to.
+  }
+}
+
+// Reads the frontmost window's title *without* touching `capturedWindow`.
+//
+// Dictation needs this and must not use captureFrontmostWindow(): that one
+// stores into the module-level `capturedWindow` slot the popup owns, so a
+// dictation triggered while a widget is open would silently redirect that
+// widget's insert_text/click_at at whatever app the user happened to be
+// dictating into. Two features, one global — so dictation reads the title
+// and keeps nothing.
+export async function readFrontmostTitle(): Promise<string | undefined> {
+  try {
+    const { getActiveWindow } = await import("@nut-tree-fork/nut-js");
+    return await (await getActiveWindow()).title;
+  } catch {
+    return undefined;
+  }
+}
+
+// Pastes at the cursor in whatever is frontmost *right now*, with no focus
+// change of any kind.
+//
+// Dictation's HUD is deliberately non-focusable (see dictationWindow.ts), so
+// focus never left the user's app and there is nothing to restore — calling
+// focusTarget() here would actively cause the bug it exists to prevent, by
+// pulling focus to whatever the popup last captured instead of leaving it
+// where the user is typing.
+export async function pasteAtCursor(text: string): Promise<void> {
+  await pasteViaClipboard(text);
+}
+
 // Selects everything in whatever's focused and deletes it — a blunt "clear
 // this field" primitive (Cmd+A, then Delete) rather than anything that tries
 // to target a specific range of text, since there's no generic cross-app way

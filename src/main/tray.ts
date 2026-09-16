@@ -15,5 +15,15 @@ export function createTray(onTogglePopup: () => void, onOpenMainWindow: () => vo
   ]);
   tray.setContextMenu(menu);
 
+  trayRef = tray;
   return tray;
+}
+
+let trayRef: Tray | null = null;
+
+// Dictation's only always-visible state. The menu bar is the one place a
+// user can see the microphone is live regardless of which display the HUD
+// opened on, or whether a full-screen app is covering it.
+export function setTrayRecording(recording: boolean): void {
+  trayRef?.setTitle(recording ? "● Clance" : "Clance");
 }

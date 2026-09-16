@@ -3,6 +3,7 @@ import { LaunchAtLoginRow, DefaultDirectoryRow, usePreferences } from "../settin
 import { ConnectClaudeStep } from "../setup/ConnectClaudeStep.js";
 import { PermissionsStep } from "../setup/PermissionsStep.js";
 import { ShortcutsStep } from "../setup/ShortcutsStep.js";
+import { DictationStep } from "../setup/DictationStep.js";
 
 export function SettingsSection() {
   const [prefs, setPrefs] = usePreferences();
@@ -23,6 +24,11 @@ export function SettingsSection() {
         <${LaunchAtLoginRow} prefs=${prefs} setPrefs=${setPrefs} />
         <${DefaultDirectoryRow} prefs=${prefs} setPrefs=${setPrefs} />
         <${ShortcutsStep} />
+      </section>
+
+      <section class="extension-group">
+        <h2 class="group-title">Dictation</h2>
+        <${DictationStep} />
       </section>
 
       <footer class="settings-footer">
