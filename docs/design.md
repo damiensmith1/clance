@@ -1512,11 +1512,19 @@ see `docs/background-agent-architecture.md`.
       "staying open" is now just however long the user keeps that
       terminal's `claude` process running, the same as any terminal-based
       CLI session, not an app-managed conversation state.
-- [ ] Which local speech-to-text engine for dictation — **not yet
-      implemented at all**, terminal pivot didn't address this; still an
-      open requirements-level question (see `docs/requirements.md`
-      §"Dictation" — that requirement predates the CLI embedding and its
-      UX under a terminal-input model hasn't been thought through)
+- [x] Which local speech-to-text engine for dictation — **resolved
+      2026-09-16: whisper.cpp (`whisper-cli`) running ggml models**, with a
+      model catalog Clance recommends from based on detected machine specs
+      and installs on demand, and transcript history in an on-disk SQLite
+      database (`node:sqlite`, verified working in Electron 44's Node
+      24.20 — no native addon, unlike `node-pty`). WhisperKit and Apple's
+      `Speech` framework were both considered and rejected for v1; see
+      `docs/dictation.md` for the reasoning. Resolving the *UX* half
+      dissolved the terminal-input problem rather than solving it:
+      dictation is system-wide, pasting into whatever app is frontmost via
+      the `insert_text` machinery in `frontApp.ts` that already exists, so
+      Clance's own terminals need no special path. **Specced, not yet
+      implemented** — `docs/dictation.md` carries the phased build plan.
 - [x] Exact folder/config conventions for skills, tools, and MCP servers —
       **moot for skills/MCP.** A Clance-launched CLI process reads
       `~/.claude/skills/` and its own project/user `.mcp.json` exactly as

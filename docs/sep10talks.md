@@ -284,8 +284,12 @@ for this concrete tool set, not for the general problem:
   per the user's explicit ask that ordinary clicks not need approval.
 - [ ] Whether Anthropic's API supports true real-time duplex audio/video
   streaming at all today — unverified, don't assume yes
-- [ ] Local speech-to-text engine for dictation (pre-existing open question,
-  unrelated to the duplex-streaming tangent above — don't conflate them)
+- [x] Local speech-to-text engine for dictation (pre-existing open question,
+  unrelated to the duplex-streaming tangent above — don't conflate them).
+  **Resolved 2026-09-16: whisper.cpp + ggml models, system-wide rather than
+  Clance-only — `docs/dictation.md`.** The separation this line insisted on
+  held up: dictation is voice → text → a normal turn, and says nothing
+  about duplex streaming, which is still open above.
 - [x] Multimodal image input implemented: `ptyManager.ts`'s
   `pasteImageIntoPty()` delivers the screenshot as a real image content
   block (clipboard + `Ctrl+V` byte), and `design.md`'s "Context injection"

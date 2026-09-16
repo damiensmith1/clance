@@ -14,7 +14,8 @@ status: draft
 - Electron + Node.js
 - Global hotkey opens a popup widget
 - Free-text goal input (open-ended, not fixed actions like "Rewrite"/"Explain")
-- Dictation — speak your goal instead of typing it (local speech-to-text)
+- Dictation — speak instead of typing, anywhere in macOS, not just into
+  Clance (local speech-to-text; see `docs/dictation.md`)
 - No screen content — window title, selection, or screenshot — is captured
   or described to the model automatically at invocation anymore (revisited
   2026-09-14; see §"Screen context capture"). Instead, every popup session
@@ -117,16 +118,23 @@ status: draft
 
 ### Dictation
 
-- ❌ Not implemented. Predates the terminal-embedding pivot — a "populate a
-  text input" model doesn't map directly onto a terminal's stdin the way it
-  did onto the old custom input field, so this needs a fresh look at how
-  dictation should work against an embedded terminal (push-to-talk that
-  writes to the pty? a separate always-available field that feeds the pty
-  once transcribed?) before implementing. See `docs/design.md`'s open
-  questions.
-- Local speech-to-text (e.g. Whisper running locally) remains the plan —
-  no audio sent to any cloud service, consistent with the local-first
-  principle. Engine choice still unresolved (see `docs/design.md`).
+- ❌ Not implemented, but **no longer an open design question** — specced
+  in full in `docs/dictation.md` (scope, decisions, phased build plan).
+- **Scope decided 2026-09-16, and it widened:** dictation is not a
+  terminal-input feature. It's a *system-wide* one — a global shortcut
+  anywhere in macOS records, transcribes locally, and types the transcript
+  into whatever app was already frontmost (Wispr Flow / superwhisper
+  shaped), plus a Dictation tab in the main window holding every past
+  transcript in an on-disk SQLite database. That sidesteps the question
+  this section was parked on ("how does dictation map onto a terminal's
+  stdin?") rather than answering it: the transcript is pasted into the
+  frontmost app, and Clance's own terminals are just one such app, with
+  no special-casing.
+- Local speech-to-text remains the plan — no audio sent to any cloud
+  service, consistent with the local-first principle. **Engine resolved:**
+  whisper.cpp running ggml models, with a model catalog Clance recommends
+  from based on detected machine specs and installs on demand. See
+  `docs/dictation.md` for why, and for the alternatives rejected.
 
 ### File drag-and-drop
 
@@ -511,7 +519,9 @@ the toggle-managed path above) no Clance-specific wiring needed at all.
 - ~~Text injection works in at least one real target app~~ — **removed**,
   no longer an app-owned feature to validate
 - ❌ Dictation not yet implemented — still an open item, not yet a met
-  success criterion
+  success criterion. Now specced rather than merely deferred, and scoped
+  wider than this criterion assumed (system-wide, not Clance-only):
+  `docs/dictation.md`
 - ✅ A session created via Clance is resumable in a bare `claude`
   terminal, and vice versa — structurally guaranteed now (every session
   is a real CLI process), not just "in a format that could support this"
