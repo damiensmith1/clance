@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld("clanceApp", {
   getShortcutActions: () => ipcRenderer.invoke("setup:get-shortcut-actions"),
   saveShortcuts: (shortcuts: Record<string, string>) =>
     ipcRenderer.invoke("setup:save-shortcuts", shortcuts),
+  // Suspends Clance's global hotkeys so a shortcut recorder can see the
+  // keys instead of the OS firing the existing binding.
+  setShortcutCapture: (capturing: boolean) =>
+    ipcRenderer.invoke("setup:set-shortcut-capture", capturing),
   completeSetup: () => ipcRenderer.invoke("setup:complete"),
   listChatSessions: () => ipcRenderer.invoke("chatHistory:list-sessions"),
   resolveOpenArgs: (sessionId: string, name: string) =>

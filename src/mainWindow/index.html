@@ -1134,6 +1134,74 @@
         gap: 14px;
         flex-shrink: 0;
       }
+      /* Shortcut recorder. The field is a button rather than a text input:
+         the combination is captured from real keypresses, never typed, so
+         there's nothing to edit as text. */
+      .shortcut-field-wrap {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-shrink: 0;
+      }
+      .shortcut-field {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        min-height: 26px;
+        min-width: 86px;
+        justify-content: flex-end;
+        padding: 3px 6px;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: var(--radius-md);
+        font-family: inherit;
+        cursor: pointer;
+      }
+      .shortcut-field:hover {
+        border-color: var(--surface-border);
+        background: var(--surface-hover);
+      }
+      /* Recording is a deliberately loud state: the window is swallowing
+         keystrokes and the app's global hotkeys are suspended, so it must
+         be obvious that it's waiting for input. */
+      .shortcut-field-recording {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+        justify-content: center;
+        min-width: 130px;
+      }
+      .shortcut-key {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 22px;
+        background: var(--surface-elevated);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-sm);
+        padding: 2px 6px;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--text-primary);
+      }
+      .shortcut-prompt {
+        font-size: 12px;
+        color: var(--accent);
+      }
+      .shortcut-hint {
+        font-size: 11px;
+        color: var(--text-secondary);
+        white-space: nowrap;
+      }
+      .shortcut-hint-ok {
+        color: var(--success);
+      }
+      /* Spans the row so a full sentence of explanation fits, rather than
+         being squeezed into the right-hand control column. */
+      .shortcut-error {
+        margin: 0 0 10px;
+        font-size: 12px;
+      }
+
       .shortcut-display,
       .shortcut-edit {
         display: flex;

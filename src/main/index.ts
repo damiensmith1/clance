@@ -201,6 +201,19 @@ ipcMain.handle("setup:open-accessibility-settings", () =>
 
 ipcMain.handle("setup:get-shortcut-actions", () => SHORTCUT_ACTIONS);
 
+// While the settings UI is recording a new shortcut, Clance's own global
+// hotkeys have to come down. They're registered with the OS, so otherwise
+// pressing the very combination you're trying to rebind fires the feature
+// instead of reaching the renderer that's listening for it.
+ipcMain.handle("setup:set-shortcut-capture", async (_event, capturing: boolean) => {
+  if (capturing) {
+    unregisterAllHotkeys();
+    return;
+  }
+  const status = await getSetupStatus();
+  registerAllHotkeys(readConfig().shortcuts, status.isComplete);
+});
+
 ipcMain.handle(
   "setup:save-shortcuts",
   async (_event, shortcuts: Record<string, string>) => {

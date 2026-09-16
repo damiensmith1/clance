@@ -779,6 +779,49 @@ Both go through the same underlying mechanism:
   wired to the wizard's "Grant Access" button so it only fires on an
   explicit user press, never automatically.
  
+## Shortcut recorder
+
+Global shortcuts are set by pressing the keys, not by typing an accelerator
+string. Clicking a shortcut field puts it in a recording state
+(`ShortcutsStep.js`), keys are read from `event.code` — `event.key` is
+wrong here, since macOS reports Option+G as "©" and Shift+2 as "@" — and
+the captured combination is saved immediately.
+
+**Clance's own hotkeys are suspended while recording**
+(`setup:set-shortcut-capture` → `unregisterAllHotkeys`, restored on exit).
+Without that, pressing the very combination you are trying to rebind fires
+the feature instead of reaching the renderer. Suspend/release is balanced
+across cancel and save paths.
+
+Validation is stricter than an in-app shortcut would need, because a global
+hotkey fires regardless of which app is focused:
+
+- **At least one of ⌘/⌥/⌃.** Without a modifier the hotkey fires on every
+  keystroke system-wide — binding `G` would mean pressing g in any app
+  triggers Clance instead of typing a letter. Shift doesn't count; ⇧G is
+  still just a letter.
+- **⌘ alone is not enough.** Plain ⌘+key is the universal shortcut space
+  every Mac app uses (⌘C, ⌘V, ⌘S, ⌘Q); taking one globally steals it from
+  every app at once. It needs ⌥, ⌃ or ⇧ alongside.
+- **Function keys are the exception** to the modifier rule: they produce no
+  text, so a bare F5 is safe and is a normal thing to bind.
+- **A short OS-reserved list** is rejected with a specific reason: ⌘Tab
+  (app switcher), ⌘Space (Spotlight), ⌃⌘Q (lock screen), ⌘⌥⎋ (Force
+  Quit).
+- **Collisions between Clance's own actions** are caught in the UI, and
+  again in `setup:save-shortcuts`.
+
+`isValidAccelerator` in the main process remains the final authority — it
+probes by actually registering the accelerator, so anything the OS refuses
+surfaces as an error regardless of what the client-side rules allow.
+
+Escape cancels, Backspace/Delete resets to the action's default.
+
+Also fixed here: the previous UI seeded its state from each action's
+`defaultAccelerator` rather than the saved config, so it displayed defaults
+after a rebind — and saving from that state would have written the defaults
+back over the real bindings. It now reads `getPreferences().shortcuts`.
+
 ## Popup UI (terminal-based — supersedes the custom chat UI)
 
 The popup no longer renders any chat UI of its own (no avatars, bubbles,
