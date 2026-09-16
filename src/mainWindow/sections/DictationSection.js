@@ -1,11 +1,5 @@
 import { h, html, useEffect, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
 import { Icon } from "../../shared/icons.js";
-import { DictationStep } from "../setup/DictationStep.js";
-
-const TABS = [
-  { id: "history", label: "History" },
-  { id: "settings", label: "Setup & Models" },
-];
 
 // Presets rather than a date picker: dictation history is browsed by
 // recency ("what did I say earlier today"), not by absolute date, and a
@@ -107,8 +101,11 @@ function TranscriptRow({ transcript }) {
   `;
 }
 
-export function DictationSection() {
-  const [tab, setTab] = useState("history");
+// Setup — microphone, models, prompt, preferences — deliberately isn't
+// here: it's rendered by SettingsSection from the same DictationStep
+// component, and having it in two places meant two routes to the same
+// controls. This tab is history only.
+export function DictationSection({ onOpenSettings }) {
   const [transcripts, setTranscripts] = useState(null);
   const [query, setQuery] = useState("");
   const [stats, setStats] = useState(null);
@@ -244,30 +241,15 @@ export function DictationSection() {
                 <span class="status-card-title">Dictation isn't ready yet</span>
                 <span class="status-card-description">${availability.message}</span>
               </span>
-              ${availability.reason === "no-model" &&
-              html`<button class="btn-primary btn-small" onClick=${() => setTab("settings")}>
-                Install a model
+              ${onOpenSettings &&
+              html`<button class="btn-primary btn-small" onClick=${onOpenSettings}>
+                Open Settings
               </button>`}
             </div>
           `
         : null}
 
-      <div class="segmented">
-        ${TABS.map(
-          (t) => html`
-            <button
-              class="segmented-item ${tab === t.id ? "segmented-item-active" : ""}"
-              onClick=${() => setTab(t.id)}
-            >
-              ${t.label}
-            </button>
-          `
-        )}
-      </div>
-
-      ${tab === "history"
-        ? html`
-            <section class="extension-group">
+      <section class="extension-group">
               <div class="group-title-row">
                 <h2 class="group-title">
                   ${stats
@@ -382,13 +364,7 @@ export function DictationSection() {
                         )}
                       </div>
                     `}
-            </section>
-          `
-        : html`
-            <section class="extension-group">
-              <${DictationStep} />
-            </section>
-          `}
+      </section>
     </div>
   `;
 }

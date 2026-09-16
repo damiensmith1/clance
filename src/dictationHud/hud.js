@@ -23,6 +23,7 @@ let totalSamples = 0;
 let audioContext = null;
 let mediaStream = null;
 let workletNode = null;
+let silentNode = null;
 
 let settings = { sampleRate: 16000, autoStopSilenceMs: 1500, maxDurationMs: 300000 };
 let startedAt = 0;
@@ -127,11 +128,17 @@ async function startCapture() {
   const source = audioContext.createMediaStreamSource(mediaStream);
   workletNode = new AudioWorkletNode(audioContext, "clance-recorder");
   workletNode.port.onmessage = (event) => handleFrame(event.data);
-  // Connected to destination because some Chromium versions won't pull from
-  // a worklet with no downstream node. The worklet emits no output of its
-  // own, so nothing is actually played back.
+  // The worklet needs a path to a destination or some Chromium versions
+  // won't pull from it at all — but routing it straight to the speakers
+  // marks the page as playing audio, which is what puts a speaker glyph
+  // next to Clance in the OS. A zero-gain node in between keeps the graph
+  // running while guaranteeing the output is silent, so nothing is ever
+  // played and nothing is ever flagged as audible.
+  silentNode = audioContext.createGain();
+  silentNode.gain.value = 0;
   source.connect(workletNode);
-  workletNode.connect(audioContext.destination);
+  workletNode.connect(silentNode);
+  silentNode.connect(audioContext.destination);
 
   setState("recording", "Listening…");
   elapsedTimer = setInterval(() => {
@@ -179,6 +186,10 @@ function teardownCapture() {
     workletNode.port.onmessage = null;
     workletNode.disconnect();
     workletNode = null;
+  }
+  if (silentNode) {
+    silentNode.disconnect();
+    silentNode = null;
   }
   // Stopping every track is what actually releases the microphone and
   // clears the macOS recording indicator — closing the context alone

@@ -9,7 +9,7 @@ This is a test.I think it's so slow.Mmm.I think it's way faster now.This is bugg
 Testing, one, two, three.
 This is another test.
 I think it's a bit faster.Hello.
-Yeah. OK.
+Yeah. OK
 How about now? This will be fast.Blah blah blah blah blah.Yes.
 # Dictation (speech-to-text)
 
@@ -315,10 +315,17 @@ Note on building these strings: user-facing sentences here are assembled in
 JS and interpolated once, not composed from several adjacent template
 expressions. htm collapses the whitespace between adjacent expressions
 inside a flex container, which shipped as "Delete 48matchingtranscripts?".
-- The tab is also where dictation is configured — model management, mic
-  permission, shortcut, preferences — surfaced as a `DictationStep`
-  component reused in Settings, matching how `SettingsSection` already
-  reuses `ConnectClaudeStep`/`PermissionsStep`/`ShortcutsStep`.
+- **The tab is history only.** Setup — model management, microphone
+  permission, the transcription prompt, preferences — lives in the Settings
+  tab, which renders the same `DictationStep` component (the pattern
+  `SettingsSection` already follows for
+  `ConnectClaudeStep`/`PermissionsStep`/`ShortcutsStep`). A "Setup &
+  Models" pane was briefly duplicated inside the Dictation tab and
+  **removed 2026-09-16**: two routes to the same controls, with no reason
+  to prefer either. The "dictation isn't ready yet" card keeps an "Open
+  Settings" button, wired through `renderTabContent` to the Shell's
+  `openSection`, so the tab can still send the user where the controls
+  actually are.
 
 ### Microphone permission
 
@@ -663,6 +670,61 @@ Known remaining edge, not fixed: clicking the Dock icon *during* a
 recording now opens the main window, which takes focus, so the transcript
 pastes there rather than into the app you started in. Deliberate — the
 Dock click is an explicit request for the app — but worth knowing.
+
+### No emoji in the UI (2026-09-16)
+
+A speaker glyph was appearing in dictation history, as "into New Tab 🔊".
+It is not authored text — a scan of every `.ts`/`.js`/`.html`/`.css` file
+under `src/` finds zero emoji in any UI string (the only pictographic
+characters in the repo are `✅`/`⚠️` status markers in `docs/`, and a `✕`
+inside two code comments).
+
+It came from **another app's window title**. Chrome appends a speaker to
+the title of a tab that's playing audio, and Clance records the frontmost
+window title as a transcript's `targetApp` — so Chrome's transient UI state
+was being stored as part of the app name. `sanitizeWindowTitle`
+(`src/main/windowTitle.ts`) strips pictographic characters at the capture
+point in `readFrontmostTitle`, and a schema-version-2 migration rewrites
+titles already stored.
+
+The sanitiser is deliberately narrow — pictographic ranges plus the emoji
+modifiers (VS16, ZWJ, skin tones) that would otherwise be left as invisible
+debris. Window titles legitimately contain accented Latin, CJK, Cyrillic
+and em/en dashes, all of which must survive; it also tidies the doubled
+space and dangling separator that removing a glyph leaves behind, and
+returns undefined for a title that was *only* an emoji so it reads as "no
+target app" rather than an empty string.
+
+Separately, and found while chasing the same glyph: the HUD's AudioWorklet
+was connected straight to `audioContext.destination`, which marks the
+renderer audible and would have made Clance itself show an audio indicator.
+That connection exists because some Chromium versions won't pull from a
+worklet with no downstream node, so it now routes through a `GainNode` at
+`gain = 0` — graph still running, output guaranteed silent, nothing ever
+flagged as playing audio.
+
+### The main window wouldn't launch (2026-09-16)
+
+Removing the Dictation tab's duplicated setup pane left its
+"dictation isn't ready" card needing a route to Settings, so
+`renderTabContent` gained an `openSection` parameter. The call site passed
+a bare `openSection` — but that call site is inside **`PaneLeaf`**, while
+`openSection` is defined in **`Shell`**. A `ReferenceError` during render
+took out the whole main window: it never got past `app.js`'s initial
+"Loading…". Fixed by going through the `launcher` prop `PaneLeaf` already
+receives (`launcher.openSection`), which is how the sidebar buttons in the
+same component already reach it.
+
+The more useful lesson is why nothing caught it. Every renderer check up to
+this point mounted a *section* component directly — `DictationSection`,
+`DictationStep` — so `Shell`, `PaneTree` and `PaneLeaf` were never
+exercised at all, and a scope error in the component that renders every
+tab was invisible. There is now a check that boots the real
+`mainWindow/index.html` with the real preload against stubbed IPC, asserts
+the window isn't stuck on "Loading…", and clicks through to the Dictation
+tab. It was confirmed to fail (6 of 7 assertions, reporting
+`ReferenceError: openSection is not defined`) against the broken build
+before being kept.
 
 ### Second round of use-driven fixes (2026-09-16)
 

@@ -1,5 +1,6 @@
 import type { Window } from "@nut-tree-fork/nut-js";
 import { clipboard, screen } from "electron";
+import { sanitizeWindowTitle } from "./windowTitle";
 
 // Captured right before the popup window steals focus, so a proposed
 // text edit can be typed back into whatever the user was actually working
@@ -206,7 +207,10 @@ export async function warmFrontAppModule(): Promise<void> {
 export async function readFrontmostTitle(): Promise<string | undefined> {
   try {
     const { getActiveWindow } = await import("@nut-tree-fork/nut-js");
-    return await (await getActiveWindow()).title;
+    // Sanitised because other apps put transient UI state in their window
+    // titles — Chrome's audio indicator makes a tab title "New Tab 🔊",
+    // which would otherwise be recorded verbatim in dictation history.
+    return sanitizeWindowTitle(await (await getActiveWindow()).title);
   } catch {
     return undefined;
   }

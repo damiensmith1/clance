@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "fs";
 import { join } from "path";
 import { SESSION_CWD } from "./paths";
+import { sanitizeWindowTitle } from "./windowTitle";
 
 // Node's built-in SQLite rather than better-sqlite3 (see docs/dictation.md):
 // verified working in Electron 44's Node 24.20, including FTS5, which means
@@ -10,7 +11,7 @@ import { SESSION_CWD } from "./paths";
 // upstream, so every statement in the app goes through this one module; a
 // swap to another engine is a change to this file and nothing else.
 const DB_PATH = join(SESSION_CWD, "dictation.db");
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 export type Transcript = {
   id: number;
@@ -69,6 +70,20 @@ function migrate(database: DatabaseSync): void {
         INSERT INTO transcripts_fts(rowid, text) VALUES (new.id, new.text);
       END;
     `);
+  }
+
+  if (version < 2) {
+    // Titles captured before sanitizeWindowTitle existed still carry other
+    // apps' emoji (Chrome's "New Tab 🔊"). Rewritten in place rather than
+    // cleaned on read, so the stored history is the clean version.
+    const rows = database
+      .prepare("SELECT id, target_app FROM transcripts WHERE target_app IS NOT NULL")
+      .all() as { id: number; target_app: string }[];
+    const update = database.prepare("UPDATE transcripts SET target_app = ? WHERE id = ?");
+    for (const row of rows) {
+      const cleaned = sanitizeWindowTitle(row.target_app);
+      if (cleaned !== row.target_app) update.run(cleaned ?? null, row.id);
+    }
   }
 
   database.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);

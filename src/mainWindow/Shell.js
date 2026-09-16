@@ -90,7 +90,7 @@ function tabIcon(tab) {
   return Icon[tab.icon] ? Icon[tab.icon](15) : null;
 }
 
-function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut) {
+function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut, openSection) {
   switch (tab.type) {
     case "chats":
       return html`<${ChatsListSection} onOpenChat=${openChatTab} onNewChat=${openNewChatTab} />`;
@@ -99,7 +99,9 @@ function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut) {
     case "settings":
       return html`<${SettingsSection} />`;
     case "dictation":
-      return html`<${DictationSection} />`;
+      // Dictation's own setup lives in the Settings tab rather than being
+      // duplicated here, so the tab needs a way to send the user there.
+      return html`<${DictationSection} onOpenSettings=${() => openSection("settings")} />`;
     case "terminal":
       return html`<${TerminalSection} terminalId=${tab.terminalId} args=${tab.args} shell=${tab.shell} onPopOut=${onPopOut} />`;
     default:
@@ -284,7 +286,12 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
           // unrelated session in the widget rather than continuing this
           // one, so the button only appears once there's something to
           // actually resume.
-          activeTab.args?.length ? () => popOutTab(activeTab) : undefined
+          activeTab.args?.length ? () => popOutTab(activeTab) : undefined,
+          // Via the launcher prop, not a bare `openSection`: this call site
+          // is inside PaneLeaf, and openSection is defined in Shell — a
+          // bare reference here is a ReferenceError that throws during
+          // render and leaves the whole window stuck on "Loading…".
+          launcher.openSection
         )}
         ${dragTab &&
         splittableEdges.length > 0 &&
