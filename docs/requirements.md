@@ -70,7 +70,7 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - Approval is Claude Code's own Allow / Deny / Always allow prompt. Tools
   that can act on an app the user didn't point at, or that destroy content,
   always ask.
-- Each tool can be switched off (Tools → Clance tools). A
+- Each tool can be switched off (Settings → clance tools). A
   switched-off tool is refused, not just prompted.
 - Screen Recording is optional. Without it, `look_at_screen` says how to
   enable it and ⌘⇧R omits the screenshot.
@@ -112,7 +112,7 @@ Sessions Clance starts get these tools when Accessibility is granted:
 
 - Opens from the Dock icon or the menu-bar menu. While setup is incomplete it
   opens on launch.
-- A launcher opens Sessions, Dictation, Tools, Settings, or a
+- A launcher opens Sessions, Dictation, Settings, or a
   plain shell terminal. Sections open as tabs; reopening one focuses it.
 - Tabs can be split into up to four panes by dragging to an edge (at most a
   2×2 grid), resized by dragging dividers, and reordered. The layout is
@@ -127,11 +127,11 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - Skills, hooks, plugins and MCP servers configured for Claude Code (in
   `~/.claude/` or a project's `.mcp.json`) work in Clance sessions with no
   Clance-specific setup.
-- Tools shows:
-  - installed skills (read-only — Claude Code has no per-skill switch);
-  - MCP servers from `~/.clance/mcp.json`, each with an on/off toggle;
-  - Clance's local tools, with per-tool toggles and a health check for the
-    local tools server.
+- Clance doesn't manage skills, plugins or MCP servers; engineers do that with
+  the `claude` CLI.
+- Settings has a collapsible "clance tools" group, collapsed by default: a
+  summary row, expanding to the local tools server's health check and a
+  per-tool on/off switch.
 
 ## Dictation
 

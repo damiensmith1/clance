@@ -382,21 +382,31 @@ export function dispatch(action) {
 // a renderer-only refresh rather than a full app restart — so keep its id
 // stable and let createPtySession's own "already exists" check (main
 // process) sort out whether there's really something to reattach to.
+const KNOWN_TAB_TYPES = new Set(["chats", "dictation", "settings", "terminal"]);
+
 // Drops anything that doesn't look like a well-formed node, falling back
 // to `initialState()`.
 function rehydrateNode(node) {
   if (!node || typeof node !== "object") return null;
   if (node.type === "leaf") {
-    if (!Array.isArray(node.tabs) || node.tabs.length === 0) return null;
-    const tabs = node.tabs.map((tab) =>
-      tab.type === "terminal" && !tab.shell ? { ...tab, terminalId: nextTerminalId() } : tab
-    );
+    if (!Array.isArray(node.tabs)) return null;
+    // A layout saved by an older version can hold a tab for a section that no
+    // longer exists (the Tools page, "skills"); drop it rather than show an
+    // empty tab.
+    const tabs = node.tabs
+      .filter((tab) => KNOWN_TAB_TYPES.has(tab?.type))
+      .map((tab) => (tab.type === "terminal" && !tab.shell ? { ...tab, terminalId: nextTerminalId() } : tab));
+    if (tabs.length === 0) return null;
     const activeTabId = tabs.some((t) => t.id === node.activeTabId) ? node.activeTabId : tabs[0].id;
     return { ...node, tabs, activeTabId };
   }
   if (node.type === "split" && Array.isArray(node.children) && node.children.length >= 2) {
     const children = node.children.map(rehydrateNode);
-    if (children.some((c) => c === null)) return null;
+    // A pane emptied by dropping removed tab types collapses into its
+    // sibling instead of discarding the whole layout.
+    const kept = children.filter((c) => c !== null);
+    if (kept.length === 0) return null;
+    if (kept.length === 1) return kept[0];
     return { ...node, children };
   }
   return null;

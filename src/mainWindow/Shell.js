@@ -1,7 +1,6 @@
 import { html, useEffect, useRef, useState } from "../shared/vendor/preact-htm-standalone.module.js";
 import { Icon } from "../shared/icons.js";
 import { ChatsListSection, focusSessionSearch } from "./sections/ChatsSection.js";
-import { SkillsSection } from "./sections/SkillsSection.js";
 import { SettingsSection } from "./sections/SettingsSection.js";
 import { DictationSection } from "./sections/DictationSection.js";
 import { TerminalSection, nextTerminalId, destroyTerminal } from "./sections/TerminalSection.js";
@@ -23,7 +22,6 @@ import {
 const LAUNCHER_ITEMS = [
   { id: "chats", label: "Sessions", icon: "chat" },
   { id: "dictation", label: "Dictation", icon: "mic" },
-  { id: "skills", label: "Tools", icon: "puzzle" },
   { id: "settings", label: "Settings", icon: "gear" },
 ];
 
@@ -105,8 +103,6 @@ function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut, openSectio
   switch (tab.type) {
     case "chats":
       return html`<${ChatsListSection} onOpenChat=${openChatTab} onNewChat=${openNewChatTab} />`;
-    case "skills":
-      return html`<${SkillsSection} />`;
     case "settings":
       return html`<${SettingsSection} />`;
     case "dictation":

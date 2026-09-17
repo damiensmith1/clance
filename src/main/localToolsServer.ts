@@ -21,7 +21,7 @@ import { readConfig, writeConfig } from "./config";
 // The single source of truth for what local tools exist, both for
 // popupWindow.ts's --allowedTools/--disallowedTools wiring (which needs
 // `tier` to know which are pre-authorized) and for the Settings UI's
-// per-tool toggle list (SkillsSection.js's "Custom Tools" tab) — kept next
+// per-tool toggle list (Settings → clance tools, SettingsSection.js) — kept next
 // to createMcpServer() below so a new server.registerTool() call is never
 // added without a matching entry here. `tier` mirrors the split
 // docs/design.md's "Local tools server" documents: "auto" tools are

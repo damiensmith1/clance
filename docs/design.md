@@ -16,7 +16,7 @@ One Electron app, three renderer surfaces:
 | Surface | Renderer | Preload | Role |
 |---|---|---|---|
 | Popup widget | `src/popup/` (vanilla JS) | `src/preload/popup.ts` | Floating terminal opened by ⌥Space |
-| Main window | `src/mainWindow/` (Preact + htm) | `src/preload/mainWindow.ts` | Sessions, Dictation, Tools, Settings, terminal tabs |
+| Main window | `src/mainWindow/` (Preact + htm) | `src/preload/mainWindow.ts` | Sessions, Dictation, Settings, terminal tabs |
 | Dictation HUD | `src/dictationHud/` (vanilla JS) | `src/preload/dictationHud.ts` | Non-focusable recording indicator; also captures the audio |
 
 Everything with OS or process access lives in the main process
@@ -53,9 +53,8 @@ which is also the working directory for sessions that have no project:
 | Path | Contents | Owner |
 |---|---|---|
 | `config.json` | Shortcuts, default directory, recent directories, enabled local tools, dictation settings | `config.ts` |
-| `mcp.json` | User MCP servers (`.mcp.json` shape plus an `enabled` flag) | `mcpConfig.ts` |
 | `archived-sessions.json` | Archived session ids | `archivedSessions.ts` |
-| `window-layout.json` | Main window pane/tab tree | `windowLayout.ts` |
+| `window-layout.json` | Main window pane/tab tree; tabs for sections that no longer exist are dropped on restore | `windowLayout.ts` |
 | `pool.json` | The pre-warmed popup session | `agentPool.ts` |
 | `loginShellPath.json` | Cached login-shell `PATH` | `ptyManager.ts` |
 | `dictation.db` | Transcript history | `dictationStore.ts` |
@@ -387,8 +386,8 @@ UI and the CLI arguments all read from.
   guessable name could otherwise collide with the pre-authorized tool names.
 - **Gated on Accessibility.** The whole server is left out of `--mcp-config`
   unless Accessibility is granted, so the CLI never sees tools that would
-  fail. The user's own MCP servers aren't affected by this gate.
-- **Health check.** Tools shows whether the server is running and
+  fail. MCP servers the user configured in Claude Code aren't affected.
+- **Health check.** Settings → clance tools shows whether the server is running and
   can send a real authenticated `initialize` to it, to tell a broken server
   from a CLI configuration problem.
 - **Logging.** Every request and tool call is logged with timing. `text`
@@ -412,25 +411,22 @@ Three transport details matter, all found by testing against the real CLI:
 
 Sessions are ordinary Claude Code processes, so skills, hooks, plugins and
 MCP servers configured in `~/.claude/` or a project's `.mcp.json` just work.
-Tools (`SkillsSection.js`) has three tabs:
+Clance doesn't list or manage any of them: it's for engineers, who manage
+them with the `claude` CLI. The only thing Clance adds to a session is its own
+local tools server, merged in with `--mcp-config`.
 
-- **Skills** — a read-only list of `~/.claude/skills/*/SKILL.md`
-  (`skills.ts`). There's no toggle because the CLI has no per-skill switch,
-  only `--disable-slash-commands` for all of them.
-- **MCP servers** — entries from `~/.clance/mcp.json`, each with an
-  `enabled` flag. Enabled servers are merged into the same `--mcp-config` as
-  the local tools, so toggles apply to sessions minted afterwards. Servers are
-  added by editing the file.
-- **Clance tools** (the default tab) — per-tool on/off for the local tools
-  (`config.enabledLocalTools`, default `"all"`), plus the server's status and
-  health check.
+Settings has a "clance tools" group for it, collapsed by default because the
+tool list is long: one summary row (how many tools are on, whether the server
+is running) with Show/Hide. Expanded, it shows the server's address and health
+check and an on/off switch per tool (`config.enabledLocalTools`, default
+`"all"`).
 
 ## Main window
 
 ### Shell and navigation
 
 `Shell.js` renders a floating launcher in the top-right corner — Sessions,
-Dictation, Tools, Settings, and a plain terminal — rather than a
+Dictation, Settings, and a plain terminal — rather than a
 sidebar, so it takes no layout space. Sections are singleton tabs: opening
 one that's already open focuses it, in whichever pane it's in. The terminal
 button opens `$SHELL -il` in the default directory.
@@ -532,9 +528,7 @@ inputs, 12 windows. Four shadows: `--shadow-menu`, `--shadow-window`,
 - Status is shown as a dot plus a mono word (`granted`, `needs you`,
   `off · optional`) rather than icons.
 - Keyboard shortcuts render as keycaps.
-- Views within a page (Tools' Skills / MCP servers / Clance tools) are
-  underline tabs with counts; value choices (Dictation's date ranges) are a
-  segmented pill.
+- Value choices (Dictation's date ranges) are a segmented pill.
 - Menus are white with `--shadow-menu`: a lowercase mono section label, an
   optional right-aligned mono detail and shortcut, and a wash highlight.
 
@@ -734,8 +728,8 @@ Dictation) and the popup hotkey isn't registered. The wizard shows its steps
 as a numbered row and every step after the first has Back. Dictation's hotkey
 doesn't depend on setup. The same step components render in Settings
 afterwards, as status rows (`StatusCard.js`: title, description, a mono status
-word, an optional action) in one column of headed groups (access, general,
-shortcuts, dictation). Microphone access sits under Access with the other
+word, an optional action) in one column of headed groups (access, clance
+tools, general, shortcuts, dictation). Microphone access sits under Access with the other
 permissions; the speech model is one row that expands into the model list.
 
 Each section loads its own data at a different speed, so Settings stays hidden

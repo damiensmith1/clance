@@ -58,7 +58,7 @@ export function openMainWindow(): void {
 
 // Brings the main window forward on one of its sections (e.g. Settings, from
 // the dictation HUD's "not set up" action).
-export async function openMainWindowSection(section: "chats" | "dictation" | "skills" | "settings"): Promise<void> {
+export async function openMainWindowSection(section: "chats" | "dictation" | "settings"): Promise<void> {
   openMainWindow();
   await mainWindowReady;
   mainWindow!.webContents.send("open-section", section);

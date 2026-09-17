@@ -4,7 +4,6 @@ import { captureFrontmostWindow, captureSelectedText, focusTarget } from "./fron
 import { captureAndSaveActiveDisplay } from "./screenCapture";
 import { checkPermissions } from "./permissions";
 import { ensureLocalToolsServer, listLocalTools } from "./localToolsServer";
-import { getActiveMcpServers, type StoredMcpServerConfig } from "./mcpConfig";
 import { spawnBackgroundAgent, resolveSessionId, stopAgent, rmAgent, listAgents } from "./agentSessions";
 import { claimPoolSpare, refillPool } from "./agentPool";
 import { hasRealUserMessage, listSessions, REFRESH_CONTEXT_PREFIX } from "./chatHistory";
@@ -376,21 +375,12 @@ export async function refreshContext(): Promise<{ text: string; preview: Context
 // no human ever seeing it happen. See `docs/design.md`'s "Local tools
 // server" for the full reasoning.
 //
-// Gives the launched CLI session every MCP server Clance should wire in:
-// Clance's own local "computer use" tools (see src/main/localToolsServer.ts
-// for the full list) plus whatever the user has enabled in Settings' "MCP
-// Servers" tab (`mcpConfig.ts`'s `getActiveMcpServers()` — previously
-// configured but never actually reached a launched session, see
-// docs/design.md's "Extensibility"). Additive
-// (not --strict-mcp-config), so a project's own `.mcp.json` still loads too.
-// `localToolsAvailable` is returned separately from `args` rather than
-// folded into "args is non-empty" — a user's own custom MCP servers can
-// make `args` non-empty even when Accessibility isn't granted, and callers
-// (see popupMintArgs) need to know specifically whether the *local* tools
-// are what's available, since that's what the system-prompt nudge is
-// about.
+// Wires Clance's own local "computer use" tools (see src/main/localToolsServer.ts
+// for the full list) into the launched CLI session. Additive (not
+// --strict-mcp-config), so the MCP servers the user configured in Claude
+// Code, and a project's own `.mcp.json`, still load too.
 export async function sessionMcpArgs(): Promise<{ args: string[]; localToolsAvailable: boolean }> {
-  const mcpServers: Record<string, StoredMcpServerConfig> = { ...getActiveMcpServers() };
+  const mcpServers: Record<string, { type: "http"; url: string; headers: Record<string, string> }> = {};
   let allowedNames: string[] = [];
   let disallowedNames: string[] = [];
 
@@ -398,9 +388,7 @@ export async function sessionMcpArgs(): Promise<{ args: string[]; localToolsAvai
   // read-only ones reuse that machinery — see frontApp.ts), so the whole
   // local tools server is gated on Accessibility; when it's not granted,
   // the CLI just doesn't see any of these tools rather than seeing ones
-  // that silently fail. This gate is scoped to Clance's own local tools
-  // only — a user's own configured MCP servers above have nothing to do
-  // with Accessibility and are never held back by it.
+  // that silently fail.
   const localToolsAvailable = checkPermissions().accessibility;
   if (localToolsAvailable) {
     const { url, token } = await ensureLocalToolsServer();
@@ -424,7 +412,7 @@ export async function sessionMcpArgs(): Promise<{ args: string[]; localToolsAvai
     const toolName = (name: string) => `mcp__${serverKey}__${name}`;
     mcpServers[serverKey] = { type: "http", url, headers: { Authorization: `Bearer ${token}` } };
 
-    // Settings' "Custom Tools" toggle list (SkillsSection.js, backed by
+    // Settings' clance tools list (SettingsSection.js, backed by
     // localToolsServer.ts's listLocalTools()) decides which tools are
     // offered at all, checked fresh at mint time same as everything here
     // — a tool that's off is passed via --disallowedTools so the CLI

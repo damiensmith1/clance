@@ -38,8 +38,6 @@ import { getSession, listSessions, hasRealUserMessage } from "./chatHistory";
 import { setSessionArchived } from "./archivedSessions";
 import { sessionFolder, revealFolder, resumeInTerminal } from "./sessionActions";
 import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
-import { listSkills } from "./skills";
-import { listMcpServers, setMcpServerEnabled } from "./mcpConfig";
 import {
   listLocalTools,
   setLocalToolEnabled,
@@ -464,15 +462,6 @@ ipcMain.handle("layout:get", () => readWindowLayout());
 ipcMain.handle("layout:save", (_event, layout: unknown) => {
   writeWindowLayout(layout);
 });
-
-ipcMain.handle("extensibility:list-skills", () => listSkills());
-
-ipcMain.handle("extensibility:list-mcp-servers", () => listMcpServers());
-
-ipcMain.handle(
-  "extensibility:set-mcp-server-enabled",
-  (_event, name: string, enabled: boolean) => setMcpServerEnabled(name, enabled)
-);
 
 ipcMain.handle("extensibility:list-local-tools", () => listLocalTools());
 
