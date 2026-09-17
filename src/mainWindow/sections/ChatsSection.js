@@ -40,6 +40,9 @@ const FILTERS = [
   { id: "running", label: "Running" },
   { id: "closed", label: "Closed" },
   { id: "archived", label: "Archived" },
+  // Sessions a program started (see chatHistory.ts's `automated`), e.g. a
+  // plugin's commit reviews: kept out of the other views, like archived ones.
+  { id: "automated", label: "Automated" },
 ];
 
 // Short and mono, for the table's "updated" column: now, 12m, 3h, 4d, then
@@ -278,11 +281,11 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
       .filter((s) => !liveSessionIds.has(s.id))
       .map((session) => ({
         key: `session:${session.id}`,
-        kind: session.archived ? "archived" : "closed",
+        kind: session.archived ? "archived" : session.automated ? "automated" : "closed",
         session,
         title: session.title,
         project: session.projectLabel,
-        state: session.archived ? "archived" : "closed",
+        state: session.archived ? "archived" : session.automated ? "automated" : "closed",
         tone: "plain",
         updated: relativeTime(session.lastModified),
       }));
@@ -292,10 +295,11 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     return allRows.filter((row) => {
-      if (filter === "all" && row.kind === "archived") return false;
+      if (filter === "all" && (row.kind === "archived" || row.kind === "automated")) return false;
       if (filter === "running" && row.kind !== "live") return false;
       if (filter === "closed" && row.kind !== "closed") return false;
       if (filter === "archived" && row.kind !== "archived") return false;
+      if (filter === "automated" && row.kind !== "automated") return false;
       if (!q) return true;
       return row.title.toLowerCase().includes(q) || row.project.toLowerCase().includes(q);
     });

@@ -26,6 +26,10 @@ export type SessionSummary = {
   // Clance-local bookkeeping (see archivedSessions.ts) — never reflects
   // anything about the underlying transcript file itself.
   archived: boolean;
+  // Started by a program through the Agent SDK or `claude -p` rather than by
+  // a person — e.g. the security-guidance plugin reviews every commit this
+  // way. Hidden from the Sessions list unless its Automated filter is on.
+  automated: boolean;
 };
 
 export type ChatBlock =
@@ -133,7 +137,19 @@ function extractText(content: unknown): string | undefined {
   return undefined;
 }
 
+// The CLI stamps every entry with how the session was started: "cli" for an
+// interactive session (including Clance's `--bg` agents), "sdk-py", "sdk-ts"
+// or "sdk-cli" for one a program started.
+function isAutomatedEntrypoint(entrypoint: unknown): boolean {
+  return typeof entrypoint === "string" && entrypoint.startsWith("sdk-");
+}
+
 async function firstUserTitle(filePath: string): Promise<string> {
+  return (await readSessionHead(filePath)).title;
+}
+
+async function readSessionHead(filePath: string): Promise<{ title: string; automated: boolean }> {
+  let automated = false;
   const rl = createInterface({
     input: createReadStream(filePath, "utf8"),
     crlfDelay: Infinity,
@@ -148,6 +164,7 @@ async function firstUserTitle(filePath: string): Promise<string> {
         continue;
       }
       if (entry.type !== "user") continue;
+      automated ||= isAutomatedEntrypoint(entry.entrypoint);
       const message = entry.message as Record<string, unknown> | undefined;
       const text = extractText(message?.content);
       if (!text || !text.trim() || isSyntheticLocalCommandText(text)) continue;
@@ -160,12 +177,12 @@ async function firstUserTitle(filePath: string): Promise<string> {
       // with nothing added — fall back to the raw text rather than
       // treating a real, submitted turn as if it didn't happen.
       const stripped = stripClanceContextPrefix(stripLeadingImagePlaceholder(text)).trim();
-      return truncate(stripped || text, TITLE_MAX_LENGTH);
+      return { title: truncate(stripped || text, TITLE_MAX_LENGTH), automated };
     }
   } finally {
     rl.close();
   }
-  return EMPTY_CONVERSATION_TITLE;
+  return { title: EMPTY_CONVERSATION_TITLE, automated };
 }
 
 // firstUserTitle's fallback when a transcript has no real (non-synthetic)
@@ -347,7 +364,7 @@ export async function listSessions(): Promise<SessionSummary[]> {
         const fileStat = await stat(filePath);
         if (!fileStat.isFile()) continue;
         const id = basename(entry, ".jsonl");
-        const title = await firstUserTitle(filePath);
+        const { title, automated } = await readSessionHead(filePath);
         // Scoped to Clance's own default-directory bucket only — a real,
         // unrelated project's session with no messages yet is none of
         // Clance's business to hide, and there's no cheap directory-based
@@ -371,6 +388,7 @@ export async function listSessions(): Promise<SessionSummary[]> {
           title,
           lastModified: fileStat.mtime.toISOString(),
           archived: archivedIds.has(id),
+          automated,
         });
       } catch {
         continue;

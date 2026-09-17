@@ -350,7 +350,10 @@ openInBrowseBtn.addEventListener("click", async () => {
 function openOpenInDropdown() {
   openInDropdownEl.classList.add("open");
   openInSearchEl.value = "";
-  window.clance.listChatSessions().then((sessions) => {
+  window.clance.listChatSessions().then((all) => {
+    // Program-started sessions (a plugin's commit reviews, say) aren't
+    // conversations to resume; the main window lists them under Automated.
+    const sessions = all.filter((s) => !s.automated);
     openInSessions = sessions;
     renderOpenInList(sessions);
   });

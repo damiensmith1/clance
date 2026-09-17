@@ -160,9 +160,17 @@ Their project is the agent's `cwd` basename, and their state comes from the
 CLI's `state` field: `working` (signal dot), `blocked` shown as "needs you"
 (amber), `failed`, `done`, or the `busy`/`idle` status otherwise. Closed
 transcripts follow, newest first, minus whatever is live. A filter menu
-narrows to running, closed or archived (`archived-sessions.json`). Archiving
-is the only form of removal: deleting a transcript could destroy real work
-from an unrelated project.
+narrows to running, closed, archived (`archived-sessions.json`) or automated.
+Archiving is the only form of removal: deleting a transcript could destroy real
+work from an unrelated project.
+
+Automated sessions are ones a program started rather than a person, read from
+the `entrypoint` the CLI stamps on each transcript entry: `sdk-py`, `sdk-ts` or
+`sdk-cli` (`claude -p`), as opposed to `cli` for interactive sessions,
+Clance's `--bg` agents included. The security-guidance plugin, for one, runs
+two Agent SDK passes per commit. They only appear under the Automated filter,
+never in All sessions, Closed, search or the widget's resume list; an archived
+one shows under Archived.
 
 The page is keyboard-first. ⌘K anywhere in the main window, terminals
 included, switches to Sessions (opening it if needed) and focuses the search

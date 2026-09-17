@@ -89,7 +89,9 @@ Sessions Clance starts get these tools when Accessibility is granted:
     newest first.
 - Opening a session attaches to it if it's running, or resumes it in its own
   recorded working directory.
-- The table can be filtered (all, running, closed, archived) and driven from
+- Sessions a program started (a plugin's commit reviews, an SDK script) are
+  hidden from the list and the widget, and viewable under an Automated filter.
+- The table can be filtered (all, running, closed, archived, automated) and driven from
   the keyboard: ⌘K (from anywhere in the main window) to search, which also
   offers a new session in the default,
   a recent or a chosen folder; arrows to select; ↩ to open; ⌥↩ to open in the
