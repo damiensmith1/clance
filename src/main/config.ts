@@ -43,6 +43,10 @@ export type DictationConfig = {
   // Seeded into whisper's --prompt. Phase 0 found this recovers camelCase
   // identifiers and fixes src-vs-source, for ~90ms.
   vocabulary: string;
+  // The microphone chosen in Settings, or null to follow macOS's default
+  // input. Stored with its name as well as its id: the HUD matches by id, then
+  // by name, since an id can change when a Bluetooth device is re-paired.
+  inputDevice: { id: string; label: string } | null;
 };
 
 const CONFIG_PATH = join(SESSION_CWD, "config.json");
@@ -60,6 +64,7 @@ const DEFAULT_DICTATION: DictationConfig = {
   maxDurationMs: 5 * 60 * 1000,
   keepAudio: false,
   vocabulary: DEFAULT_VOCABULARY,
+  inputDevice: null,
 };
 
 const DEFAULT_CONFIG: ClanceConfig = {

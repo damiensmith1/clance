@@ -122,14 +122,15 @@ async function startCapture() {
   startedAt = Date.now();
 
   try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    });
+    const device = await chosenInputDeviceId();
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints(device) });
+    } catch (error) {
+      // A chosen mic that can't be opened (unplugged mid-enumeration, busy)
+      // shouldn't stop dictation; the system default still might work.
+      if (!device) throw error;
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints(null) });
+    }
   } catch (error) {
     window.clanceDictation.micError(error && error.message ? error.message : String(error));
     setState("error", "Allow microphone access", {
@@ -169,6 +170,31 @@ async function startCapture() {
   elapsedTimer = setInterval(() => {
     elapsedEl.textContent = formatElapsed(Date.now() - startedAt);
   }, 250);
+}
+
+function audioConstraints(deviceId) {
+  return {
+    channelCount: 1,
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+    ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+  };
+}
+
+// The microphone chosen in Settings, if it's connected: matched by id, then
+// by name (an id can change when a Bluetooth device is re-paired). Null means
+// record from macOS's default input.
+async function chosenInputDeviceId() {
+  const chosen = settings.inputDevice;
+  if (!chosen) return null;
+  try {
+    const inputs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput");
+    const match = inputs.find((d) => d.deviceId === chosen.id) ?? inputs.find((d) => d.label === chosen.label);
+    return match ? match.deviceId : null;
+  } catch {
+    return null;
+  }
 }
 
 function handleFrame(frame) {

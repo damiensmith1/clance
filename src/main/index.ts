@@ -603,6 +603,20 @@ ipcMain.handle(
   "dictation:save-settings",
   (_event, patch: Partial<ReturnType<typeof readConfig>["dictation"]>) => {
     const config = readConfig();
+    // The microphone arrives from the renderer: keep it only as a null or a
+    // well-formed { id, label }.
+    if (patch && "inputDevice" in patch) {
+      const device = patch.inputDevice as unknown;
+      const valid =
+        device === null ||
+        (typeof device === "object" &&
+          typeof (device as { id?: unknown }).id === "string" &&
+          typeof (device as { label?: unknown }).label === "string" &&
+          (device as { id: string }).id.length <= 512 &&
+          (device as { label: string }).label.length <= 512);
+      if (!valid) delete patch.inputDevice;
+      else if (device) patch.inputDevice = { id: (device as { id: string }).id, label: (device as { label: string }).label };
+    }
     config.dictation = { ...config.dictation, ...patch };
     // A null prompt means "reset to the shipped default" — the settings UI
     // has a Reset button and this is how it asks, rather than the renderer

@@ -1,4 +1,4 @@
-import { h, html, useEffect, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { h, html, useEffect, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
 import { Icon } from "../../shared/icons.js";
 import { StatusCard } from "../components/StatusCard.js";
 import { Toggle } from "../components/Toggle.js";
@@ -51,6 +51,118 @@ function metaLine(model, installing, progress) {
  * PermissionsStep): with `onComplete` it renders as a wizard step, without
  * it as plain rows for the Settings page and the Dictation tab.
  */
+// Which microphone dictation records from. "System default" follows macOS's
+// input, which switches to a headset's mic when one connects; choosing a mic
+// keeps dictation on it. Stored as { id, label }: the HUD matches by id, then
+// by name (see chosenInputDeviceId in hud.js).
+function MicrophoneRow({ value, onChange }) {
+  const [inputs, setInputs] = useState([]);
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    function load() {
+      navigator.mediaDevices
+        .enumerateDevices()
+        .then((devices) => setInputs(devices.filter((d) => d.kind === "audioinput")))
+        .catch(() => setInputs([]));
+    }
+    load();
+    navigator.mediaDevices.addEventListener("devicechange", load);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", load);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e) => {
+      if (!wrapRef.current?.contains(e.target)) setOpen(false);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  // Chromium lists the default input twice: once as itself and once as a
+  // "default" entry named "Default - <device>".
+  const defaultName = inputs.find((d) => d.deviceId === "default")?.label.replace(/^Default - /, "") || null;
+  const devices = inputs.filter((d) => d.deviceId !== "default" && d.deviceId !== "communications" && d.label);
+  const connected = value && (devices.some((d) => d.deviceId === value.id) || devices.some((d) => d.label === value.label));
+
+  function choose(device) {
+    setOpen(false);
+    onChange(device ? { id: device.deviceId, label: device.label } : null);
+  }
+
+  const description = !value
+    ? defaultName
+      ? `Follows your Mac's sound input, now ${defaultName}.`
+      : "Follows your Mac's sound input."
+    : connected
+      ? "Dictation records from this mic, whatever your Mac's input is."
+      : "Not connected, so dictation uses your Mac's sound input for now.";
+
+  return html`
+    <div class="preference-row">
+      <div>
+        <div class="preference-title">Microphone</div>
+        <div class="preference-description">${description}</div>
+      </div>
+      <div class="mic-menu-wrap" ref=${wrapRef}>
+        <button
+          class="btn-secondary btn-small mic-menu-button"
+          aria-haspopup="menu"
+          aria-expanded=${open}
+          onClick=${() => setOpen(!open)}
+        >
+          <span class="mic-menu-button-label">${value ? value.label : "System default"}</span>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+        </button>
+        ${open &&
+        html`
+          <div class="menu mic-menu" role="menu">
+            <button class="menu-item" role="menuitemradio" aria-checked=${!value} onClick=${() => choose(null)}>
+              <span class="menu-check">${!value ? "✓" : ""}</span>
+              <span class="menu-item-title">System default</span>
+              ${defaultName && html`<span class="menu-item-detail">${defaultName}</span>`}
+            </button>
+            ${devices.length > 0 && html`<div class="menu-separator"></div>`}
+            ${devices.map((device) => {
+              const checked = Boolean(value && (value.id === device.deviceId || (!connected && value.label === device.label)));
+              return html`
+                <button
+                  key=${device.deviceId}
+                  class="menu-item"
+                  role="menuitemradio"
+                  aria-checked=${checked}
+                  onClick=${() => choose(device)}
+                >
+                  <span class="menu-check">${checked ? "✓" : ""}</span>
+                  <span class="menu-item-title">${device.label}</span>
+                </button>
+              `;
+            })}
+            ${value &&
+            !connected &&
+            html`
+              <button class="menu-item" role="menuitemradio" aria-checked="true" disabled>
+                <span class="menu-check">✓</span>
+                <span class="menu-item-title">${value.label}</span>
+                <span class="menu-item-detail">not connected</span>
+              </button>
+            `}
+          </div>
+        `}
+      </div>
+    </div>
+  `;
+}
+
 export function DictationStep({ onComplete, onBack, onReady } = {}) {
   const [data, setData] = useState(null);
   const [settings, setSettings] = useState(null);
@@ -314,6 +426,7 @@ export function DictationStep({ onComplete, onBack, onReady } = {}) {
   `;
 
   const preferenceRows = html`
+    <${MicrophoneRow} value=${settings.inputDevice ?? null} onChange=${(inputDevice) => patchSettings({ inputDevice })} />
     <div class="preference-row">
       <div>
         <div class="preference-title">Type the transcript for me</div>

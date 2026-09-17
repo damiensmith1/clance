@@ -195,6 +195,7 @@ async function startRecording(): Promise<void> {
     autoStopSilenceMs: config.dictation.autoStopSilenceMs,
     maxDurationMs: config.dictation.maxDurationMs,
     targetApp: targetApp ?? null,
+    inputDevice: config.dictation.inputDevice,
   });
 
   cancelEscapeHotkey = registerTemporaryHotkey("Escape", () => void cancelDictation());

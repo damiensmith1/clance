@@ -563,7 +563,14 @@ the menu bar, which macOS recolours for light and dark. `Logo()` in
    only metadata for the history row, so it isn't on the critical path.
 3. The HUD renderer records: `getUserMedia` → an `AudioWorklet` that
    downsamples to 16 kHz mono and computes RMS for the level meter and
-   silence detection. Auto-stop arms only after speech is heard.
+   silence detection. Auto-stop arms only after speech is heard. The input is
+   macOS's default unless Settings names a microphone (`dictation.inputDevice`,
+   `{ id, label }`). That one is used when connected, matched by id and then by
+   name, since an id can change when a Bluetooth device re-pairs; if it's
+   missing or won't open, recording falls back to the default. Following the
+   default alone broke dictation with Bluetooth headsets: macOS moves the input
+   to the headset's mic, which often records silence from Chromium while it
+   switches into call mode.
 4. On stop, PCM goes to main, is written as a WAV, and `whisper-cli` runs.
 5. The text is pasted at the cursor (`pasteAtCursor`), or copied when
    `insertMode` is `clipboard` or Accessibility is off. Then the transcript is

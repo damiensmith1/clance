@@ -13,6 +13,7 @@ export type DictationStartPayload = {
   autoStopSilenceMs: number;
   maxDurationMs: number;
   targetApp: string | null;
+  inputDevice: { id: string; label: string } | null;
 };
 
 contextBridge.exposeInMainWorld("clanceDictation", {

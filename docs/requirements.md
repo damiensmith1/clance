@@ -143,6 +143,9 @@ Sessions Clance starts get these tools when Accessibility is granted:
   into which window, or copied), and when something is missing (model, engine,
   microphone permission) it says what and links to the place to fix it. The menu bar shows a dot while
   recording, and the app menu has Start/Stop and Cancel.
+- Dictation records from the Mac's default input, or from a microphone chosen
+  in Settings, so connecting a headset doesn't move it; a chosen mic that isn't
+  connected falls back to the default.
 - Transcription runs on the Mac with whisper.cpp. Audio is deleted after
   transcription unless "keep audio" is on.
 - The transcript is pasted at the cursor (needs Accessibility), or only
