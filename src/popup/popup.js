@@ -362,6 +362,27 @@ function closeOpenInDropdown() {
   openInDropdownEl.classList.remove("open");
 }
 
+// ⌘K opens this menu from anywhere in the widget, terminal included (capture
+// phase, so xterm never sees the key); ⌘K again or Esc closes it and hands
+// the keyboard back to the terminal.
+window.addEventListener(
+  "keydown",
+  (e) => {
+    const open = openInDropdownEl.classList.contains("open");
+    const commandK = e.metaKey && !e.altKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "k";
+    if (!commandK && !(open && e.key === "Escape")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (open) {
+      closeOpenInDropdown();
+      term?.focus();
+    } else {
+      openOpenInDropdown();
+    }
+  },
+  true
+);
+
 openInBtn.addEventListener("click", () => {
   if (openInDropdownEl.classList.contains("open")) {
     closeOpenInDropdown();

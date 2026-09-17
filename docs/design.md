@@ -163,7 +163,11 @@ narrows to running, closed or archived (`archived-sessions.json`). Archiving
 is the only form of removal: deleting a transcript could destroy real work
 from an unrelated project.
 
-The page is keyboard-first. ⌘K focuses the search field, whose dropdown lists
+The page is keyboard-first. ⌘K anywhere in the main window, terminals
+included, switches to Sessions (opening it if needed) and focuses the search
+field. `Shell.js` catches it in the capture phase so a focused terminal never
+sees it, and `focusSessionSearch()` holds the request until the section has
+mounted. The search dropdown lists
 the top matches and then "start a new session in" the default folder (⌘↩),
 recent folders or a chosen one (⌘O). In the table ↑↓ select, ↩ opens in a tab,
 ⌥↩ opens in the widget, ⌘⌫ archives (or stops a live session) and ⌘N starts a
@@ -281,12 +285,14 @@ every open would cost latency and be stale or irrelevant most of the time.
   one in a chosen directory (never pooled — the directory isn't known in
   advance). Nothing is typed into a resumed session. It's the toolbar title
   itself: a status dot, the session's folder and title
-  (`popup:session-info`), and a chevron.
+  (`popup:session-info`), and a chevron. ⌘K anywhere in the widget, terminal
+  included, opens it with its search focused; ⌘K again or Esc closes it and
+  returns focus to the terminal.
 
 If a session fails to start — a spawn error, or the CLI exiting non-zero
 within 8 s — the popup swaps the terminal for an error state with Try again
 (`popup:retry`) and Open Settings, rather than leaving a dead terminal. A
-hint bar under the terminal shows the hide and ⌘⇧R shortcuts and the
+hint bar under the terminal shows the hide, ⌘K and ⌘⇧R shortcuts and the
 session's folder.
 
 ### ⌘⇧R: hand over the current screen

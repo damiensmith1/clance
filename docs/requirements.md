@@ -33,9 +33,9 @@ What Clance does. Why is in `background.md`; how is in `design.md`.
 - The widget can be dragged and resized and stays where the user puts it. It
   never closes on losing focus.
 - Toolbar:
-  - **Title** — shows the session's folder and title; clicking it resumes
-    any past session in the widget, or starts a new session in a recent or
-    chosen directory.
+  - **Title** — shows the session's folder and title; clicking it, or ⌘K
+    anywhere in the widget, resumes any past session in the widget, or starts
+    a new session in a recent or chosen directory.
   - **ctx** — hover card showing what the last ⌘⇧R captured.
   - **Open in App** — move the live terminal into a main-window tab without
     restarting it.
@@ -90,7 +90,8 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - Opening a session attaches to it if it's running, or resumes it in its own
   recorded working directory.
 - The table can be filtered (all, running, closed, archived) and driven from
-  the keyboard: ⌘K to search, which also offers a new session in the default,
+  the keyboard: ⌘K (from anywhere in the main window) to search, which also
+  offers a new session in the default,
   a recent or a chosen folder; arrows to select; ↩ to open; ⌥↩ to open in the
   widget; ⌘⌫ to archive or stop; ⌘N for a new session.
 - Right-clicking a session offers opening it in a tab or the widget, resuming

@@ -1,6 +1,6 @@
 import { html, useEffect, useRef, useState } from "../shared/vendor/preact-htm-standalone.module.js";
 import { Icon } from "../shared/icons.js";
-import { ChatsListSection } from "./sections/ChatsSection.js";
+import { ChatsListSection, focusSessionSearch } from "./sections/ChatsSection.js";
 import { SkillsSection } from "./sections/SkillsSection.js";
 import { SettingsSection } from "./sections/SettingsSection.js";
 import { DictationSection } from "./sections/DictationSection.js";
@@ -545,6 +545,21 @@ export function Shell() {
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
+  // ⌘K from anywhere in the window, terminals included: switch to Sessions
+  // (opening it if needed) with the cursor in its search. Capture phase, so a
+  // focused terminal never sees the key.
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (!e.metaKey || e.altKey || e.ctrlKey || e.shiftKey || e.key.toLowerCase() !== "k") return;
+      e.preventDefault();
+      e.stopPropagation();
+      openSection("chats");
+      focusSessionSearch();
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, []);
+
   useEffect(() => {
     window.clanceApp.launchUpdateCheck().then((result) => {
       if (result?.status === "available") setUpdate(result);
@@ -566,9 +581,11 @@ export function Shell() {
     });
   }
 
+  // Reads the store directly rather than the render's `state`, so it's
+  // current when called from a listener registered once.
   function openSection(id) {
     const item = LAUNCHER_ITEMS.find((i) => i.id === id);
-    openTab({ id, type: id, label: item.label, icon: item.icon }, { paneId: state.activePaneId });
+    openTab({ id, type: id, label: item.label, icon: item.icon }, { paneId: getState().activePaneId });
   }
 
   // Minting a background agent is a real subprocess round trip (~0.5-1s),

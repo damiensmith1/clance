@@ -24,6 +24,16 @@ const ACTIVE_POLL_MS = 5000;
 const TOAST_MS = 5000;
 const COMMAND_MATCHES = 5;
 const COMMAND_RECENT_DIRS = 3;
+const FOCUS_SEARCH_EVENT = "clance:focus-session-search";
+
+// ⌘K anywhere in the main window (Shell.js) calls this after switching to the
+// Sessions tab. The tab may not be mounted yet, so the request is also kept
+// until the section mounts and picks it up.
+let searchFocusPending = false;
+export function focusSessionSearch() {
+  searchFocusPending = true;
+  window.dispatchEvent(new Event(FOCUS_SEARCH_EVENT));
+}
 
 const FILTERS = [
   { id: "all", label: "All sessions" },
@@ -200,6 +210,18 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
   const rootRef = useRef(null);
   const searchRef = useRef(null);
   const toastTimer = useRef(null);
+
+  useEffect(() => {
+    function takeFocus() {
+      if (!searchFocusPending || !searchRef.current) return;
+      searchFocusPending = false;
+      searchRef.current.focus();
+      searchRef.current.select();
+    }
+    takeFocus();
+    window.addEventListener(FOCUS_SEARCH_EVENT, takeFocus);
+    return () => window.removeEventListener(FOCUS_SEARCH_EVENT, takeFocus);
+  }, []);
 
   useEffect(() => {
     window.clanceApp.listChatSessions().then((result) => {
@@ -444,11 +466,6 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
       const focusInside = root.contains(document.activeElement) || document.activeElement === document.body;
       if (!focusInside) return;
 
-      if (e.metaKey && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        searchRef.current?.focus();
-        return;
-      }
       if (typingElsewhere(e.target)) return;
 
       if (e.key === "Escape") {
