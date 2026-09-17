@@ -9,8 +9,9 @@ export function usePreferences() {
   return [prefs, setPrefs];
 }
 
+// While preferences load, both rows render without their controls rather
+// than as a shorter placeholder, so the page doesn't shift when they arrive.
 export function LaunchAtLoginRow({ prefs, setPrefs }) {
-  if (!prefs) return html`<p class="empty-note">Loading…</p>`;
   function handleChange(enabled) {
     setPrefs({ ...prefs, launchOnLogin: enabled });
     window.clanceApp.setLaunchOnLogin(enabled);
@@ -21,7 +22,7 @@ export function LaunchAtLoginRow({ prefs, setPrefs }) {
         <div class="preference-title">Launch at login</div>
         <div class="preference-description">Open Clance when you log in to your Mac.</div>
       </div>
-      <${Toggle} checked=${prefs.launchOnLogin} label="Launch at login" onChange=${handleChange} />
+      ${prefs && html`<${Toggle} checked=${prefs.launchOnLogin} label="Launch at login" onChange=${handleChange} />`}
     </div>
   `;
 }
@@ -32,7 +33,6 @@ export function LaunchAtLoginRow({ prefs, setPrefs }) {
 // existing session, which always reopens in whatever directory it already
 // belongs to. See docs/design.md's "Working directory".
 export function DefaultDirectoryRow({ prefs, setPrefs }) {
-  if (!prefs) return html`<p class="empty-note">Loading…</p>`;
 
   async function handleBrowse() {
     const dir = await window.clanceApp.pickDirectory();
@@ -54,12 +54,15 @@ export function DefaultDirectoryRow({ prefs, setPrefs }) {
           Where new sessions start.
         </div>
       </div>
-      <div class="preference-row-actions">
-        <span class="preference-value">${prefs.defaultDirectory || "~/.clance"}</span>
-        ${prefs.defaultDirectory &&
-        html`<button class="btn-quiet btn-small" onClick=${handleReset}>Reset</button>`}
-        <button class="btn-secondary btn-small" onClick=${handleBrowse}>Change…</button>
-      </div>
+      ${prefs &&
+      html`
+        <div class="preference-row-actions">
+          <span class="preference-value">${prefs.defaultDirectory || "~/.clance"}</span>
+          ${prefs.defaultDirectory &&
+          html`<button class="btn-quiet btn-small" onClick=${handleReset}>Reset</button>`}
+          <button class="btn-secondary btn-small" onClick=${handleBrowse}>Change…</button>
+        </div>
+      `}
     </div>
   `;
 }

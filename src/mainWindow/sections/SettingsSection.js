@@ -73,7 +73,7 @@ export function SettingsSection() {
   }, []);
 
   return html`
-    <div class="settings-layout">
+    <div class="section-page">
       <header class="page-header">
         <h1 class="page-title">Settings</h1>
       </header>

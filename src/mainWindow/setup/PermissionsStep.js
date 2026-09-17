@@ -36,7 +36,14 @@ export function PermissionsStep({ onComplete, onBack } = {}) {
   }, [allGranted]);
 
   if (status === null) {
-    return html`<p class="empty-note">Checking…</p>`;
+    // Settings keeps the rows' shape while checking, so nothing jumps.
+    return onComplete
+      ? html`<p class="empty-note">Checking…</p>`
+      : html`
+          <${StatusCard} title="Accessibility" description="Type and click in other apps when you ask." status="checking…" />
+          <${StatusCard} title="Screen Recording" description="Hand Clance a screenshot with ⌘⇧R." status="checking…" />
+          <${StatusCard} title="Microphone" description="Needed for dictation." status="checking…" />
+        `;
   }
 
   // Accessibility is the only hard requirement — it's what lets Clance type

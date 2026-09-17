@@ -369,7 +369,9 @@
         flex: 1 1 auto;
         min-height: 0;
         background: var(--app-bg);
-        padding: var(--space-1) 14px var(--space-3);
+        /* Little at the bottom: the terminal already leaves up to a row's
+           height spare below its last line. */
+        padding: var(--space-1) 14px var(--space-1);
         box-sizing: border-box;
       }
       #term-inner {

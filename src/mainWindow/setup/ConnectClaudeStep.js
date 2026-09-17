@@ -53,7 +53,11 @@ export function ConnectClaudeStep({ onComplete, onBack } = {}) {
   }
 
   if (status === null) {
-    return html`<p class="empty-note">Checking…</p>`;
+    // In Settings the check can take a few seconds; hold the row's shape so
+    // nothing below it moves when the result arrives.
+    return onComplete
+      ? html`<p class="empty-note">Checking…</p>`
+      : html`<${StatusCard} title="Claude account" description="Checking your Claude plan…" status="checking…" />`;
   }
 
   const account = `${status.email ?? "your account"}${status.subscriptionType ? ` · ${status.subscriptionType} plan` : ""}`;
