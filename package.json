@@ -1,6 +1,6 @@
 {
   "name": "clance",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "license": "MIT",
   "description": "Hotkey-triggered, screen-aware macOS agent popup built on the Claude Agent SDK",
   "main": "dist/main/index.js",
