@@ -153,7 +153,8 @@ real user message, read line by line rather than parsing whole transcripts
 (`REFRESH_CONTEXT_PREFIX`) are skipped so they never become a title.
 
 The Sessions tab (`ChatsSection.js`) is one table: session (title over its
-folder), project, state, updated. Live sessions come first, from
+folder), project, state, updated. It has no header row, since each column is
+plain from its content; a line of keyboard hints sits above it instead. Live sessions come first, from
 `claude agents --json` polled every 5 s, titled from the matching transcript.
 Their project is the agent's `cwd` basename, and their state comes from the
 CLI's `state` field: `working` (signal dot), `blocked` shown as "needs you"

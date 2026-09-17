@@ -760,17 +760,17 @@
         bottom: var(--space-5);
         z-index: 40;
       }
+      /* Above the table, not below it: with a long history nobody scrolls to
+         the end. It stands in for column headers, which the table doesn't
+         need: each column is plain from its content. */
       .keyboard-hints {
         display: flex;
         gap: 18px;
-        margin-top: var(--space-4);
+        margin: 0 0 var(--space-3);
+        padding-left: var(--space-2);
         font-family: var(--font-mono);
         font-size: var(--text-xs);
         color: var(--text-tertiary);
-      }
-      .sessions-loading-label {
-        display: block;
-        margin-bottom: var(--space-2);
       }
       .skeleton {
         display: block;
@@ -825,7 +825,6 @@
         flex-direction: column;
         border-top: 1px solid var(--surface-border);
       }
-      .session-table-head,
       .session-row {
         display: grid;
         grid-template-columns: 14px minmax(0, 1fr) 130px 84px 60px 60px;
@@ -833,12 +832,6 @@
         column-gap: var(--space-3);
         padding: 0 var(--space-2);
         border-bottom: 1px solid var(--surface-border);
-      }
-      .session-table-head {
-        height: 30px;
-        font-family: var(--font-mono);
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
       }
       .session-row {
         height: 42px;
@@ -848,6 +841,9 @@
       .session-row:hover,
       .session-row-selected {
         background: var(--surface-bg);
+      }
+      .sessions-keyboard-nav .session-row:not(.session-row-selected):hover {
+        background: transparent;
       }
       .session-row-selected .session-title {
         font-weight: var(--weight-medium);
@@ -899,10 +895,6 @@
       .session-state-ok {
         color: var(--success);
       }
-      .session-table-head .session-updated {
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-      }
       .session-actions {
         display: flex;
         justify-content: flex-end;
@@ -914,6 +906,9 @@
       .session-row:hover .session-row-action,
       .session-row:focus-within .session-row-action {
         visibility: visible;
+      }
+      .sessions-keyboard-nav .session-row:hover:not(:focus-within) .session-row-action {
+        visibility: hidden;
       }
       .section-page > .segmented {
         margin-bottom: var(--space-5);

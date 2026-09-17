@@ -82,21 +82,14 @@ function typingElsewhere(target) {
   return Boolean(target?.closest?.("input, textarea, [contenteditable], .xterm"));
 }
 
-function SessionTableHead() {
-  return html`
-    <div class="session-table-head" aria-hidden="true">
-      <span></span>
-      <span>session</span>
-      <span>project</span>
-      <span>state</span>
-      <span class="session-updated">updated</span>
-      <span></span>
-    </div>
-  `;
-}
+// Enough placeholder rows to fill the window (rows are 42px tall), so the
+// loading table reaches the bottom like a real history does.
+const SKELETON_WIDTHS = [320, 250, 380, 210, 290];
+const SESSION_ROW_PX = 42;
 
 function SkeletonRows() {
-  return [320, 250, 380, 210, 290].map(
+  const count = Math.max(SKELETON_WIDTHS.length, Math.ceil(window.innerHeight / SESSION_ROW_PX));
+  return Array.from({ length: count }, (_, i) => SKELETON_WIDTHS[i % SKELETON_WIDTHS.length]).map(
     (width) => html`
       <div class="session-row session-row-skeleton" aria-hidden="true">
         <span></span>
@@ -482,6 +475,11 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
       const index = rows.findIndex((row) => row.key === selectedKey);
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
+        // Moving the selection leaves a right-clicked row behind: close its
+        // menu and drop its focus (and focus ring), or ↩ would still open it.
+        setContextMenu(null);
+        if (document.activeElement?.closest?.(".session-row")) document.activeElement.blur();
+        root.classList.add("sessions-keyboard-nav");
         const step = e.key === "ArrowDown" ? 1 : -1;
         const next = index === -1 ? 0 : Math.max(0, Math.min(rows.length - 1, index + step));
         setSelectedKey(rows[next].key);
@@ -500,6 +498,20 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [rows, selectedKey]);
+
+  // While the arrow keys drive the selection, the row under a resting mouse
+  // pointer mustn't look selected too: hover styling is off until the mouse
+  // actually moves (a scroll can fire mousemove without moving it).
+  useEffect(() => {
+    let last = null;
+    function onMouseMove(e) {
+      const moved = last && (last.x !== e.screenX || last.y !== e.screenY);
+      last = { x: e.screenX, y: e.screenY };
+      if (moved) rootRef.current?.classList.remove("sessions-keyboard-nav");
+    }
+    window.addEventListener("mousemove", onMouseMove);
+    return () => window.removeEventListener("mousemove", onMouseMove);
+  }, []);
 
   // Menus close on any outside click.
   useEffect(() => {
@@ -531,6 +543,14 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
 
   const hasAnySession = allRows.length > 0;
   const filterLabel = FILTERS.find((f) => f.id === filter).label;
+
+  // Shown while loading too, so the skeleton rows sit exactly where the real
+  // rows will.
+  const keyboardHints = html`
+    <div class="keyboard-hints">
+      <span>↑↓ select</span><span>↩ open</span><span>⌥↩ widget</span><span>⌘⌫ archive</span><span>⌘N new session</span>
+    </div>
+  `;
 
   return html`
     <div class="section-page sessions-page" ref=${rootRef}>
@@ -621,8 +641,8 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
 
       ${loading
         ? html`
-            <div class="mono-label sessions-loading-label">loading sessions</div>
-            <div class="session-table"><${SkeletonRows} /></div>
+            ${keyboardHints}
+            <div class="session-table" aria-busy="true" aria-label="Loading sessions"><${SkeletonRows} /></div>
           `
         : !hasAnySession
           ? html`
@@ -644,8 +664,8 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
                 ${query.trim() ? "Nothing matches that search." : `No ${filterLabel.toLowerCase()} sessions.`}
               </p>`
             : html`
+                ${keyboardHints}
                 <div class="session-table">
-                  <${SessionTableHead} />
                   ${rows.map(
                     (row) => html`
                       <${SessionRow}
@@ -659,9 +679,6 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
                       />
                     `
                   )}
-                </div>
-                <div class="keyboard-hints">
-                  <span>↑↓ select</span><span>↩ open</span><span>⌘N new session</span><span>⌘⌫ archive</span><span>⌘K search</span>
                 </div>
               `}
 
