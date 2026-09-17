@@ -27,13 +27,15 @@ contextBridge.exposeInMainWorld("clanceDictation", {
   requestStop: () => ipcRenderer.send("dictation:request-stop"),
   cancel: () => ipcRenderer.send("dictation:request-cancel"),
   micError: (message: string) => ipcRenderer.send("dictation:mic-error", message),
+  resize: (width: number) => ipcRenderer.send("dictation:resize", width),
+  action: (name: "open-settings" | "open-microphone-settings") => ipcRenderer.send("dictation:hud-action", name),
 
   onStart: (cb: (p: DictationStartPayload) => void) => on("dictation:start", cb),
   onStop: (cb: () => void) => on("dictation:stop", cb),
   onCancel: (cb: () => void) => on("dictation:cancel", cb),
   onState: (cb: (p: { state: string }) => void) => on("dictation:state", cb),
-  onDone: (cb: (p: { text: string; inserted: boolean }) => void) => on("dictation:done", cb),
+  onDone: (cb: (p: { text: string; inserted: boolean; targetApp: string | null }) => void) => on("dictation:done", cb),
   onEmpty: (cb: () => void) => on("dictation:empty", cb),
   onError: (cb: (p: { message: string }) => void) => on("dictation:error", cb),
-  onUnavailable: (cb: (p: { message?: string }) => void) => on("dictation:unavailable", cb),
+  onUnavailable: (cb: (p: { reason?: string; message?: string }) => void) => on("dictation:unavailable", cb),
 });

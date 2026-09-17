@@ -23,7 +23,7 @@ import {
 const LAUNCHER_ITEMS = [
   { id: "chats", label: "Sessions", icon: "chat" },
   { id: "dictation", label: "Dictation", icon: "mic" },
-  { id: "skills", label: "Skills & Plugins", icon: "puzzle" },
+  { id: "skills", label: "Tools", icon: "puzzle" },
   { id: "settings", label: "Settings", icon: "gear" },
 ];
 
@@ -86,7 +86,18 @@ function usePaneState() {
   return state;
 }
 
+// Section tabs take their label from LAUNCHER_ITEMS rather than the saved
+// tab, so a layout persisted before a section was renamed shows the new name.
+function tabLabel(tab) {
+  return LAUNCHER_ITEMS.find((item) => item.id === tab.type)?.label ?? tab.label;
+}
+
+// An attached session is live by definition (the tab is an `attach` client
+// onto a running background agent), so it shows the signal dot.
 function tabIcon(tab) {
+  if (tab.type === "terminal" && tab.args?.[0] === "attach") {
+    return html`<span class="status-dot status-dot-live"></span>`;
+  }
   return Icon[tab.icon] ? Icon[tab.icon](15) : null;
 }
 
@@ -207,6 +218,18 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
     ? EDGES.filter((edge) => canSplitAt(root, dragTab.paneId, dragTab.tabId, node.id, edge))
     : [];
   const showLauncher = node.id === launcher.topRightPaneId;
+  const tabListRef = useRef(null);
+
+  // The tab row has no scrollbar (see .tab-list in index.html), so keep the
+  // active tab in view and let a mouse wheel scroll it sideways.
+  useEffect(() => {
+    tabListRef.current?.querySelector(".tab-active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [node.activeTabId, node.tabs.length]);
+
+  function scrollTabList(event) {
+    if (event.deltaX !== 0 || event.deltaY === 0) return;
+    event.currentTarget.scrollLeft += event.deltaY;
+  }
 
   // Closes this tab and reopens the same session in the popup widget —
   // window.clanceApp.openInWidget resumes it there via the same args this
@@ -220,7 +243,7 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
   return html`
     <div class="pane-leaf" onMouseDown=${() => activatePane(node.id)}>
       <div class="tab-bar ${node.id === topLeftPaneId ? "tab-bar-inset" : ""}" data-pane-id=${node.id}>
-        <div class="tab-list">
+        <div class="tab-list" ref=${tabListRef} onWheel=${scrollTabList}>
           ${node.tabs.map(
             (tab, i) => html`
               <button
@@ -229,7 +252,7 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
                 onPointerDown=${(e) => startDrag(e, tab, node.id)}
               >
                 <span class="tab-icon">${tabIcon(tab)}</span>
-                <span class="tab-label">${tab.label}</span>
+                <span class="tab-label">${tabLabel(tab)}</span>
                 <span
                   class="tab-close"
                   onPointerDown=${(e) => e.stopPropagation()}
@@ -255,7 +278,7 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
           <div class="launcher-cluster">
             <span
               class="status-dot ${launcher.claudeConnected ? "status-dot-ok" : "status-dot-off"}"
-              title=${launcher.claudeConnected ? "Claude Connected" : "Claude Disconnected"}
+              title=${launcher.claudeConnected ? "Claude connected" : "Claude signed out"}
             ></span>
             <button class="launcher-item" title="New Terminal" onClick=${() => launcher.openShellTab()}>
               ${Icon.terminal(15)}
@@ -275,6 +298,7 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
           </div>
         `}
       </div>
+      ${showLauncher && launcher.banner}
       <main class="content ${activeTab?.type === "terminal" ? "content-chat" : ""}">
         ${activeTab &&
         renderTabContent(
@@ -318,6 +342,10 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
 export function Shell() {
   const state = usePaneState();
   const [claudeConnected, setClaudeConnected] = useState(null);
+  const [claudeInstalled, setClaudeInstalled] = useState(true);
+  const [signingIn, setSigningIn] = useState(false);
+  const [update, setUpdate] = useState(null);
+  const [updateCopied, setUpdateCopied] = useState(false);
   const [dragTab, setDragTab] = useState(null);
   const paneAreaRef = useRef(null);
   const previewRef = useRef(null);
@@ -478,7 +506,7 @@ export function Shell() {
   }
 
   useEffect(() => {
-    window.clanceApp.getSetupStatus().then((status) => setClaudeConnected(status.claude.loggedIn));
+    refreshClaudeStatus();
     hydrateFromDisk();
   }, []);
 
@@ -486,6 +514,12 @@ export function Shell() {
   // session: the pty itself is reparented to this window (so the CLI
   // process isn't restarted and nothing in flight is lost) before the tab
   // is opened to receive its output.
+  useEffect(() => {
+    return window.clanceApp.onOpenSection((section) => {
+      if (LAUNCHER_ITEMS.some((item) => item.id === section)) openSection(section);
+    });
+  }, [state.activePaneId]);
+
   useEffect(() => {
     return window.clanceApp.onOpenSessionTab(async ({ terminalId, args, title }) => {
       await window.clanceApp.reparentTerminal(terminalId);
@@ -495,6 +529,42 @@ export function Shell() {
       );
     });
   }, []);
+
+  function refreshClaudeStatus() {
+    return window.clanceApp.getSetupStatus().then((status) => {
+      setClaudeConnected(status.claude.loggedIn);
+      setClaudeInstalled(status.claude.installed);
+    });
+  }
+
+  // Sign-in happens in the browser or a terminal, so re-check when the
+  // window comes back to the front rather than waiting for a relaunch.
+  useEffect(() => {
+    const onFocus = () => refreshClaudeStatus();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
+  useEffect(() => {
+    window.clanceApp.launchUpdateCheck().then((result) => {
+      if (result?.status === "available") setUpdate(result);
+    });
+  }, []);
+
+  function signIn() {
+    setSigningIn(true);
+    window.clanceApp
+      .connectClaude()
+      .catch(() => {})
+      .finally(() => refreshClaudeStatus().finally(() => setSigningIn(false)));
+  }
+
+  function copyUpgradeCommand() {
+    navigator.clipboard.writeText(update.command).then(() => {
+      setUpdateCopied(true);
+      setTimeout(() => setUpdate(null), 1200);
+    });
+  }
 
   function openSection(id) {
     const item = LAUNCHER_ITEMS.find((i) => i.id === id);
@@ -585,17 +655,44 @@ export function Shell() {
 
   const topLeftPaneId = topLeftLeafId(state.root);
   const topRightPaneId = topRightLeafId(state.root);
+  const banner =
+    claudeConnected === false
+      ? html`
+          <div class="app-banner" role="status">
+            <span class="status-dot status-dot-off"></span>
+            ${claudeInstalled
+              ? html`<span>Claude is signed out, so new sessions can't start.</span>
+                  <button class="btn-secondary btn-small" disabled=${signingIn} onClick=${signIn}>
+                    ${signingIn ? "Waiting for browser…" : "Sign in"}
+                  </button>`
+              : html`<span>Claude Code isn't installed, so sessions can't start.</span>
+                  <button class="btn-secondary btn-small" onClick=${() => openSection("settings")}>Open Settings</button>`}
+          </div>
+        `
+      : null;
+
   const launcher = {
     topRightPaneId,
     claudeConnected,
     activeSectionId: activeTab?.type,
     openSection,
     openShellTab,
+    banner,
   };
 
   return html`
     <div class="shell">
       <div class="shell-main">
+        ${update &&
+        html`
+          <div class="toast toast-floating" role="status">
+            <span class="toast-message">${`Clance ${update.latest} is available`}</span>
+            <button class="toast-action" onClick=${copyUpgradeCommand}>
+              ${updateCopied ? "Copied" : "Copy upgrade command"}
+            </button>
+            <button class="toast-dismiss" aria-label="Dismiss" onClick=${() => setUpdate(null)}>×</button>
+          </div>
+        `}
         <div class="pane-area" ref=${paneAreaRef}>
           <${PaneTree}
             node=${state.root}

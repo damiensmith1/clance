@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <title>Clance</title>
     <link rel="stylesheet" href="../shared/theme.css" />
+    <link rel="stylesheet" href="../shared/components.css" />
     <style>
       html,
       body {
@@ -12,6 +13,8 @@
         background: var(--app-bg);
         color: var(--text-primary);
         font-family: var(--font-sans);
+        font-weight: var(--weight-regular);
+        -webkit-font-smoothing: antialiased;
       }
       code {
         font-family: var(--font-mono);
@@ -29,7 +32,7 @@
          in Shell.js. Compound selector so it can't lose to `.tab-bar`'s
          own `padding` shorthand on source order. */
       .tab-bar.tab-bar-inset {
-        padding-left: 96px;
+        padding-left: 84px;
       }
       /* Lives inline at the trailing end of whichever tab bar sits in the
          window's top-right corner — normal flow content, not an overlay,
@@ -45,18 +48,21 @@
         gap: 2px;
         align-self: center;
         flex-shrink: 0;
-        padding-bottom: 4px;
+        padding-right: var(--space-1);
+      }
+      .launcher-cluster .status-dot {
+        margin: 0 var(--space-2);
       }
       .launcher-item {
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 26px;
-        height: 26px;
+        width: 28px;
+        height: 28px;
         flex-shrink: 0;
         background: transparent;
         border: none;
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-md);
         color: var(--text-secondary);
         cursor: pointer;
         transition: background-color 0.12s ease, color 0.12s ease;
@@ -66,21 +72,9 @@
         color: var(--text-primary);
       }
       .launcher-item-active {
-        background: var(--surface-card);
-        color: var(--accent);
-      }
-      .status-dot {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
-        flex-shrink: 0;
-        margin: 0 4px;
-      }
-      .status-dot-ok {
-        background: var(--success);
-      }
-      .status-dot-off {
-        background: var(--text-secondary);
+        background: var(--app-bg);
+        box-shadow: 0 0 0 1px var(--surface-border);
+        color: var(--text-primary);
       }
 
       /* ---- Tab bar ---- */
@@ -90,13 +84,18 @@
         display: flex;
         flex-direction: column;
       }
+      /* Tabs are cards standing on the bar's bottom line. The line is an
+         inset shadow rather than a border so the active tab's paper paints
+         over it and joins the page below. */
       .tab-bar {
         display: flex;
         align-items: flex-end;
-        gap: 2px;
-        padding: 8px 8px 0;
+        gap: 0;
+        height: 40px;
+        box-sizing: border-box;
+        padding: var(--space-2) var(--space-2) 0;
         background: var(--surface-bg);
-        border-bottom: 1px solid var(--surface-border);
+        box-shadow: inset 0 -1px 0 var(--surface-border);
         flex-shrink: 0;
         -webkit-app-region: drag;
       }
@@ -120,43 +119,39 @@
         overflow-x: auto;
         overflow-y: hidden;
       }
-      /* A near-invisible scroll affordance rather than a fully hidden one
-         — thin enough to stay out of the way, present enough that an
-         overflowing tab row doesn't look like it's just silently clipping
-         content. */
+      /* No scrollbar: a horizontal one takes its height out of the tabs,
+         which pushes the labels up and lifts the active tab off the page
+         below. The row still scrolls by trackpad or wheel, and the active
+         tab is kept in view (PaneLeaf in Shell.js). */
       .tab-list::-webkit-scrollbar {
-        height: 3px;
-      }
-      .tab-list::-webkit-scrollbar-thumb {
-        background: var(--surface-border);
-        border-radius: 2px;
-      }
-      .tab-list::-webkit-scrollbar-track {
-        background: transparent;
+        display: none;
       }
       .tab {
         -webkit-app-region: no-drag;
         display: flex;
         align-items: center;
-        gap: 6px;
-        max-width: 220px;
+        gap: var(--space-2);
+        max-width: 240px;
+        height: 32px;
+        box-sizing: border-box;
         flex-shrink: 0;
-        padding: 7px 10px;
+        padding: 0 10px 0 var(--space-3);
         border: 1px solid transparent;
         border-bottom: none;
         border-radius: var(--radius-md) var(--radius-md) 0 0;
         background: transparent;
         color: var(--text-secondary);
-        font-size: 12.5px;
+        font-size: var(--text-md);
         font-family: inherit;
         cursor: pointer;
+      }
+      .tab:hover {
+        color: var(--text-primary);
       }
       .tab-active {
         background: var(--app-bg);
         border-color: var(--surface-border);
         color: var(--text-primary);
-        margin-bottom: -1px;
-        padding-bottom: 8px;
       }
       .tab-icon {
         display: flex;
@@ -187,7 +182,7 @@
         flex: 1;
         min-height: 0;
         overflow-y: auto;
-        padding: 108px 120px 64px;
+        padding: var(--space-6) var(--space-7) 64px;
         position: relative;
       }
       .content-chat {
@@ -195,30 +190,54 @@
         overflow: hidden;
         display: flex;
       }
-      /* Sits in the terminal's own 20px padding gutter (TerminalSection.js),
-         not overlapping the xterm viewport itself — deliberately tiny and
-         low-contrast so it doesn't compete with the terminal content. */
-      .terminal-pop-out {
-        position: absolute;
-        top: 4px;
-        right: 4px;
-        z-index: 5;
+      /* An open session: the terminal, then a one-line status bar. */
+      .terminal-tab {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        height: 100%;
+        background: var(--app-bg);
+      }
+      .terminal-tab-body {
+        flex: 1;
+        min-height: 0;
+        padding: var(--space-4) var(--space-5);
+        box-sizing: border-box;
+      }
+      .terminal-status {
+        display: flex;
+        align-items: center;
+        gap: var(--space-4);
+        height: 28px;
+        flex-shrink: 0;
+        padding: 0 var(--space-2) 0 var(--space-4);
+        border-top: 1px solid var(--surface-border);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .terminal-status-hint {
+        white-space: nowrap;
+      }
+      .terminal-status-spacer {
+        flex: 1;
+      }
+      .terminal-status-action {
+        height: 22px;
+      }
+
+      /* App-wide problem that blocks sessions, directly under the tab bar of
+         the pane holding the launcher. */
+      .app-banner {
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 28px;
-        height: 28px;
-        background: transparent;
-        border: none;
-        border-radius: var(--radius-sm);
-        color: var(--text-secondary);
-        opacity: 0.5;
-        cursor: pointer;
-        transition: opacity 0.12s ease, background-color 0.12s ease, color 0.12s ease;
-      }
-      .terminal-pop-out:hover {
-        opacity: 1;
-        background: var(--surface-hover);
+        gap: var(--space-3);
+        height: 40px;
+        flex-shrink: 0;
+        background: var(--warning-bg);
+        border-bottom: 1px solid var(--surface-border);
+        font-size: var(--text-md);
         color: var(--text-primary);
       }
 
@@ -286,7 +305,7 @@
         transition: background-color 0.12s ease;
       }
       .pane-drop-edge:hover {
-        background: rgba(217, 119, 87, 0.16);
+        background: var(--signal-soft);
       }
       .pane-drop-edge-left {
         left: 0;
@@ -334,7 +353,7 @@
         transition: background-color 0.12s ease, border-color 0.12s ease;
       }
       .pane-drop-edge-outer:hover {
-        background: rgba(217, 119, 87, 0.24);
+        background: var(--signal-soft);
         border-color: var(--accent);
       }
       .pane-drop-edge-outer-left {
@@ -366,7 +385,7 @@
         position: absolute;
         z-index: 20;
         pointer-events: none;
-        background: rgba(217, 119, 87, 0.16);
+        background: var(--signal-soft);
         border: 2px solid var(--accent);
         border-radius: var(--radius-sm);
         box-sizing: border-box;
@@ -391,333 +410,596 @@
         border: 1px solid var(--accent);
         border-radius: var(--radius-sm);
         padding: 6px 12px;
-        font-size: 12.5px;
+        font-size: var(--text-sm);
         font-family: var(--font-sans);
         color: var(--text-primary);
-        box-shadow: 0 4px 14px rgba(45, 41, 36, 0.18);
+        box-shadow: var(--shadow-menu);
         white-space: nowrap;
       }
 
       /* ---- Page header ---- */
+      /* ---- Page layout ---- */
+      .section-page {
+        max-width: 880px;
+        margin: 0 auto;
+      }
+      .page-header {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        margin-bottom: var(--space-5);
+      }
       .page-title {
-        font-family: var(--font-serif);
-        font-weight: 700;
-        font-size: 30px;
-        margin: 0 0 6px;
+        margin: 0;
+        font-size: var(--text-xl);
+        font-weight: var(--weight-semibold);
+        letter-spacing: -0.03em;
         color: var(--text-primary);
       }
+      .page-meta {
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        color: var(--text-tertiary);
+      }
       .page-subtitle {
-        margin: 0 0 24px;
+        margin: calc(-1 * var(--space-3)) 0 var(--space-5);
+        font-size: var(--text-md);
+        line-height: 1.5;
         color: var(--text-secondary);
-        font-size: 14px;
+      }
+      .search-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        margin-bottom: var(--space-5);
+      }
+
+      .page-header-aside {
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-1);
+        font-size: var(--text-md);
+        color: var(--text-secondary);
+      }
+
+      /* ---- Notice: an inline banner for something that needs attention ---- */
+      .notice {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        margin-bottom: var(--space-5);
+        border-radius: var(--radius-lg);
+        background: var(--surface-bg);
+      }
+      .notice-attention {
+        background: var(--warning-bg);
+      }
+      .notice-body {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .notice-title {
+        font-size: var(--text-md);
+        font-weight: var(--weight-medium);
+        color: var(--text-primary);
+      }
+      .notice-text {
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+      }
+
+      /* ---- Dictation history ---- */
+      .transcript-list {
+        display: flex;
+        flex-direction: column;
+        border-top: 1px solid var(--surface-border);
+      }
+      .transcript-row {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--space-4);
+        padding: 14px var(--space-2);
+        border-bottom: 1px solid var(--surface-border);
+      }
+      .transcript-row:hover {
+        background: var(--surface-bg);
+      }
+      .transcript-body {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .transcript-text {
+        font-size: var(--text-lg);
+        line-height: 1.5;
+        color: var(--text-primary);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .transcript-meta {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .transcript-actions {
+        display: flex;
+        gap: 2px;
+        visibility: hidden;
+      }
+      .transcript-row:hover .transcript-actions,
+      .transcript-row:focus-within .transcript-actions {
+        visibility: visible;
+      }
+      .dictation-bulk {
+        position: relative;
+        margin-left: auto;
+      }
+      .dictation-confirm {
+        position: absolute;
+        top: calc(100% + 6px);
+        right: 0;
+        z-index: 20;
+      }
+      .dictation-custom-range {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        margin: calc(-1 * var(--space-3)) 0 var(--space-5);
+      }
+      .dictation-range-sep {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      /* Native date inputs, flattened to the app's field style. Both get the
+         same explicit width: Chromium's intrinsic width for a date input
+         isn't stable between two otherwise identical fields. */
+      .dictation-date {
+        width: 104px;
+        height: 30px;
+        box-sizing: border-box;
+        padding: 0 var(--space-2);
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+        background: var(--surface-card);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-md);
+        cursor: text;
+      }
+      .dictation-date:focus {
+        outline: none;
+        border-color: var(--text-primary);
+      }
+
+      /* ---- Tools ---- */
+      .tools-tabs {
+        margin-bottom: var(--space-5);
+      }
+      .segmented-count {
+        margin-left: 2px;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .tool-server {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: 10px var(--space-3);
+        margin-bottom: var(--space-4);
+        border-radius: var(--radius-md);
+        background: var(--surface-bg);
+      }
+      .tool-server-text {
+        font-size: var(--text-md);
+        color: var(--text-primary);
+      }
+      .tool-server-spacer {
+        flex: 1;
+      }
+      .tool-list {
+        display: flex;
+        flex-direction: column;
+        border-top: 1px solid var(--surface-border);
+      }
+      .tool-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-4);
+        min-height: 48px;
+        padding: 10px var(--space-1);
+        box-sizing: border-box;
+        border-bottom: 1px solid var(--surface-border);
+      }
+      .tool-row-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        column-gap: var(--space-4);
+        row-gap: 2px;
+      }
+      .tool-row-name {
+        flex: 0 0 150px;
+        font-family: var(--font-mono);
+        font-size: var(--text-md);
+        color: var(--text-primary);
+      }
+      .tool-row-description {
+        flex: 1;
+        min-width: 200px;
+        font-size: var(--text-md);
+        color: var(--text-secondary);
+      }
+      .tool-row-detail {
+        flex: 1;
+        min-width: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        color: var(--text-tertiary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tool-row-tag {
+        width: 90px;
+        flex-shrink: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        color: var(--text-tertiary);
+      }
+      .tool-row-tag-attention {
+        color: var(--warning);
+      }
+      .section-note {
+        margin: var(--space-3) 0 0;
+        font-size: var(--text-sm);
+        line-height: 1.5;
+        color: var(--text-tertiary);
+      }
+      .section-note code,
+      .empty-note code {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        padding: 1px 5px;
+        border-radius: var(--radius-sm);
+        background: var(--surface-bg);
+        color: var(--text-secondary);
+      }
+
+      /* ---- Sessions table ---- */
+      /* Search doubles as a command menu: matching sessions, then folders to
+         start a new session in. */
+      .command-search {
+        position: relative;
+        flex: 1;
+        min-width: 0;
+      }
+      .search-input-large {
+        height: 44px;
+        padding: 0 14px;
+        box-shadow: var(--shadow-field);
+      }
+      .search-input-large input {
+        font-size: var(--text-base);
+      }
+      .command-menu {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        right: 0;
+        max-height: 420px;
+        overflow-y: auto;
+      }
+      .kbd-quiet {
+        height: 20px;
+        border: none;
+        background: var(--surface-bg);
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+      }
+      .filter-menu-wrap {
+        position: relative;
+        flex-shrink: 0;
+      }
+      .filter-button {
+        height: 32px;
+      }
+      .filter-menu {
+        position: absolute;
+        top: calc(100% + 6px);
+        right: 0;
+        width: 190px;
+      }
+      .menu-check {
+        width: 12px;
+        flex-shrink: 0;
+        font-size: var(--text-sm);
+      }
+      .context-menu {
+        position: fixed;
+        width: 240px;
+        z-index: 40;
+      }
+      .toast-floating {
+        position: fixed;
+        right: var(--space-5);
+        bottom: var(--space-5);
+        z-index: 40;
+      }
+      .keyboard-hints {
+        display: flex;
+        gap: 18px;
+        margin-top: var(--space-4);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .sessions-loading-label {
+        display: block;
+        margin-bottom: var(--space-2);
+      }
+      .skeleton {
+        display: block;
+        height: 10px;
+        max-width: 100%;
+        border-radius: 5px;
+        background: var(--surface-bg);
+      }
+      .skeleton-short {
+        width: 40px;
+        margin-left: auto;
+      }
+      .session-row-skeleton {
+        cursor: default;
+      }
+      .session-row-skeleton:hover {
+        background: none;
+      }
+
+      /* First run: nothing to list yet. */
+      .empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+        padding: 90px var(--space-5);
+        border: 1px dashed var(--surface-border);
+        border-radius: var(--radius-xl);
+        text-align: center;
+      }
+      .empty-state-logo {
+        color: var(--text-tertiary);
+      }
+      .empty-state-title {
+        font-size: var(--text-lg);
+        font-weight: var(--weight-medium);
+        color: var(--text-primary);
+      }
+      .empty-state-text {
+        max-width: 460px;
+        font-size: var(--text-base);
+        line-height: 1.7;
+        color: var(--text-secondary);
+      }
+      .empty-state-actions {
+        display: flex;
+        gap: var(--space-2);
+        margin-top: 6px;
+      }
+      .session-table {
+        display: flex;
+        flex-direction: column;
+        border-top: 1px solid var(--surface-border);
+      }
+      .session-table-head,
+      .session-row {
+        display: grid;
+        grid-template-columns: 14px minmax(0, 1fr) 130px 84px 60px 60px;
+        align-items: center;
+        column-gap: var(--space-3);
+        padding: 0 var(--space-2);
+        border-bottom: 1px solid var(--surface-border);
+      }
+      .session-table-head {
+        height: 30px;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .session-row {
+        height: 42px;
+        cursor: pointer;
+        color: var(--text-primary);
+      }
+      .session-row:hover,
+      .session-row-selected {
+        background: var(--surface-bg);
+      }
+      .session-row-selected .session-title {
+        font-weight: var(--weight-medium);
+      }
+      .session-lead {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .session-dot-attention {
+        background: var(--warning);
+      }
+      .session-dot-danger {
+        background: var(--danger);
+      }
+      .session-title {
+        font-size: var(--text-md);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .session-project,
+      .session-updated {
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .session-updated {
+        text-align: right;
+      }
+      .session-state {
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        color: var(--text-tertiary);
+        white-space: nowrap;
+      }
+      .session-state-live {
+        color: var(--text-primary);
+      }
+      .session-state-attention {
+        color: var(--warning);
+      }
+      .session-state-danger {
+        color: var(--danger);
+      }
+      .session-state-ok {
+        color: var(--success);
+      }
+      .session-table-head .session-updated {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .session-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 2px;
+      }
+      .session-row-action {
+        visibility: hidden;
+      }
+      .session-row:hover .session-row-action,
+      .session-row:focus-within .session-row-action {
+        visibility: visible;
+      }
+      .section-page > .segmented {
+        margin-bottom: var(--space-5);
+      }
+      .search-row .search-input {
+        flex: 1;
       }
       .empty-note {
         color: var(--text-secondary);
-        font-size: 13px;
+        font-size: var(--text-md);
       }
       .empty-note code {
-        font-size: 12px;
+        font-size: var(--text-xs);
         background: var(--surface-hover);
         border-radius: 4px;
         padding: 1px 5px;
       }
 
-      /* ---- Buttons ---- */
-      .btn-primary {
-        background: var(--accent);
-        color: var(--accent-contrast);
-        border: none;
-        border-radius: var(--radius-md);
-        padding: 8px 16px;
-        font-size: 13px;
-        font-weight: 600;
-        cursor: pointer;
-        font-family: inherit;
-        transition: background-color 0.12s ease;
-      }
-      .btn-primary:hover {
-        background: var(--accent-hover);
-      }
-      .btn-primary.btn-small {
-        padding: 6px 12px;
-        font-size: 12px;
-      }
-      .btn-secondary {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        background: var(--surface-elevated);
-        color: var(--text-primary);
-        border: 1px solid var(--surface-border);
-        border-radius: var(--radius-md);
-        padding: 8px 14px;
-        font-size: 13px;
-        cursor: pointer;
-        font-family: inherit;
-      }
-      .btn-ghost {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        background: transparent;
-        color: var(--accent);
-        border: 1px solid var(--accent);
-        border-radius: var(--radius-md);
-        padding: 6px 12px;
-        font-size: 11.5px;
-        font-weight: 700;
-        letter-spacing: 0.03em;
-        text-transform: uppercase;
-        cursor: pointer;
-        font-family: inherit;
-      }
-      .btn-link {
-        background: none;
-        border: none;
-        color: var(--accent);
-        font-size: 12.5px;
-        font-weight: 600;
-        cursor: pointer;
-        font-family: inherit;
-        padding: 0;
-      }
-
       /* ---- Search row (Chats) ---- */
-      .search-row {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 32px;
-      }
-      /* "New Session" dropdown — same shape as the popup's "Open in..."
-         one (default first, then recent directories, then Browse...), own
-         CSS since this window and the popup are entirely separate
-         documents with their own stylesheets. */
       .new-session-wrap {
         position: relative;
       }
-      .new-session-dropdown {
-        position: absolute;
-        top: 100%;
-        right: 0;
-        margin-top: 6px;
-        width: 320px;
-        max-height: 340px;
-        overflow-y: auto;
-        display: flex;
-        flex-direction: column;
-        gap: 3px;
-        box-sizing: border-box;
-        background: var(--surface-card);
-        border: 1px solid var(--surface-border);
-        border-radius: var(--radius-md);
-        box-shadow: 0 8px 30px rgba(51, 44, 34, 0.16);
-        padding: 8px;
-        z-index: 10;
-      }
-      .dir-pick-row {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 2px;
-        width: 100%;
-        box-sizing: border-box;
-        text-align: left;
-        background: transparent;
-        border: none;
-        border-radius: var(--radius-sm);
-        padding: 6px 8px;
-        cursor: pointer;
-        font-family: inherit;
-        flex-shrink: 0;
-      }
-      .dir-pick-row:hover {
-        background: var(--surface-hover);
-      }
-      .dir-pick-row-title {
-        font-size: 13px;
-        color: var(--text-primary);
-      }
-      .dir-pick-row-meta {
-        font-size: 11px;
-        color: var(--text-secondary);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        max-width: 100%;
-      }
-      .dir-pick-divider {
-        height: 1px;
-        background: var(--surface-border);
-        margin: 2px 0;
-        flex-shrink: 0;
-      }
-      .search-input {
-        flex: 1;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        background: transparent;
-        border: none;
-        border-bottom: 1px solid var(--text-primary);
-        border-radius: 0;
-        padding: 6px 2px 10px;
-        color: var(--text-secondary);
-      }
-      .search-input input {
-        flex: 1;
-        border: none;
-        background: transparent;
-        outline: none;
-        font-family: var(--font-serif);
-        font-style: italic;
-        font-size: 15px;
-        color: var(--text-primary);
-      }
-      .search-input input::placeholder {
-        color: var(--text-secondary);
-      }
 
       /* ---- List groups / item cards ---- */
+      /* ---- Lists shared by Settings and setup ---- */
       .list-group {
-        margin-bottom: 20px;
+        display: flex;
+        flex-direction: column;
+        border-top: 1px solid var(--surface-border);
       }
       .list-group-label {
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-        color: var(--text-secondary);
-        margin-bottom: 8px;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        margin-bottom: 6px;
       }
+
+      /* A speech model row: name + tag, a note, a mono meta line, actions. */
       .item-card {
         display: flex;
         align-items: flex-start;
-        gap: 12px;
-        width: 100%;
-        box-sizing: border-box;
-        text-align: left;
-        background: transparent;
-        border: none;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-1);
         border-bottom: 1px solid var(--surface-border);
-        border-radius: 0;
-        padding: 16px 2px;
-        margin-bottom: 0;
-        cursor: pointer;
-        font-family: inherit;
-        color: var(--text-primary);
-      }
-      .extension-group .item-card:last-child {
-        border-bottom: none;
-      }
-      .item-card:hover .item-card-title {
-        color: var(--accent);
-      }
-      .item-card-static {
-        cursor: default;
-      }
-      .item-card-static:hover .item-card-title {
         color: var(--text-primary);
       }
       .item-card-icon {
         flex-shrink: 0;
-        width: 20px;
-        height: 20px;
         display: flex;
-        align-items: center;
-        justify-content: center;
-        margin-top: 2px;
-        color: var(--text-secondary);
+        margin-top: 1px;
+        color: var(--text-tertiary);
       }
       .item-card-icon-accent {
-        color: var(--accent);
+        color: var(--text-primary);
       }
       .item-card-body {
-        min-width: 0;
         flex: 1;
+        min-width: 0;
         display: flex;
         flex-direction: column;
-        gap: 4px;
-      }
-      .item-card-title {
-        font-family: var(--font-serif);
-        font-size: 15.5px;
-        font-weight: 600;
-      }
-      .item-card-meta {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 12px;
-        color: var(--text-secondary);
-      }
-
-      /* Dictated transcripts are prose, often several sentences, so unlike
-         the single-line titles elsewhere in .item-card they wrap and keep
-         their own line spacing. */
-      /* Model rows carry three stacked lines, so they need to be tighter
-         than the default .item-card or the list reads as very loose. */
-      .dictation-model {
-        padding: 12px 2px;
-      }
-      .dictation-model .item-card-body {
         gap: 3px;
       }
-      .dictation-model .item-card-title {
+      .item-card-title {
         display: flex;
         align-items: baseline;
-        gap: 8px;
-        font-size: 14.5px;
+        gap: var(--space-2);
+        font-size: var(--text-md);
+        font-weight: var(--weight-medium);
       }
-
-      /* Deliberately not .pill: a bordered box at this size fought the
-         serif title next to it and read as a button. This is the same
-         information as plain weighted text. */
-      .dictation-badge {
-        font-family: var(--font-sans);
-        font-size: 9.5px;
-        font-weight: 700;
-        letter-spacing: 0.09em;
-        text-transform: uppercase;
-        color: var(--accent);
-      }
-      .dictation-badge-muted {
+      .item-card-description {
+        font-size: var(--text-sm);
+        line-height: 1.45;
         color: var(--text-secondary);
       }
-
-      /* Groups the dictation settings pane into labelled blocks. Without
-         these the recommendation sentence floated between the microphone
-         card and the model list, and the preference toggles ran straight on
-         from the model rows as if they were more models. */
+      .item-card-meta {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .item-card-actions {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+      }
+      .dictation-badge {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        font-weight: var(--weight-regular);
+        color: var(--success);
+      }
+      .dictation-badge-muted {
+        color: var(--text-tertiary);
+      }
       .dictation-subsection {
-        margin-top: 26px;
+        margin-top: var(--space-5);
       }
       .dictation-subsection:first-child {
         margin-top: 0;
       }
-      .dictation-subsection .list-group-label {
-        margin-bottom: 6px;
-      }
-      .dictation-subsection .list-group {
-        margin-bottom: 0;
-      }
       .dictation-recommendation {
-        margin: 0 0 10px;
+        margin: 0 0 var(--space-2);
       }
 
-      .dictation-text {
-        font-size: 13.5px;
-        color: var(--text-primary);
-        line-height: 1.5;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-      }
-      /* Model download progress. A 500MB download needs a real bar — the
-         percentage in the metadata line alone doesn't read as "working". */
+      /* Model download progress: a 500 MB download needs a real bar. */
       .install-bar {
         display: block;
         width: 100%;
         max-width: 260px;
-        height: 3px;
+        height: 4px;
         margin-top: 6px;
         background: var(--surface-border);
         border-radius: 2px;
@@ -740,144 +1022,26 @@
         50% { opacity: 0.35; }
       }
 
-      /* Copy is the only per-row action, so it's an icon rather than a text
-         button — it doesn't need to compete with the transcript for
-         attention. */
-      .dictation-copy {
-        background: none;
-        border: none;
-        padding: 4px;
-        margin: -4px;
-        border-radius: var(--radius-sm);
-        color: var(--text-secondary);
-      }
-      .dictation-copy:hover {
-        color: var(--text-primary);
-        background: var(--surface-hover);
-      }
-
-      /* Date-range chips, custom range inputs, and the bulk-delete control,
-         on one row beneath the search box. */
-      .dictation-filters {
-        display: flex;
-        /* Baseline, not center: the chips carry underline padding below
-           their text, so centring put "Delete all" visibly lower than them. */
-        align-items: baseline;
-        flex-wrap: wrap;
-        gap: 12px;
-        margin: 14px 0 6px;
-      }
-      /* The filters belong to the search box, so they sit close under it
-         rather than after the Chats page's full section gap. */
-      .search-row:has(+ .dictation-filters) {
-        margin-bottom: 0;
-      }
-      /* The "isn't ready" notice is its own block above the history. */
-      .dictation-notice {
-        margin-bottom: 32px;
-      }
-      /* Lighter than the page-level .segmented: these are filters, not
-         navigation, so they shouldn't carry a full-width underline. Two
-         classes because .segmented is declared later in this sheet and
-         would otherwise win, restoring its underline, 24px margin and gap. */
-      .segmented.segmented-compact {
-        gap: 14px;
-        border-bottom: none;
-        margin-bottom: 0;
-      }
-      .segmented-compact .segmented-item {
-        font-size: 11.5px;
-      }
-      .dictation-custom-range {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-      .dictation-range-sep {
-        font-size: 11.5px;
-        color: var(--text-secondary);
-      }
-      /* Native date inputs arrive as a chunky grey Chromium control with a
-         boxed calendar glyph, which reads as a foreign widget next to the
-         flat filter chips. Stripped back to a plain underlined field in the
-         app's own type.
-
-         Both fields get the same explicit width: left to size themselves
-         they came out visually mismatched, with the digits in one colliding
-         with its calendar glyph and the other left with a wide gap. */
-      .dictation-date {
-        font-family: var(--font-sans);
-        font-size: 11.5px;
-        /* Explicit and identical, because Chromium's intrinsic width for a
-           date input isn't stable between two otherwise identical fields
-           (measured 84px vs 92px), which left the pair visibly misaligned.
-           84px of content box against ~65px of text leaves room to spare:
-           an earlier, tighter value clipped the last digit, and Chromium
-           clips inside the input's shadow DOM *without* reporting overflow,
-           so nothing catches that automatically — the test measures the
-           text with canvas measureText instead. */
-        width: 84px;
-        box-sizing: content-box;
-        color: var(--text-primary);
-        background: transparent;
-        border: none;
-        border-bottom: 1px solid var(--surface-border);
-        border-radius: 0;
-        padding: 2px 0 3px;
-        /* Text, not pointer: with the picker button hidden (below), the
-           field is edited in place rather than opened. */
-        cursor: text;
-      }
-      .dictation-date:hover {
-        border-bottom-color: var(--text-secondary);
-      }
-      .dictation-date:focus {
-        outline: none;
-        border-bottom-color: var(--accent);
-      }
       /* Hidden deliberately. The glyph is the only thing that opens
          Chromium's native calendar popover, and that popover is browser
-         chrome — rendered outside the page and completely unstyleable, so
-         it arrives with its own blue/orange highlights that clash with
-         everything around it. Removing the button means it can never open,
-         while the field stays fully editable: clicking a segment and typing
-         digits, or arrow keys, are native date-input behaviour and
-         unaffected. */
+         chrome — rendered outside the page and completely unstyleable.
+         Removing the button means it can never open, while the field stays
+         fully editable by typing or arrow keys. */
       .dictation-date::-webkit-calendar-picker-indicator {
         display: none;
       }
-      /* Kills the grey inset field Chromium draws around the editable date
-         parts, and tightens the separators — the default padding around
-         each "-" made the date read as spaced-out digits. */
-      .dictation-date::-webkit-datetime-edit {
-        padding: 0;
-      }
+      .dictation-date::-webkit-datetime-edit,
       .dictation-date::-webkit-datetime-edit-fields-wrapper {
         padding: 0;
         background: transparent;
       }
       .dictation-date::-webkit-datetime-edit-text {
-        color: var(--text-secondary);
+        color: var(--text-tertiary);
         padding: 0;
-      }
-      /* Pushed to the far end so a destructive action never sits directly
-         beside the filter chips it would act on. */
-      .dictation-bulk {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-left: auto;
-      }
-      .dictation-danger {
-        color: var(--danger);
-      }
-      .dictation-danger:disabled {
-        opacity: 0.5;
       }
 
       /* The transcription prompt is long-form text, so it gets a full-width
-         block rather than the label-left/control-right .preference-row
-         layout used by the toggles. */
+         block rather than the label-left/control-right row. */
       .dictation-prompt-row {
         padding: 14px 0;
         border-bottom: 1px solid var(--surface-border);
@@ -888,297 +1052,124 @@
         margin-top: 10px;
         padding: 9px 11px;
         font-family: var(--font-mono);
-        font-size: 12px;
+        font-size: var(--text-sm);
         line-height: 1.55;
         color: var(--text-primary);
-        background: var(--surface-bg);
+        background: var(--surface-card);
         border: 1px solid var(--surface-border);
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-lg);
         resize: vertical;
       }
       .dictation-prompt:focus {
-        /* Explicit: the platform default focus ring is a heavy amber box
-           that doesn't belong in this palette. */
         outline: none;
-        border-color: var(--accent);
+        border-color: var(--text-primary);
+        box-shadow: 0 0 0 3px var(--accent-soft);
       }
       .dictation-prompt-actions {
         display: flex;
         align-items: center;
-        gap: 12px;
-        margin-top: 8px;
-      }
-      .item-card-description {
-        font-size: 12.5px;
-        font-style: italic;
-        color: var(--text-secondary);
-        line-height: 1.4;
-      }
-      .item-card-actions {
-        flex-shrink: 0;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-top: 2px;
-      }
-      /* ---- Conversation list rows (flat, newspaper-style listing) ---- */
-      .session-row {
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        gap: 8px;
-        width: 100%;
-        box-sizing: border-box;
-        text-align: left;
-        background: transparent;
-        border: none;
-        border-bottom: 1px solid var(--surface-border);
-        border-radius: 0;
-        padding: 16px 4px;
-        margin-bottom: 0;
-        cursor: pointer;
-        font-family: inherit;
-        color: var(--text-primary);
-      }
-      .list-group:last-child .session-row:last-child {
-        border-bottom: none;
-      }
-      .session-row-main {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 4px;
-        flex: 1 1 auto;
-        min-width: 0;
-      }
-      .session-row:hover .session-headline {
-        color: var(--accent);
-      }
-      .session-headline {
-        font-family: var(--font-serif);
-        font-size: 17px;
-        font-weight: 600;
-        line-height: 1.3;
-      }
-      .session-byline {
-        font-family: var(--font-sans);
-        font-size: 11px;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-        color: var(--text-secondary);
-      }
-      /* Hidden until the row is hovered, same pattern as .tab-close. */
-      .session-archive-btn {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        flex-shrink: 0;
-        visibility: hidden;
-        background: transparent;
-        border: none;
-        border-radius: var(--radius-sm);
-        padding: 5px 8px;
-        color: var(--text-secondary);
-        font-family: inherit;
-        font-size: 11px;
-        cursor: pointer;
-      }
-      .session-archive-btn:hover {
-        background: var(--surface-hover);
-        color: var(--text-primary);
-      }
-      .session-row:hover .session-archive-btn {
-        visibility: visible;
-      }
-      .icon-button {
-        display: flex;
-        color: var(--text-secondary);
-        cursor: pointer;
-      }
-      .pill {
-        display: inline-flex;
-        align-items: center;
-        background: transparent;
-        border: 1px solid var(--surface-border);
-        border-radius: 2px;
-        padding: 1px 6px;
-        font-size: 10.5px;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: var(--text-secondary);
-      }
-      .pill-mono {
-        font-family: var(--font-mono);
-        text-transform: none;
-        letter-spacing: 0;
-        align-self: flex-start;
-      }
-      .pill-strong {
-        border-color: var(--text-primary);
-        color: var(--text-primary);
-        font-weight: 700;
-        letter-spacing: 0.03em;
-        padding: 3px 8px;
-      }
-      .pill-muted {
-        color: var(--text-secondary);
-        font-size: 9px;
-        font-weight: 700;
-        margin-left: 6px;
+        gap: var(--space-3);
+        margin-top: var(--space-2);
       }
 
-      /* ---- Segmented control (Skills sub-tabs) ---- */
-      .segmented {
-        display: flex;
-        gap: 20px;
-        border-bottom: 1px solid var(--surface-border);
-        margin-bottom: 24px;
+      /* ---- Settings ---- */
+      .settings-layout {
+        max-width: 680px;
+        margin: 0 auto;
       }
-      .segmented-item {
-        background: none;
-        border: none;
-        border-bottom: 2px solid transparent;
-        color: var(--text-secondary);
-        font-size: 11.5px;
-        font-weight: 600;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-        padding: 0 0 10px;
-        cursor: pointer;
-        font-family: inherit;
-      }
-      .segmented-item-active {
-        color: var(--text-primary);
-        font-weight: 600;
-        border-bottom-color: var(--accent);
-      }
-
       .extension-group {
-        margin-bottom: 40px;
+        margin-bottom: var(--space-6);
       }
       .group-title {
-        font-size: 12px;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        margin: 0 0 4px;
-        padding-bottom: 10px;
-        border-bottom: 1px solid var(--text-primary);
-        color: var(--text-primary);
-      }
-      .group-title-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 4px;
-        padding-bottom: 10px;
-        border-bottom: 1px solid var(--text-primary);
-      }
-      .group-title-row .group-title {
         margin: 0;
-        padding-bottom: 0;
-        border-bottom: none;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--surface-border);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        font-weight: var(--weight-regular);
+        color: var(--text-tertiary);
       }
 
-      /* ---- Toggle switch ---- */
-      .toggle {
-        position: relative;
-        width: 38px;
-        height: 22px;
-        border-radius: 11px;
-        border: none;
-        background: var(--surface-active);
-        cursor: pointer;
-        padding: 0;
-        flex-shrink: 0;
-        transition: background-color 0.15s ease;
-      }
-      .toggle-on {
-        background: var(--accent);
-      }
-      .toggle-thumb {
-        position: absolute;
-        top: 2px;
-        left: 2px;
-        width: 18px;
-        height: 18px;
-        border-radius: 50%;
-        background: var(--surface-card);
-        transition: transform 0.15s ease;
-      }
-      .toggle-on .toggle-thumb {
-        transform: translateX(16px);
-      }
-
-      /* ---- Status rows (Settings, flat) ---- */
+      /* A status row: title and description on the left, a mono status word
+         and an optional action on the right. */
       .status-card {
         display: flex;
         align-items: center;
-        gap: 12px;
-        padding: 14px 0;
+        gap: var(--space-4);
+        min-height: 56px;
+        box-sizing: border-box;
+        padding: 10px 0;
         border-bottom: 1px solid var(--surface-border);
-      }
-      .status-card-ok {
-        color: var(--success);
-      }
-      .status-card-warn {
-        color: var(--warning);
-      }
-      .status-card-icon {
-        display: flex;
-        flex-shrink: 0;
       }
       .status-card-body {
         flex: 1;
         min-width: 0;
         display: flex;
         flex-direction: column;
-        gap: 2px;
+        gap: 3px;
       }
       .status-card-title {
-        font-family: var(--font-serif);
-        font-size: 14.5px;
-        font-weight: 600;
+        font-size: var(--text-md);
+        font-weight: var(--weight-medium);
         color: var(--text-primary);
       }
       .status-card-description {
-        font-size: 12.5px;
+        font-size: var(--text-sm);
+        line-height: 1.45;
         color: var(--text-secondary);
       }
+      .status-card-status {
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        color: var(--text-tertiary);
+        white-space: nowrap;
+      }
+      .status-card-status-ok {
+        color: var(--success);
+      }
+      .status-card-status-attention {
+        color: var(--warning);
+      }
 
-      /* ---- Preferences ---- */
-      .preference-row,
-      .permission-row {
+      .preference-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 16px;
-        padding: 12px 0;
+        gap: var(--space-4);
+        min-height: 56px;
+        box-sizing: border-box;
+        padding: 10px 0;
         border-bottom: 1px solid var(--surface-border);
       }
       .preference-title {
-        font-family: var(--font-serif);
-        font-size: 14.5px;
-        font-weight: 600;
+        font-size: var(--text-md);
+        font-weight: var(--weight-medium);
         color: var(--text-primary);
       }
       .preference-description {
-        font-size: 12.5px;
+        margin-top: 3px;
+        font-size: var(--text-sm);
+        line-height: 1.45;
         color: var(--text-secondary);
-        margin-top: 2px;
       }
       .preference-description code {
-        font-size: 11.5px;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
       }
       .preference-row-actions {
         display: flex;
         align-items: center;
-        gap: 14px;
+        gap: var(--space-3);
         flex-shrink: 0;
       }
+      .preference-value {
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+      }
+
       /* Shortcut recorder. The field is a button rather than a text input:
-         the combination is captured from real keypresses, never typed, so
-         there's nothing to edit as text. */
+         the combination is captured from real keypresses, never typed. */
       .shortcut-field-wrap {
         display: flex;
         align-items: center;
@@ -1188,11 +1179,11 @@
       .shortcut-field {
         display: flex;
         align-items: center;
-        gap: 4px;
-        min-height: 26px;
-        min-width: 86px;
         justify-content: flex-end;
-        padding: 3px 6px;
+        gap: var(--space-1);
+        min-height: 30px;
+        min-width: 86px;
+        padding: 0 6px;
         background: transparent;
         border: 1px solid transparent;
         border-radius: var(--radius-md);
@@ -1201,297 +1192,296 @@
       }
       .shortcut-field:hover {
         border-color: var(--surface-border);
-        background: var(--surface-hover);
+        background: var(--surface-card);
       }
-      /* Recording is a deliberately loud state: the window is swallowing
-         keystrokes and the app's global hotkeys are suspended, so it must
-         be obvious that it's waiting for input. */
-      .shortcut-field-recording {
-        border-color: var(--accent);
-        background: var(--accent-soft);
+      /* Recording must be obvious: the window is swallowing keystrokes and
+         the app's global hotkeys are suspended while it waits. */
+      .shortcut-field-recording,
+      .shortcut-field-recording:hover {
         justify-content: center;
-        min-width: 130px;
-      }
-      .shortcut-key {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 22px;
-        background: var(--surface-elevated);
-        border: 1px solid var(--surface-border);
-        border-radius: var(--radius-sm);
-        padding: 2px 6px;
-        font-family: var(--font-mono);
-        font-size: 12px;
-        color: var(--text-primary);
+        min-width: 140px;
+        background: var(--surface-card);
+        border-color: var(--text-primary);
+        box-shadow: 0 0 0 3px var(--accent-soft);
       }
       .shortcut-prompt {
-        font-size: 12px;
-        color: var(--accent);
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+      .shortcut-prompt::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 3px;
+        background: var(--signal);
+        box-shadow: 0 0 0 3px var(--signal-soft);
       }
       .shortcut-hint {
-        font-size: 11px;
-        color: var(--text-secondary);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
         white-space: nowrap;
       }
       .shortcut-hint-ok {
         color: var(--success);
       }
-      /* Spans the row so a full sentence of explanation fits, rather than
-         being squeezed into the right-hand control column. */
       .shortcut-error {
         margin: 0 0 10px;
-        font-size: 12px;
+        text-align: right;
       }
 
-      .shortcut-display,
-      .shortcut-edit {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        flex-shrink: 0;
-      }
-      .kbd {
-        display: inline-block;
-        background: var(--surface-elevated);
-        border: 1px solid var(--surface-border);
-        border-radius: var(--radius-sm);
-        padding: 3px 8px;
-        font-family: var(--font-mono);
-        font-size: 12px;
-      }
-      .shortcut-edit input {
-        background: var(--surface-elevated);
-        border: 1px solid var(--surface-border);
-        border-radius: var(--radius-md);
-        color: var(--text-primary);
-        padding: 5px 8px;
-        font-size: 13px;
-        font-family: inherit;
-      }
       .settings-footer {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        margin-top: 24px;
-        padding-top: 16px;
+        gap: var(--space-3);
+        padding-top: 14px;
         border-top: 1px solid var(--surface-border);
-        font-size: 12px;
-        font-style: italic;
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
         color: var(--text-secondary);
       }
-
       .settings-footer-brand {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: var(--space-2);
       }
       .settings-footer-brand .clance-logo {
         flex-shrink: 0;
+        color: var(--text-secondary);
       }
       .update-check {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+      }
+      .update-available {
+        color: var(--text-primary);
+      }
+      .update-command {
+        padding: 2px 6px;
+        border-radius: var(--radius-sm);
+        background: var(--surface-bg);
+        color: var(--text-primary);
+      }
+
+      .dictation-model-list {
+        margin: 0 0 var(--space-3);
+      }
+      /* Setup's single model card: id, tag, action, then download progress. */
+      .model-card {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: var(--space-4);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-lg);
+        background: var(--surface-card);
+      }
+      .model-card-head {
         display: flex;
         align-items: baseline;
         gap: 10px;
       }
-      .update-available {
-        font-style: normal;
-        font-weight: 600;
+      .model-card-name {
+        font-size: var(--text-base);
+        font-weight: var(--weight-medium);
         color: var(--text-primary);
       }
-      .update-command {
-        font-style: normal;
-        font-size: 11.5px;
-        padding: 2px 6px;
-        border-radius: var(--radius-sm);
-        background: var(--surface-hover);
+      .model-card-tag {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--success);
+      }
+      .model-card-tag-ok {
+        color: var(--text-tertiary);
+      }
+      .model-card-spacer {
+        flex: 1;
+      }
+      .model-card-text {
+        font-size: var(--text-md);
+        line-height: 1.5;
+        color: var(--text-secondary);
+      }
+      .model-card-progress {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .model-card-progress-row {
+        display: flex;
+        justify-content: space-between;
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
         color: var(--text-primary);
       }
-      .settings-footer .btn-link {
-        font-style: normal;
+      .model-card-progress-detail {
+        color: var(--text-tertiary);
+      }
+      .model-menu-wrap {
+        position: relative;
+        margin: var(--space-3) 0;
+      }
+      .model-menu {
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 0;
+        width: 340px;
+      }
+      .setup-more {
+        padding-left: 0;
       }
 
-      /* ---- Setup wizard (first-run flow, distinct from Settings) ---- */
+      /* ---- Setup wizard ---- */
       .setup-wizard {
         display: flex;
-        align-items: center;
         justify-content: center;
-        height: 100vh;
-        padding: 32px;
+        min-height: 100vh;
+        padding: 116px var(--space-6) var(--space-6);
         box-sizing: border-box;
       }
-      /* Fixed-width column so the logo lines up with each step's left-aligned
-         heading, whichever step is showing. */
       .setup-frame {
-        width: 440px;
+        width: 480px;
         max-width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 30px;
       }
-      .setup-logo {
-        display: block;
-        margin-bottom: 20px;
+      .setup-progress {
+        display: flex;
+        align-items: center;
+        gap: 14px;
         color: var(--text-primary);
       }
-      .setup-logo .clance-logo {
+      .setup-progress .clance-logo {
         display: block;
+        flex-shrink: 0;
+      }
+      .setup-progress-step {
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        color: var(--text-tertiary);
+      }
+      .setup-progress-step-done {
+        color: var(--text-secondary);
+      }
+      .setup-progress-step-current {
+        color: var(--text-primary);
       }
       .setup-step {
-        max-width: 440px;
         text-align: left;
       }
       .setup-step h2 {
-        font-family: var(--font-serif);
-        font-weight: 700;
-        font-size: 26px;
-        margin: 0 0 8px;
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        margin: 0 0 10px;
+        font-size: var(--text-2xl);
+        font-weight: var(--weight-semibold);
+        line-height: 1.15;
+        letter-spacing: -0.03em;
         color: var(--text-primary);
       }
-      .setup-step p {
+      .setup-step > h2 + p {
+        margin: 0 0 var(--space-6);
+        font-size: var(--text-base);
+        line-height: 1.6;
         color: var(--text-secondary);
-        font-size: 14px;
-        margin: 0 0 20px;
       }
-      .setup-step .status-card {
-        text-align: left;
+      .setup-step > .status-card:first-of-type,
+      .setup-step > .preference-row:first-of-type {
+        border-top: 1px solid var(--surface-border);
       }
       .setup-step-actions {
         display: flex;
         align-items: center;
-        gap: 10px;
-        margin-top: 20px;
+        justify-content: flex-end;
+        gap: var(--space-2);
+        margin-top: var(--space-6);
       }
-      .setup-step button {
-        background: var(--accent);
-        color: var(--accent-contrast);
-        border: none;
-        border-radius: var(--radius-md);
-        padding: 8px 16px;
-        font-size: 13px;
-        font-weight: 600;
-        cursor: pointer;
-        font-family: inherit;
-        transition: background-color 0.12s ease;
-      }
-      .setup-step button:hover {
-        background: var(--accent-hover);
-      }
-      .setup-step button:disabled {
-        opacity: 0.6;
-        cursor: default;
-      }
-      .setup-step .btn-secondary {
-        background: transparent;
-        color: var(--text-primary);
-        border: 1px solid var(--surface-border);
-      }
-      .setup-step .btn-secondary:hover {
-        background: var(--surface-hover);
-      }
-
-      /* Classed buttons and paragraphs inside a wizard step keep their own
-         look. `.setup-step button` and `.setup-step p` exist to style a
-         step's bare primary actions and body copy, but element+class
-         specificity outranks a single component class — so every link-style
-         button ("Restart Clance", Use/Remove, "Choose a different model"),
-         every shortcut field, and every hint rendered as a filled orange
-         button or oversized body text inside the wizard. */
-      .setup-step .btn-link {
-        background: none;
-        border: none;
-        border-radius: 0;
-        padding: 0;
-        color: var(--accent);
-        font-size: 12.5px;
-        font-weight: 600;
-      }
-      .setup-step .btn-link:hover {
-        background: none;
-        color: var(--accent-hover);
-      }
-      .setup-step .shortcut-field {
-        background: transparent;
-        color: inherit;
-        border: 1px solid transparent;
-        padding: 3px 6px;
-        font-weight: inherit;
-      }
-      .setup-step .shortcut-field:hover {
-        background: var(--surface-hover);
-        border-color: var(--surface-border);
-      }
-      .setup-step .shortcut-field-recording,
-      .setup-step .shortcut-field-recording:hover {
-        background: var(--accent-soft);
-        border-color: var(--accent);
-      }
-      /* A permission hint belongs to the card above it: it sits inside that
-         card's row (the divider moves below the hint), indented to line up
-         with the card's title and description (18px icon + 12px gap). */
-      .setup-step .status-card:has(+ .setup-hint) {
-        padding-bottom: 12px;
-        border-bottom: none;
-      }
-      .setup-step .setup-hint {
-        font-size: 12.5px;
-        line-height: 1.5;
-        margin: 0;
-        padding: 0 0 14px 30px;
-        border-bottom: 1px solid var(--surface-border);
-      }
-      .setup-step .preference-description {
-        font-size: 12.5px;
-        margin: 2px 0 0;
-      }
-      .setup-step .dictation-recommendation {
-        margin: 0 0 10px;
+      .setup-step-actions-status {
+        margin-right: auto;
       }
       .setup-optional {
-        margin-left: 8px;
-        font-family: var(--font-sans);
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 0.09em;
-        text-transform: uppercase;
-        vertical-align: middle;
-        color: var(--text-secondary);
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        font-weight: var(--weight-regular);
+        letter-spacing: 0;
+        color: var(--text-tertiary);
+      }
+      /* A permission hint belongs to the row above it. */
+      .setup-step .status-card:has(+ .setup-hint) {
+        border-bottom: none;
+        padding-bottom: 4px;
       }
       .setup-hint {
-        font-size: 12.5px;
+        margin: 0;
+        padding: 0 0 14px;
+        border-bottom: 1px solid var(--surface-border);
+        font-size: var(--text-sm);
+        line-height: 1.5;
         color: var(--text-secondary);
-        margin: 6px 0 2px;
       }
       .setup-hint .btn-link {
-        margin-left: 4px;
+        margin-left: var(--space-1);
+      }
+      .setup-hint-plain {
+        padding: 10px 0 0;
+        border-bottom: none;
       }
       .setup-error {
+        margin: var(--space-2) 0 0;
+        font-size: var(--text-sm);
         color: var(--danger);
-        font-size: 12px;
-        margin: 8px 0 0;
       }
-      .setup-success {
-        color: var(--text-secondary);
-        font-size: 12px;
-        margin: 8px 0 0;
-      }
-      .shortcut-row {
+      .setup-command {
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 8px 0;
-        border-bottom: 1px solid var(--surface-border);
-        text-align: left;
+        gap: 10px;
+        padding: var(--space-3) 14px;
+        border-radius: 8px;
+        background: var(--accent);
+        font-family: var(--font-mono);
+        font-size: var(--text-md);
+        color: var(--accent-contrast);
       }
-      .shortcut-row input {
-        background: var(--surface-elevated);
+      .setup-command-text {
+        flex: 1;
+        min-width: 0;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+      .setup-command-prompt {
+        color: var(--text-tertiary);
+      }
+      .setup-command .btn-small {
+        background: transparent;
+        border-color: var(--text-secondary);
+        color: var(--accent-contrast);
+      }
+      .setup-waiting-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        flex-shrink: 0;
+        border-radius: 8px;
+        background: var(--surface-bg);
+      }
+      .setup-waiting {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: var(--space-4);
         border: 1px solid var(--surface-border);
-        border-radius: var(--radius-md);
-        color: var(--text-primary);
-        padding: 4px 8px;
-        font-size: 13px;
-        font-family: inherit;
-      }
-      .permission-row {
-        text-align: left;
+        border-radius: var(--radius-lg);
+        background: var(--surface-card);
       }
 
       input[type="checkbox"] {

@@ -29,12 +29,17 @@ contextBridge.exposeInMainWorld("clanceApp", {
   relaunchApp: () => ipcRenderer.invoke("setup:relaunch"),
   getAppVersion: () => ipcRenderer.invoke("app:get-version"),
   checkForUpdates: () => ipcRenderer.invoke("app:check-for-updates"),
+  launchUpdateCheck: () => ipcRenderer.invoke("app:launch-update-check"),
   openReleasePage: (url: string) => ipcRenderer.invoke("app:open-release-page", url),
   listChatSessions: () => ipcRenderer.invoke("chatHistory:list-sessions"),
   resolveOpenArgs: (sessionId: string, name: string) =>
     ipcRenderer.invoke("chatHistory:resolve-open-args", sessionId, name),
   setSessionArchived: (sessionId: string, archived: boolean) =>
     ipcRenderer.invoke("chatHistory:set-archived", sessionId, archived),
+  sessionFolder: (sessionId: string) => ipcRenderer.invoke("sessions:folder", sessionId),
+  revealFolder: (dir: string) => ipcRenderer.invoke("sessions:reveal-folder", dir),
+  resumeInTerminal: (target: { sessionId?: string; agentId?: string; cwd?: string }) =>
+    ipcRenderer.invoke("sessions:resume-in-terminal", target),
   spawnNewAgent: (name: string, claudeArgs: string[] = [], cwd: string | null = null) =>
     ipcRenderer.invoke("agents:spawn-new", name, claudeArgs, cwd),
   getRecentDirectories: () => ipcRenderer.invoke("config:get-recent-directories"),
@@ -54,6 +59,11 @@ contextBridge.exposeInMainWorld("clanceApp", {
   reparentTerminal: (terminalId: string) => ipcRenderer.invoke("terminal:reparent", terminalId),
   getTerminalBuffer: (terminalId: string): Promise<string> =>
     ipcRenderer.invoke("terminal:get-buffer", terminalId),
+  onOpenSection: (callback: (section: string) => void) => {
+    const listener = (_event: unknown, section: string) => callback(section);
+    ipcRenderer.on("open-section", listener);
+    return () => ipcRenderer.removeListener("open-section", listener);
+  },
   onOpenSessionTab: (
     callback: (payload: { terminalId: string; args: string[]; title: string | null }) => void
   ) => {

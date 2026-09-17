@@ -1,6 +1,6 @@
 import { app, ipcMain, Menu, BrowserWindow } from "electron";
 import { join } from "path";
-import { createTray } from "./tray";
+import { createTray, updateTrayState } from "./tray";
 import { registerHotkey, unregisterAllHotkeys, isValidAccelerator } from "./hotkey";
 import {
   toggleClancePopup,
@@ -11,7 +11,7 @@ import {
   refreshContext,
   sessionMcpArgs,
 } from "./popupWindow";
-import { openMainWindow, openSessionInMainWindow } from "./mainWindow";
+import { openMainWindow, openMainWindowSection, openSessionInMainWindow } from "./mainWindow";
 import { checkForUpdates, openReleasePage } from "./updates";
 import { createAppMenu } from "./appMenu";
 import { ensureSessionCwd, SESSION_CWD } from "./paths";
@@ -36,6 +36,7 @@ import {
 import { SHORTCUT_ACTIONS } from "./shortcuts";
 import { getSession, listSessions, hasRealUserMessage } from "./chatHistory";
 import { setSessionArchived } from "./archivedSessions";
+import { sessionFolder, revealFolder, resumeInTerminal } from "./sessionActions";
 import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
 import { listSkills } from "./skills";
 import { listMcpServers, setMcpServerEnabled } from "./mcpConfig";
@@ -148,7 +149,13 @@ app.whenReady().then(async () => {
   warmLoginShellPath();
 
   Menu.setApplicationMenu(createAppMenu());
-  createTray(handleTrayPopupClick, openMainWindow);
+  createTray({
+    onTogglePopup: handleTrayPopupClick,
+    onDictate: () => void toggleDictation(),
+    onOpenMainWindow: openMainWindow,
+  });
+  updateTrayState({ shortcuts: readConfig().shortcuts });
+  void getSetupStatus().then(updateTrayFromStatus);
 
   // Picks up models already on disk that the config doesn't know about, so
   // dictation doesn't claim to be unconfigured next to installed weights.
@@ -209,7 +216,19 @@ app.on("will-quit", unregisterAllHotkeys);
 // Keep the app running from the tray with no windows open.
 app.on("window-all-closed", () => {});
 
-ipcMain.handle("setup:get-status", () => getSetupStatus());
+// Keeps the menu bar menu's "Claude: …" line current whenever anything
+// re-checks setup (the main window does on every focus).
+function updateTrayFromStatus(status: Awaited<ReturnType<typeof getSetupStatus>>): void {
+  updateTrayState({
+    claude: !status.claude.installed ? "not installed" : status.claude.loggedIn ? "connected" : "signed out",
+  });
+}
+
+ipcMain.handle("setup:get-status", async () => {
+  const status = await getSetupStatus();
+  updateTrayFromStatus(status);
+  return status;
+});
 
 ipcMain.handle("setup:connect-claude", () => connectClaude());
 
@@ -283,6 +302,7 @@ ipcMain.handle(
 
     const status = await getSetupStatus();
     registerAllHotkeys(config.shortcuts, status.isComplete);
+    updateTrayState({ shortcuts: config.shortcuts });
 
     return config;
   }
@@ -311,6 +331,10 @@ ipcMain.handle("setup:relaunch", () => {
 // "version"), so the Settings footer can't drift from the release.
 ipcMain.handle("app:get-version", () => app.getVersion());
 ipcMain.handle("app:check-for-updates", () => checkForUpdates());
+// One automatic check per app run, shared by every main window that asks, so
+// reopening the window can't run into GitHub's unauthenticated rate limit.
+let launchUpdateCheck: ReturnType<typeof checkForUpdates> | null = null;
+ipcMain.handle("app:launch-update-check", () => (launchUpdateCheck ??= checkForUpdates()));
 ipcMain.handle("app:open-release-page", (_event, url: string) => openReleasePage(url));
 
 ipcMain.handle("chatHistory:list-sessions", () => listSessions());
@@ -326,6 +350,13 @@ ipcMain.handle("chatHistory:resolve-open-args", async (_event, sessionId: string
 ipcMain.handle(
   "chatHistory:set-archived",
   (_event, sessionId: string, archived: boolean) => setSessionArchived(sessionId, archived)
+);
+
+ipcMain.handle("sessions:folder", (_event, sessionId: unknown) => sessionFolder(sessionId));
+ipcMain.handle("sessions:reveal-folder", (_event, dir: unknown) => revealFolder(dir));
+ipcMain.handle(
+  "sessions:resume-in-terminal",
+  (_event, target: { sessionId?: unknown; agentId?: unknown; cwd?: unknown }) => resumeInTerminal(target ?? {})
 );
 
 // cwd is explicit only when the caller picked one (the main window's "New
@@ -376,6 +407,7 @@ ipcMain.handle("agents:list", async (_event, opts: { all?: boolean }) => {
 ipcMain.handle("popup:open-with-args", (_event, args: string[]) => openPopupWithArgs(args));
 
 ipcMain.handle("popup:refresh-context", () => refreshContext());
+ipcMain.handle("popup:open-settings", () => openMainWindowSection("settings"));
 
 ipcMain.handle(
   "popup:open-in-app",
@@ -656,6 +688,14 @@ ipcMain.handle("dictation:stats", (_event, filter: TranscriptFilter = {}) =>
 
 ipcMain.handle("dictation:request-microphone", () => requestMicrophoneAccess());
 ipcMain.handle("dictation:open-microphone-settings", () => openMicrophoneSettings());
+// Actions on the dictation HUD's "needs setup" states. The HUD never takes
+// focus, so it asks main to open the right place and hide itself.
+ipcMain.on("dictation:hud-action", (_event, action: unknown) => {
+  if (action === "open-settings") openMainWindowSection("settings");
+  else if (action === "open-microphone-settings") openMicrophoneSettings();
+  else return;
+  getHud()?.hide();
+});
 
 // Keeps an open Dictation tab live as dictations happen elsewhere in the
 // OS, rather than only refreshing when the user reopens the tab.

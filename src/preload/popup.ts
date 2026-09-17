@@ -33,6 +33,14 @@ contextBridge.exposeInMainWorld("clance", {
     ipcRenderer.on("terminal:data", listener);
     return () => ipcRenderer.removeListener("terminal:data", listener);
   },
+  onTerminalExit: (callback: (payload: { terminalId: string; exitCode: number }) => void) => {
+    const listener = (_event: unknown, payload: { terminalId: string; exitCode: number }) => callback(payload);
+    ipcRenderer.on("terminal:exit", listener);
+    return () => ipcRenderer.removeListener("terminal:exit", listener);
+  },
+  sessionInfo: (args: string[]) => ipcRenderer.invoke("popup:session-info", args),
+  retry: () => ipcRenderer.invoke("popup:retry"),
+  openSettings: () => ipcRenderer.invoke("popup:open-settings"),
   onShown: (callback: (payload: PopupShownPayload) => void) =>
     ipcRenderer.on("popup-shown", (_event, payload: PopupShownPayload) => callback(payload)),
 });
@@ -46,4 +54,5 @@ type ContextPreview = {
 
 type PopupShownPayload =
   | { mode: "loading" }
-  | { mode: "new"; args: string[]; contextPreview?: ContextPreview; visibleContext?: string };
+  | { mode: "new"; args: string[]; contextPreview?: ContextPreview; visibleContext?: string }
+  | { mode: "error"; message: string };

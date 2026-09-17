@@ -1,36 +1,30 @@
 import { html, useEffect, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
-import { Icon } from "../../shared/icons.js";
 import { Toggle } from "../components/Toggle.js";
 
 const TABS = [
-  { id: "all", label: "All Extensions" },
   { id: "skills", label: "Skills" },
-  { id: "mcp", label: "MCP Servers" },
-  { id: "tools", label: "Custom Tools" },
+  { id: "mcp", label: "MCP servers" },
+  { id: "tools", label: "Clance tools" },
 ];
 
-// onToggle is optional — omit it (see the Skills list below) to render a
-// plain, non-interactive card with no Toggle at all, for extensions Clance
-// has no way to actually gate (see skills.ts's read-only note).
-function ExtensionCard({ icon, title, subtitle, description, enabled, onToggle }) {
+// One row of the Tools lists. `toggle` is optional: skills have no per-skill
+// switch at the CLI level (see skills.ts), so their rows render without one.
+function ToolRow({ name, detail, description, tag, tagTone, toggle }) {
   return html`
-    <div class="item-card item-card-static">
-      <span class="item-card-icon item-card-icon-accent">${icon}</span>
-      <span class="item-card-body">
-        <span class="item-card-title">${title}</span>
-        ${subtitle && html`<span class="pill pill-mono">${subtitle}</span>`}
-        ${description && html`<span class="item-card-description">${description}</span>`}
-      </span>
-      <span class="item-card-actions">
-        ${onToggle && html`<${Toggle} checked=${enabled} onChange=${onToggle} />`}
-        <span class="icon-button">${Icon.moreVertical(16)}</span>
-      </span>
+    <div class="tool-row">
+      <div class="tool-row-main">
+        <span class="tool-row-name">${name}</span>
+        ${description && html`<span class="tool-row-description">${description}</span>`}
+        ${detail && html`<span class="tool-row-detail">${detail}</span>`}
+      </div>
+      ${tag && html`<span class="tool-row-tag ${tagTone ? `tool-row-tag-${tagTone}` : ""}">${tag}</span>`}
+      ${toggle}
     </div>
   `;
 }
 
 export function SkillsSection() {
-  const [tab, setTab] = useState("all");
+  const [tab, setTab] = useState("tools");
   const [skills, setSkills] = useState([]);
   const [loadingSkills, setLoadingSkills] = useState(true);
   const [servers, setServers] = useState([]);
@@ -70,6 +64,7 @@ export function SkillsSection() {
     });
   }
 
+  // Optimistic, then reconciled with what the main process actually saved.
   function handleServerToggle(name, enabled) {
     setServers((current) =>
       current.map((server) => (server.name === name ? { ...server, enabled } : server))
@@ -84,147 +79,131 @@ export function SkillsSection() {
     window.clanceApp.setLocalToolEnabled(name, enabled).then(setLocalTools);
   }
 
-  const showSkills = tab === "all" || tab === "skills";
-  const showServers = tab === "all" || tab === "mcp";
-  const showTools = tab === "tools";
+  const counts = { tools: localTools.length, mcp: servers.length, skills: skills.length };
+
+  const serverHost = serverStatus?.url ? serverStatus.url.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : null;
+  const serverLine =
+    serverStatus === null
+      ? html`<span class="status-dot"></span><span class="tool-server-text">Checking the local tools server…</span>`
+      : serverStatus.running
+        ? html`<span class="status-dot status-dot-ok"></span>
+            <span class="tool-server-text">Local tools server is running</span>
+            <span class="mono-label">${serverHost}</span>`
+        : html`<span class="status-dot"></span>
+            <span class="tool-server-text">Local tools server starts when a session opens</span>`;
 
   return html`
     <div class="section-page">
-      <h1 class="page-title">Skills & Plugins</h1>
-      <p class="page-subtitle">Extend Clance with specialized capabilities and external integrations.</p>
+      <header class="page-header">
+        <h1 class="page-title">Tools</h1>
+        <span class="page-meta">what sessions can do on this Mac</span>
+      </header>
 
-      <div class="segmented">
+      <div class="tabs tools-tabs" role="tablist" aria-label="Tool type">
         ${TABS.map(
           (t) => html`
             <button
-              class="segmented-item ${tab === t.id ? "segmented-item-active" : ""}"
+              role="tab"
+              aria-selected=${tab === t.id}
+              class="tabs-item ${tab === t.id ? "tabs-item-active" : ""}"
               onClick=${() => setTab(t.id)}
             >
-              ${t.label} ${t.planned && html`<span class="pill pill-muted">PLANNED</span>`}
+              ${t.label}<span class="tabs-count">${counts[t.id]}</span>
             </button>
           `
         )}
       </div>
 
-      ${showSkills &&
+      ${tab === "tools" &&
       html`
-        <section class="extension-group">
-          <h2 class="group-title">Skills</h2>
-          <p class="page-subtitle">
-            Read-only — every Clance-launched session already reads
-            <code>~/.claude/skills/</code> directly, the same way any other <code>claude</code>
-            session does. There's no per-skill on/off switch at the CLI level to hook a toggle
-            to here, so add or remove a skill's folder there to change what's available.
-          </p>
-          ${loadingSkills
-            ? html`<p class="empty-note">Loading…</p>`
-            : skills.length === 0
-            ? html`<p class="empty-note">
-                No skills found in <code>~/.claude/skills/</code>.
-              </p>`
-            : skills.map(
-                (skill) => html`
-                  <${ExtensionCard}
-                    icon=${Icon.markdown(18)}
-                    title=${skill.name}
-                    description=${skill.description}
-                  />
-                `
-              )}
-        </section>
+        <div class="tool-server">
+          ${serverLine}
+          <span class="tool-server-spacer"></span>
+          ${health &&
+          html`<span class="status status-plain ${health.ok ? "status-ok" : "status-danger"}">${health.detail.toLowerCase()}</span>`}
+          <button class="btn-quiet btn-small" onClick=${handleCheckHealth} disabled=${checkingHealth}>
+            ${checkingHealth ? "Checking…" : "Check"}
+          </button>
+        </div>
+        ${loadingLocalTools
+          ? html`<p class="empty-note">Loading tools…</p>`
+          : html`
+              <div class="tool-list">
+                ${localTools.map(
+                  (tool) => html`
+                    <${ToolRow}
+                      key=${tool.name}
+                      name=${tool.name}
+                      description=${tool.description}
+                      tag=${tool.tier === "auto" ? "no prompt" : "asks first"}
+                      tagTone=${tool.tier === "auto" ? null : "attention"}
+                      toggle=${html`<${Toggle}
+                        checked=${tool.enabled}
+                        label=${tool.name}
+                        onChange=${(enabled) => handleLocalToolToggle(tool.name, enabled)}
+                      />`}
+                    />
+                  `
+                )}
+              </div>
+            `}
+        <p class="section-note">
+          Off means sessions can't use the tool at all. "Asks first" tools still need your OK the
+          first time in each session.
+        </p>
       `}
-      ${showServers &&
+
+      ${tab === "mcp" &&
       html`
-        <section class="extension-group">
-          <h2 class="group-title">Clance's Local Tools Server</h2>
-          <div class="item-card item-card-static">
-            <span
-              class="item-card-icon item-card-icon-accent"
-              style=${{ color: serverStatus?.running ? "#3C6B40" : "#7A7267" }}
-            >
-              ${Icon.plug(18)}
-            </span>
-            <span class="item-card-body">
-              <span class="item-card-title">clance-tools</span>
-              <span class="pill pill-mono">
-                ${serverStatus === null
-                  ? "Checking…"
-                  : serverStatus.running
-                  ? serverStatus.url
-                  : "Not started yet"}
-              </span>
-              <span class="item-card-description">
-                Backs the Custom Tools below (screenshot, click, type) — starts automatically the
-                first time a session opens, not something you configure directly.
-              </span>
-              ${health &&
-              html`
-                <span class="item-card-description">
-                  <span class="status-dot ${health.ok ? "status-dot-ok" : "status-dot-off"}"></span>
-                  ${health.detail}
-                </span>
+        ${loadingServers
+          ? html`<p class="empty-note">Loading servers…</p>`
+          : servers.length === 0
+            ? html`<p class="empty-note">
+                No MCP servers yet. Add them to <code>~/.clance/mcp.json</code>, in the same shape as
+                Claude Code's <code>.mcp.json</code>.
+              </p>`
+            : html`
+                <div class="tool-list">
+                  ${servers.map(
+                    (server) => html`
+                      <${ToolRow}
+                        key=${server.name}
+                        name=${server.name}
+                        detail=${server.config.type === "stdio" || !server.config.type
+                          ? [server.config.command, ...(server.config.args ?? [])].join(" ")
+                          : server.config.url}
+                        toggle=${html`<${Toggle}
+                          checked=${server.enabled}
+                          label=${server.name}
+                          onChange=${(enabled) => handleServerToggle(server.name, enabled)}
+                        />`}
+                      />
+                    `
+                  )}
+                </div>
+                <p class="section-note">Servers are read from <code>~/.clance/mcp.json</code>.</p>
               `}
-            </span>
-            <span class="item-card-actions">
-              <button class="btn-ghost" onClick=${handleCheckHealth} disabled=${checkingHealth}>
-                ${checkingHealth ? "Checking…" : "Check Health"}
-              </button>
-            </span>
-          </div>
-        </section>
-        <section class="extension-group">
-          <div class="group-title-row">
-            <h2 class="group-title">MCP Servers</h2>
-            <button class="btn-ghost">${Icon.addServer(12)} Add Server</button>
-          </div>
-          ${loadingServers
-            ? html`<p class="empty-note">Loading…</p>`
-            : servers.length === 0
-            ? html`<p class="empty-note">
-                No MCP servers configured yet. Add entries to
-                <code>~/.clance/mcp.json</code> (mirrors Claude Code's own
-                <code>.mcp.json</code> shape) to see them here.
-              </p>`
-            : servers.map(
-                (server) => html`
-                  <${ExtensionCard}
-                    icon=${Icon.plug(18)}
-                    title=${server.name}
-                    subtitle=${server.config.type === "stdio" || !server.config.type
-                      ? [server.config.command, ...(server.config.args ?? [])].join(" ")
-                      : server.config.url}
-                    enabled=${server.enabled}
-                    onToggle=${(enabled) => handleServerToggle(server.name, enabled)}
-                  />
-                `
-              )}
-        </section>
       `}
-      ${showTools &&
+
+      ${tab === "skills" &&
       html`
-        <section class="extension-group">
-          <h2 class="group-title">Custom Tools</h2>
-          <p class="page-subtitle">
-            Clance's own tools for reading and acting on your screen — click, type, take a
-            screenshot on demand. Turning one off makes the assistant unable to use it at all,
-            not just unprompted; a tool marked "Asks first" still needs the CLI's own
-            Allow/Deny/Always-allow prompt the first time each session even while it's on.
-          </p>
-          ${loadingLocalTools
-            ? html`<p class="empty-note">Loading…</p>`
-            : localTools.map(
-                (tool) => html`
-                  <${ExtensionCard}
-                    icon=${Icon.sparkle(18)}
-                    title=${tool.name}
-                    subtitle=${tool.tier === "auto" ? "No prompt" : "Asks first"}
-                    description=${tool.description}
-                    enabled=${tool.enabled}
-                    onToggle=${(enabled) => handleLocalToolToggle(tool.name, enabled)}
-                  />
-                `
-              )}
-        </section>
+        ${loadingSkills
+          ? html`<p class="empty-note">Loading skills…</p>`
+          : skills.length === 0
+            ? html`<p class="empty-note">No skills in <code>~/.claude/skills/</code>.</p>`
+            : html`
+                <div class="tool-list">
+                  ${skills.map(
+                    (skill) => html`
+                      <${ToolRow} key=${skill.name} name=${skill.name} description=${skill.description} />
+                    `
+                  )}
+                </div>
+              `}
+        <p class="section-note">
+          Every session reads <code>~/.claude/skills/</code>, like any Claude Code session. Add or
+          remove a skill's folder there to change what's available.
+        </p>
       `}
     </div>
   `;

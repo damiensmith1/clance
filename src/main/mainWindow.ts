@@ -14,13 +14,11 @@ function createMainWindow(): BrowserWindow {
     minWidth: 720,
     minHeight: 480,
     titleBarStyle: "hiddenInset",
-    // Vertically centers the traffic lights within our tab bar's actual
-    // height (~39px: 8px top padding + tab's 7px+7px padding + ~15px line
-    // height + 1px bottom border) — Electron's unset default assumes a
-    // shorter native title bar and places them noticeably higher, so they
-    // read as a different size/row than the tabs.
-    trafficLightPosition: { x: 20, y: 19 },
-    backgroundColor: "#f7f3eb",
+    // Puts the traffic lights on the same line as the tab labels: the tabs
+    // are 32px cards at the bottom of the 40px bar, so their labels centre
+    // at y≈24 (y here is the top of the buttons, ~7px above their centre).
+    trafficLightPosition: { x: 20, y: 17 },
+    backgroundColor: "#fafaf7",
     webPreferences: {
       preload: join(__dirname, "../preload/mainWindow.js"),
       contextIsolation: true,
@@ -56,6 +54,14 @@ export function openMainWindow(): void {
 
   mainWindow.show();
   mainWindow.focus();
+}
+
+// Brings the main window forward on one of its sections (e.g. Settings, from
+// the dictation HUD's "not set up" action).
+export async function openMainWindowSection(section: "chats" | "dictation" | "skills" | "settings"): Promise<void> {
+  openMainWindow();
+  await mainWindowReady;
+  mainWindow!.webContents.send("open-section", section);
 }
 
 // terminalId embeds its pty's spawn time (popup.js's `popup-${Date.now()}`,

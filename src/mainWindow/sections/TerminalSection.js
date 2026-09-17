@@ -1,5 +1,4 @@
-import { html, useEffect, useRef } from "../../shared/vendor/preact-htm-standalone.module.js";
-import { Icon } from "../../shared/icons.js";
+import { html, useEffect, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
 import { filePathsToPastePayload } from "../../shared/dragDropPaste.js";
 
 let terminalCounter = 0;
@@ -41,31 +40,34 @@ function getOrCreateEntry(terminalId, { shell, args }) {
   if (existing) return existing;
 
   const term = new window.Terminal({
-    fontFamily: "JetBrains Mono, monospace",
+    fontFamily: "Geist Mono, monospace",
     fontSize: 13,
     minimumContrastRatio: 4.5,
     theme: {
-      background: "#F7F3EB",
-      foreground: "#2D2924",
-      cursor: "#D97757",
-      cursorAccent: "#F7F3EB",
-      selectionBackground: "rgba(217, 119, 87, 0.14)",
-      black: "#2D2924",
-      red: "#B23B3B",
-      green: "#3C6B40",
-      yellow: "#C9773F",
+      background: "#FAFAF7",
+      foreground: "#171614",
+      cursor: "#E2632F",
+      cursorAccent: "#FAFAF7",
+      selectionBackground: "rgba(23, 22, 20, 0.12)",
+      scrollbarSliderBackground: "rgba(23, 22, 20, 0.14)",
+      scrollbarSliderHoverBackground: "rgba(23, 22, 20, 0.28)",
+      scrollbarSliderActiveBackground: "rgba(23, 22, 20, 0.36)",
+      black: "#171614",
+      red: "#B3362B",
+      green: "#2F7D4F",
+      yellow: "#9A5C00",
       blue: "#2E5A88",
-      magenta: "#8B5FBF",
-      cyan: "#3B8FA3",
-      white: "#FDFBF6",
-      brightBlack: "#7A7267",
-      brightRed: "#D9534F",
-      brightGreen: "#4A7A4E",
-      brightYellow: "#D97757",
+      magenta: "#7B4FAF",
+      cyan: "#2C7A8C",
+      white: "#FAFAF7",
+      brightBlack: "#75726B",
+      brightRed: "#D14A3C",
+      brightGreen: "#3A8F5C",
+      brightYellow: "#E2632F",
       brightBlue: "#3E699E",
-      brightMagenta: "#A57CD9",
-      brightCyan: "#4FA8BD",
-      brightWhite: "#FDFBF6",
+      brightMagenta: "#9466C8",
+      brightCyan: "#3A95A8",
+      brightWhite: "#FFFFFF",
     },
   });
   const fitAddon = new window.FitAddon.FitAddon();
@@ -87,7 +89,7 @@ function getOrCreateEntry(terminalId, { shell, args }) {
   const entry = { term, fitAddon, termHost };
   registry.set(terminalId, entry);
 
-  // The terminal opens (and does its first fit) before the JetBrains Mono
+  // The terminal opens (and does its first fit) before the Geist Mono
   // web font is necessarily loaded, so that first fit can measure the
   // fallback font's cell metrics and overestimate how many rows fit. Once
   // the real font is ready, re-fit and re-sync the pty so the CLI's TUI
@@ -236,22 +238,53 @@ export function TerminalSection({ terminalId, args = [], shell = false, onPopOut
   // (a known xterm.js limitation) — so the padding has to live on an outer
   // wrapper, never on the element term.open() mounts into, or the computed
   // row count overshoots the actually-visible area.
-  return html`<div
-    style=${{
-      position: "relative",
-      width: "100%",
-      height: "100%",
-      padding: "20px",
-      boxSizing: "border-box",
-      background: "#F7F3EB",
-    }}
-  >
-    ${onPopOut &&
-    html`
-      <button class="terminal-pop-out" title="Open in Widget" onClick=${onPopOut}>${Icon.popOut(15)}</button>
-    `}
-    <div ref=${containerRef} style=${{ width: "100%", height: "100%" }}></div>
-  </div>`;
+  return html`
+    <div class="terminal-tab">
+      <div class="terminal-tab-body">
+        <div ref=${containerRef} style=${{ width: "100%", height: "100%" }}></div>
+      </div>
+      <${TerminalStatusLine} args=${args} shell=${shell} onPopOut=${onPopOut} />
+    </div>
+  `;
+}
+
+function shortTime(iso) {
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
+}
+
+// The line under an open session: its folder, when it started, and the
+// pop-out action. A session tab's args are `attach <agentId>`, so its folder
+// and start time come from the agent listing.
+function TerminalStatusLine({ args, shell, onPopOut }) {
+  const [agent, setAgent] = useState(null);
+  const agentId = args[0] === "attach" ? args[1] : null;
+
+  useEffect(() => {
+    if (!agentId) return;
+    let cancelled = false;
+    window.clanceApp.listAgents({ all: true }).then((agents) => {
+      if (!cancelled) setAgent(agents.find((a) => a.id === agentId) ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId]);
+
+  const folder = agent?.cwd ? agent.cwd.replace(/^\/Users\/[^/]+/, "~") : shell ? "shell" : "";
+  return html`
+    <div class="terminal-status">
+      ${folder && html`<span>${folder}</span>`}
+      ${agent?.startedAt && html`<span>started ${shortTime(agent.startedAt)}</span>`}
+      <span class="terminal-status-spacer"></span>
+      <span class="terminal-status-hint">drag a tab to split</span>
+      ${onPopOut &&
+      html`<button class="btn-quiet btn-small terminal-status-action" onClick=${onPopOut}>Pop out</button>`}
+    </div>
+  `;
 }
 
 export function nextTerminalId() {

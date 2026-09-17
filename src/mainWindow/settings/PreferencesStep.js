@@ -18,10 +18,10 @@ export function LaunchAtLoginRow({ prefs, setPrefs }) {
   return html`
     <div class="preference-row">
       <div>
-        <div class="preference-title">Launch at Login</div>
-        <div class="preference-description">Automatically open Clance when you start your computer.</div>
+        <div class="preference-title">Launch at login</div>
+        <div class="preference-description">Open Clance when you log in to your Mac.</div>
       </div>
-      <${Toggle} checked=${prefs.launchOnLogin} onChange=${handleChange} />
+      <${Toggle} checked=${prefs.launchOnLogin} label="Launch at login" onChange=${handleChange} />
     </div>
   `;
 }
@@ -49,17 +49,16 @@ export function DefaultDirectoryRow({ prefs, setPrefs }) {
   return html`
     <div class="preference-row">
       <div>
-        <div class="preference-title">Default Working Directory</div>
+        <div class="preference-title">Default folder</div>
         <div class="preference-description">
-          ${prefs.defaultDirectory
-            ? html`New conversations open in <code>${prefs.defaultDirectory}</code>.`
-            : "New conversations open in Clance's own directory."}
+          Where new sessions start.
         </div>
       </div>
       <div class="preference-row-actions">
+        <span class="preference-value">${prefs.defaultDirectory || "~/.clance"}</span>
         ${prefs.defaultDirectory &&
-        html`<button class="btn-link" onClick=${handleReset}>Reset</button>`}
-        <button class="btn-link" onClick=${handleBrowse}>Browse…</button>
+        html`<button class="btn-quiet btn-small" onClick=${handleReset}>Reset</button>`}
+        <button class="btn-secondary btn-small" onClick=${handleBrowse}>Change…</button>
       </div>
     </div>
   `;

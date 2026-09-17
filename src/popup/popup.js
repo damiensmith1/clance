@@ -15,6 +15,7 @@ const openInAppBtn = document.getElementById("open-in-app-btn");
 const contextLinkEl = document.getElementById("context-link");
 const contextDialogEl = document.getElementById("context-dialog");
 const contextDialogTitleEl = document.getElementById("context-dialog-title");
+const contextDialogWindowLabelEl = document.getElementById("context-dialog-window-label");
 const contextDialogImageLabelEl = document.getElementById("context-dialog-image-label");
 const contextDialogImageEl = document.getElementById("context-dialog-image");
 const contextDialogSelectionLabelEl = document.getElementById("context-dialog-selection-label");
@@ -22,6 +23,13 @@ const contextDialogSelectionEl = document.getElementById("context-dialog-selecti
 const contextDialogSystemPromptLabelEl = document.getElementById("context-dialog-system-prompt-label");
 const contextDialogSystemPromptEl = document.getElementById("context-dialog-system-prompt");
 const contextDialogEmptyEl = document.getElementById("context-dialog-empty");
+const toolbarLabelEl = document.getElementById("toolbar-label");
+const toolbarTitleEl = document.getElementById("toolbar-title");
+const hintBarFolderEl = document.getElementById("hint-bar-folder");
+const hintBarToggleEl = document.getElementById("hint-bar-toggle");
+
+// A session that exits this soon after attaching never really started.
+const EARLY_EXIT_MS = 8000;
 
 let openInSessions = [];
 let term = null;
@@ -29,6 +37,7 @@ let fitAddon = null;
 let activeTerminalId = null;
 let activeArgs = [];
 let offTerminalData = null;
+let offTerminalExit = null;
 
 // The window itself is now user-resizable (drag its edges/corners) rather
 // than sized to fit its content, so #app just fills whatever size the
@@ -43,20 +52,21 @@ const resizeObserver = new ResizeObserver(() => {
 resizeObserver.observe(appEl);
 
 function relativeTime(iso) {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const diffMin = Math.round(diffMs / 60000);
-  if (diffMin < 1) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffMin = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (diffMin < 1) return "now";
+  if (diffMin < 60) return `${diffMin}m`;
   const diffHour = Math.round(diffMin / 60);
-  if (diffHour < 24) return `${diffHour}h ago`;
+  if (diffHour < 24) return `${diffHour}h`;
   const diffDay = Math.round(diffHour / 24);
-  if (diffDay < 7) return `${diffDay}d ago`;
-  return new Date(iso).toLocaleDateString();
+  if (diffDay < 7) return `${diffDay}d`;
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function teardownTerminal() {
   if (!activeTerminalId) return;
   offTerminalData?.();
+  offTerminalExit?.();
+  offTerminalExit = null;
   window.clance.killTerminal(activeTerminalId);
   term?.dispose();
   term = null;
@@ -73,6 +83,8 @@ function teardownTerminal() {
 function detachTerminal() {
   if (!activeTerminalId) return;
   offTerminalData?.();
+  offTerminalExit?.();
+  offTerminalExit = null;
   term?.dispose();
   term = null;
   fitAddon = null;
@@ -160,32 +172,35 @@ function openTerminal(args, visibleContext, screenshotPath) {
   activeArgs = args;
 
   term = new window.Terminal({
-    fontFamily: "JetBrains Mono, monospace",
-    fontSize: 11,
+    fontFamily: "Geist Mono, monospace",
+    fontSize: 12,
     lineHeight: 1.15,
     minimumContrastRatio: 4.5,
     theme: {
-      background: "#F7F3EB",
-      foreground: "#2D2924",
-      cursor: "#D97757",
-      cursorAccent: "#F7F3EB",
-      selectionBackground: "rgba(217, 119, 87, 0.14)",
-      black: "#2D2924",
-      red: "#B23B3B",
-      green: "#3C6B40",
-      yellow: "#C9773F",
+      background: "#FAFAF7",
+      foreground: "#171614",
+      cursor: "#E2632F",
+      cursorAccent: "#FAFAF7",
+      selectionBackground: "rgba(23, 22, 20, 0.12)",
+      scrollbarSliderBackground: "rgba(23, 22, 20, 0.14)",
+      scrollbarSliderHoverBackground: "rgba(23, 22, 20, 0.28)",
+      scrollbarSliderActiveBackground: "rgba(23, 22, 20, 0.36)",
+      black: "#171614",
+      red: "#B3362B",
+      green: "#2F7D4F",
+      yellow: "#9A5C00",
       blue: "#2E5A88",
-      magenta: "#8B5FBF",
-      cyan: "#3B8FA3",
-      white: "#FDFBF6",
-      brightBlack: "#7A7267",
-      brightRed: "#D9534F",
-      brightGreen: "#4A7A4E",
-      brightYellow: "#D97757",
+      magenta: "#7B4FAF",
+      cyan: "#2C7A8C",
+      white: "#FAFAF7",
+      brightBlack: "#75726B",
+      brightRed: "#D14A3C",
+      brightGreen: "#3A8F5C",
+      brightYellow: "#E2632F",
       brightBlue: "#3E699E",
-      brightMagenta: "#A57CD9",
-      brightCyan: "#4FA8BD",
-      brightWhite: "#FDFBF6",
+      brightMagenta: "#9466C8",
+      brightCyan: "#3A95A8",
+      brightWhite: "#FFFFFF",
     },
   });
   fitAddon = new window.FitAddon.FitAddon();
@@ -214,7 +229,7 @@ function openTerminal(args, visibleContext, screenshotPath) {
       if (activeTerminalId) window.clance.resizeTerminal(activeTerminalId, term.cols, term.rows);
     });
 
-  // The terminal opens (and does its first fit) before the JetBrains Mono
+  // The terminal opens (and does its first fit) before the Geist Mono
   // web font is necessarily loaded, so that first fit can measure the
   // fallback font's cell metrics and overestimate how many rows fit. Once
   // the real font is ready, re-fit and re-sync the pty so the CLI's TUI
@@ -228,6 +243,18 @@ function openTerminal(args, visibleContext, screenshotPath) {
   offTerminalData = window.clance.onTerminalData(({ terminalId, data }) => {
     if (terminalId === activeTerminalId) term.write(data);
   });
+
+  const openedAt = Date.now();
+  offTerminalExit = window.clance.onTerminalExit(({ terminalId: id, exitCode }) => {
+    if (id !== activeTerminalId || exitCode === 0 || Date.now() - openedAt > EARLY_EXIT_MS) return;
+    const retryArgs = activeArgs;
+    showError(
+      "Claude Code exited before the session was ready. This usually means it needs to sign in again.",
+      () => openTerminal(retryArgs),
+      `exit code ${exitCode}`
+    );
+  });
+  showSessionInfo(args);
 
   term.onData((data) => {
     window.clance.writeTerminal(activeTerminalId, data);
@@ -249,7 +276,7 @@ function renderOpenInList(sessions) {
   if (sessions.length === 0) {
     const empty = document.createElement("div");
     empty.className = "note";
-    empty.textContent = "No matching conversations.";
+    empty.textContent = "No matching sessions.";
     openInListEl.appendChild(empty);
     return;
   }
@@ -301,7 +328,7 @@ function renderRecentDirs(dirs) {
 
     const meta = document.createElement("span");
     meta.className = "open-in-row-meta";
-    meta.textContent = dir;
+    meta.textContent = folderLabel(dir);
 
     row.appendChild(title);
     row.appendChild(meta);
@@ -411,6 +438,7 @@ function renderContextPreview(preview) {
   // whenever preview is.
   if (!preview) {
     contextDialogTitleEl.hidden = true;
+    contextDialogWindowLabelEl.hidden = true;
     contextDialogImageLabelEl.hidden = true;
     contextDialogImageEl.hidden = true;
     contextDialogImageEl.removeAttribute("src");
@@ -426,7 +454,8 @@ function renderContextPreview(preview) {
   contextDialogEmptyEl.hidden = true;
 
   contextDialogTitleEl.hidden = !windowTitle;
-  contextDialogTitleEl.textContent = windowTitle ? `From: ${windowTitle}` : "";
+  contextDialogWindowLabelEl.hidden = !windowTitle;
+  contextDialogTitleEl.textContent = windowTitle ?? "";
 
   if (screenshotPath) {
     // encodeURI (not encodeURIComponent, which would also escape "/")
@@ -491,13 +520,91 @@ openInAppBtn.addEventListener("click", () => {
 // ready — see toggleClancePopup in popupWindow.ts, which sends this first
 // so the window is never just a blank frame while that work is still in
 // flight.
-function showLoading() {
+function showLoading(contextPreview) {
   teardownTerminal();
   appEl.classList.add("has-messages");
-  const placeholder = document.createElement("div");
-  placeholder.className = "note";
-  placeholder.textContent = "Starting…";
-  termInnerEl.replaceChildren(placeholder);
+  appEl.classList.remove("has-error");
+  const state = document.createElement("div");
+  state.className = "popup-state";
+  const label = document.createElement("div");
+  label.className = "note";
+  label.textContent = "starting claude…";
+  state.append(label);
+  const captured = [
+    contextPreview?.windowTitle && "window",
+    contextPreview?.selectedText && "selection",
+    contextPreview?.screenshotPath && "screenshot",
+  ].filter(Boolean);
+  if (captured.length > 0) {
+    const detail = document.createElement("div");
+    detail.className = "note";
+    detail.textContent = `captured: ${captured.join(" · ")}`;
+    state.append(detail);
+  }
+  termInnerEl.replaceChildren(state);
+}
+
+// Replaces the terminal with a short explanation and a way to try again.
+function showError(message, onRetry, detail) {
+  teardownTerminal();
+  appEl.classList.add("has-messages", "has-error");
+  const state = document.createElement("div");
+  state.className = "popup-state";
+  const title = document.createElement("div");
+  title.className = "popup-state-title";
+  title.textContent = "Couldn't start the session";
+  const text = document.createElement("div");
+  text.className = "popup-state-text";
+  text.textContent = message;
+  const actions = document.createElement("div");
+  actions.className = "popup-state-actions";
+  const retry = document.createElement("button");
+  retry.className = "btn-primary";
+  retry.textContent = "Try again";
+  retry.addEventListener("click", onRetry);
+  const settings = document.createElement("button");
+  settings.className = "btn-secondary";
+  settings.textContent = "Open Settings";
+  settings.addEventListener("click", () => window.clance.openSettings());
+  actions.append(retry, settings);
+  state.append(title, text, actions);
+  if (detail) {
+    const note = document.createElement("div");
+    note.className = "note";
+    note.textContent = detail;
+    state.append(note);
+  }
+  termInnerEl.replaceChildren(state);
+}
+
+// "Alt+Space" as "⌥Space", for hints.
+function acceleratorGlyphs(accelerator) {
+  const glyphs = { Alt: "⌥", Option: "⌥", Command: "⌘", Cmd: "⌘", CommandOrControl: "⌘", Control: "⌃", Ctrl: "⌃", Shift: "⇧" };
+  return accelerator
+    .split("+")
+    .map((part) => glyphs[part] ?? part)
+    .join("");
+}
+
+function folderLabel(folder) {
+  return folder.replace(/^\/Users\/[^/]+/, "~");
+}
+
+// The header and hint bar describe the attached session once main has
+// looked it up. Stale answers (the widget moved on) are dropped.
+function showSessionInfo(args) {
+  toolbarLabelEl.textContent = "claude";
+  toolbarTitleEl.textContent = "";
+  hintBarFolderEl.textContent = "";
+  window.clance.sessionInfo(args).then(({ folder, title, toggleShortcut }) => {
+    if (args !== activeArgs) return;
+    if (toggleShortcut) hintBarToggleEl.textContent = `${acceleratorGlyphs(toggleShortcut)} hide`;
+    if (folder) {
+      toolbarLabelEl.textContent = dirBasename(folder);
+      hintBarFolderEl.textContent = folderLabel(folder);
+    }
+    if (title) toolbarTitleEl.textContent = `/ ${title}`;
+  });
 }
 
 window.clance.onShown((payload) => {
@@ -505,8 +612,11 @@ window.clance.onShown((payload) => {
   closeOpenInDropdown();
   renderContextPreview(payload.contextPreview);
 
+  appEl.classList.remove("has-error");
   if (payload.mode === "loading") {
-    showLoading();
+    showLoading(payload.contextPreview);
+  } else if (payload.mode === "error") {
+    showError(payload.message, () => window.clance.retry());
   } else {
     openTerminal(payload.args, payload.visibleContext, payload.contextPreview?.screenshotPath);
   }

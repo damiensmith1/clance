@@ -1,7 +1,9 @@
 import { h, html, useState, useEffect } from "../../shared/vendor/preact-htm-standalone.module.js";
 import { StatusCard } from "../components/StatusCard.js";
 
-export function PermissionsStep({ onComplete } = {}) {
+const RECHECK_MS = 2000;
+
+export function PermissionsStep({ onComplete, onBack } = {}) {
   const [status, setStatus] = useState(null);
   // The restart hint only appears once the user has actually been sent to
   // System Settings — before that it would just be noise.
@@ -19,6 +21,20 @@ export function PermissionsStep({ onComplete } = {}) {
     refresh();
   }, []);
 
+  // Permissions are granted in System Settings, outside Clance, so check
+  // again whenever the window comes back to the front, and poll while one is
+  // still missing. The check reads local state and is cheap.
+  const allGranted = Boolean(status?.accessibility && status?.screenRecording);
+  useEffect(() => {
+    const onFocus = () => refresh();
+    window.addEventListener("focus", onFocus);
+    const timer = allGranted ? null : setInterval(refresh, RECHECK_MS);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      if (timer) clearInterval(timer);
+    };
+  }, [allGranted]);
+
   if (status === null) {
     return html`<p class="empty-note">Checking…</p>`;
   }
@@ -30,36 +46,49 @@ export function PermissionsStep({ onComplete } = {}) {
   if (!onComplete) {
     return html`
       <${StatusCard}
-        ok=${status.screenRecording}
-        title="Screen Recording (optional)"
-        description=${status.screenRecording
-          ? "Clance can read your screen when a session asks to."
-          : "Off. Sessions can't look at your screen — everything else works."}
-        actionLabel=${status.screenRecording ? null : "Grant Access"}
+        title="Accessibility"
+        description="Type and click in other apps when you ask."
+        status=${status.accessibility ? "granted" : "not granted"}
+        tone=${status.accessibility ? "ok" : "attention"}
+        actionLabel=${status.accessibility ? null : "Grant"}
+        onAction=${() => window.clanceApp.openAccessibilitySettings()}
+      />
+      <${StatusCard}
+        title="Screen Recording"
+        description="Hand Clance a screenshot with ⌘⇧R."
+        status=${status.screenRecording ? "granted" : "off · optional"}
+        tone=${status.screenRecording ? "ok" : "plain"}
+        actionLabel=${status.screenRecording ? null : "Grant"}
         onAction=${() => window.clanceApp.requestScreenRecordingAccess()}
       />
       <${StatusCard}
-        ok=${status.accessibility}
-        title="Accessibility"
-        description="Required for Clance to type, click, or edit fields on your behalf."
-        actionLabel=${status.accessibility ? null : "Grant Access"}
-        onAction=${() => window.clanceApp.openAccessibilitySettings()}
+        title="Microphone"
+        description="Needed for dictation."
+        status=${status.microphone ? "granted" : "not granted"}
+        tone=${status.microphone ? "ok" : "attention"}
+        actionLabel=${status.microphone ? null : "Grant"}
+        onAction=${() =>
+          window.clanceApp.requestMicrophone().then((granted) => {
+            if (!granted) window.clanceApp.openMicrophoneSettings();
+            refresh();
+          })}
       />
     `;
   }
 
   return html`
     <div class="setup-step">
-      <h2>Grant permissions</h2>
+      <h2>Allow Clance to act for you</h2>
       <p>
-        Clance needs Accessibility to type and click on your behalf. Screen Recording is
-        optional — without it, everything works except letting a session look at your screen.
+        Accessibility is required; Screen Recording is optional. You stay in control: either can be
+        turned off in System Settings.
       </p>
       <${StatusCard}
-        ok=${status.accessibility}
         title="Accessibility"
-        description="Lets Clance type, click, or edit fields in other apps on your behalf."
-        actionLabel=${status.accessibility ? null : "Open Settings"}
+        description="Type and click in other apps when you ask."
+        status=${status.accessibility ? "granted" : "required · not granted"}
+        tone=${status.accessibility ? "ok" : "attention"}
+        actionLabel=${status.accessibility ? null : "Grant"}
         onAction=${() => {
           setOpenedAccessibilitySettings(true);
           window.clanceApp.openAccessibilitySettings();
@@ -68,17 +97,18 @@ export function PermissionsStep({ onComplete } = {}) {
       ${!status.accessibility && openedAccessibilitySettings
         ? html`
             <p class="setup-hint">
-              Already switched on but still showing here? After Clance is reinstalled, macOS
-              can keep an old entry that no longer applies. Select Clance in that list, remove
-              it with the − button, then click Open Settings again.
+              Already switched on but still showing here? After Clance is reinstalled, macOS can keep
+              an old entry that no longer applies. Select Clance in that list, remove it with the −
+              button, then click Grant again.
             </p>
           `
         : null}
       <${StatusCard}
-        ok=${status.screenRecording}
-        title="Screen Recording (optional)"
-        description="Lets a session look at your screen when it needs to."
-        actionLabel=${status.screenRecording ? null : "Open Settings"}
+        title="Screen Recording"
+        description="Hand Clance a screenshot with ⌘⇧R."
+        status=${status.screenRecording ? "granted" : "optional · off"}
+        tone=${status.screenRecording ? "ok" : "plain"}
+        actionLabel=${status.screenRecording ? null : "Grant"}
         onAction=${() => {
           setOpenedScreenSettings(true);
           window.clanceApp.requestScreenRecordingAccess();
@@ -87,22 +117,21 @@ export function PermissionsStep({ onComplete } = {}) {
       ${!status.screenRecording && openedScreenSettings
         ? html`
             <p class="setup-hint">
-              Clance not in the list? Click + below it and choose Clance from Applications.
-              Already switched it on? macOS only applies Screen Recording after Clance
-              restarts.
-              <button class="btn-link" onClick=${() => window.clanceApp.relaunchApp()}>
-                Restart Clance
-              </button>
+              Clance not in the list? Click + below it and choose Clance from Applications. Already
+              switched it on? macOS only applies Screen Recording after Clance restarts.
+              <button class="btn-link" onClick=${() => window.clanceApp.relaunchApp()}>Restart Clance</button>
             </p>
           `
         : null}
       <div class="setup-step-actions">
-        <button class="btn-secondary" onClick=${refresh}>Recheck</button>
-        ${canContinue &&
-        onComplete &&
-        html`<button onClick=${onComplete}>
-          ${status.screenRecording ? "Continue" : "Continue without Screen Recording"}
-        </button>`}
+        <span class="setup-step-actions-status status ${canContinue ? "status-ok" : "status-attention"}">
+          ${canContinue ? "ready" : "waiting for Accessibility…"}
+        </span>
+        ${onBack && html`<button class="btn-quiet" onClick=${onBack}>Back</button>`}
+        <button class="btn-primary" disabled=${!canContinue} onClick=${onComplete}>
+          ${status.screenRecording || !canContinue ? "Continue" : "Continue without screenshots"}
+          <span class="key-hint">↩</span>
+        </button>
       </div>
     </div>
   `;

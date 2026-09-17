@@ -1,4 +1,4 @@
-import { app, BrowserWindow, screen } from "electron";
+import { app, BrowserWindow, ipcMain, screen } from "electron";
 import { join } from "path";
 
 // Compact by design: while recording the HUD shows only a dot, the level
@@ -6,6 +6,12 @@ import { join } from "path";
 // is dictating into.
 const WIDTH = 210;
 const HEIGHT = 36;
+// The pill fits its content: a short status is narrower than the recording
+// pill, and a message with an action widens it instead of being cut off. The
+// renderer reports the width it needs.
+const MIN_WIDTH = 120;
+const MAX_WIDTH = 560;
+let currentWidth = WIDTH;
 // Gap between the HUD and the bottom of the *work area*, which macOS has
 // already shrunk to exclude the Dock and menu bar — so this is only a
 // small visual gap, not clearance for the Dock. It started at 120px, which
@@ -113,21 +119,30 @@ export async function prewarmHud(): Promise<void> {
 // Bottom-centre of whichever display holds the cursor — not at the cursor
 // like the popup, since the thing being dictated into is usually right
 // there and covering it would be worse than useless.
-function position(win: BrowserWindow): void {
-  const cursor = screen.getCursorScreenPoint();
-  const display = screen.getDisplayNearestPoint(cursor);
+function position(win: BrowserWindow, display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())): void {
   const { x, y, width, height } = display.workArea;
   win.setBounds({
-    x: Math.round(x + (width - WIDTH) / 2),
+    x: Math.round(x + (width - currentWidth) / 2),
     y: Math.round(y + height - HEIGHT - BOTTOM_MARGIN),
-    width: WIDTH,
+    width: currentWidth,
     height: HEIGHT,
   });
 }
 
+// Resizes in place, re-centred on the display the HUD is already on, so a
+// state change never makes it jump to wherever the cursor has moved.
+ipcMain.on("dictation:resize", (_event, width: unknown) => {
+  if (typeof width !== "number" || !Number.isFinite(width)) return;
+  const next = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.ceil(width)));
+  if (next === currentWidth || !hud || hud.isDestroyed()) return;
+  currentWidth = next;
+  position(hud, screen.getDisplayMatching(hud.getBounds()));
+});
+
 export async function showHud(): Promise<BrowserWindow> {
   if (!hud) hud = createHud();
   await hudReady;
+  currentWidth = WIDTH;
   position(hud);
   // showInactive, never show() — see the class comment above.
   hud.showInactive();

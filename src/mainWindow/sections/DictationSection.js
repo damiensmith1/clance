@@ -46,15 +46,16 @@ function resolveRange(rangeId, customFrom, customTo) {
   }
 }
 
+// Short and mono, like the Sessions table: now, 6m, 2h, 3d, then a date.
 function relativeTime(ms) {
   const diffMin = Math.round((Date.now() - ms) / 60000);
-  if (diffMin < 1) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffMin < 1) return "now";
+  if (diffMin < 60) return `${diffMin}m`;
   const diffHour = Math.round(diffMin / 60);
-  if (diffHour < 24) return `${diffHour}h ago`;
+  if (diffHour < 24) return `${diffHour}h`;
   const diffDay = Math.round(diffHour / 24);
-  if (diffDay < 7) return `${diffDay}d ago`;
-  return new Date(ms).toLocaleDateString();
+  if (diffDay < 7) return `${diffDay}d`;
+  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function formatDuration(ms) {
@@ -64,7 +65,13 @@ function formatDuration(ms) {
     : `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
 }
 
-function TranscriptRow({ transcript }) {
+// An accelerator string ("Alt+D") as keycap labels (["⌥", "D"]).
+function shortcutKeys(accelerator) {
+  const glyphs = { Alt: "⌥", Option: "⌥", Command: "⌘", Cmd: "⌘", CommandOrControl: "⌘", Control: "⌃", Ctrl: "⌃", Shift: "⇧" };
+  return (accelerator || "Alt+D").split("+").filter(Boolean).map((part) => glyphs[part] ?? part);
+}
+
+function TranscriptRow({ transcript, onDelete }) {
   const [copied, setCopied] = useState(false);
 
   function handleCopy() {
@@ -74,29 +81,24 @@ function TranscriptRow({ transcript }) {
     });
   }
 
+  const meta = [
+    relativeTime(transcript.createdAt),
+    formatDuration(transcript.durationMs),
+    transcript.inserted ? transcript.targetApp : "clipboard only",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return html`
-    <div class="item-card item-card-static">
-      <span class="item-card-body">
-        <span class="dictation-text">${transcript.text}</span>
-        <span class="item-card-meta">
-          ${relativeTime(transcript.createdAt)} · ${formatDuration(transcript.durationMs)} spoken ·
-          transcribed in ${transcript.transcribeMs}ms · ${transcript.model}
-          ${transcript.targetApp ? html` · into ${transcript.targetApp}` : null}
-          ${!transcript.inserted
-            ? html`<span class="pill pill-muted">clipboard only</span>`
-            : null}
-        </span>
-      </span>
-      <span class="item-card-actions">
-        <button
-          class="icon-button dictation-copy"
-          title=${copied ? "Copied" : "Copy transcript"}
-          aria-label=${copied ? "Copied" : "Copy transcript"}
-          onClick=${handleCopy}
-        >
-          ${copied ? Icon.checkCircle(15) : Icon.copy(15)}
-        </button>
-      </span>
+    <div class="transcript-row">
+      <div class="transcript-body">
+        <span class="transcript-text">${transcript.text}</span>
+        <span class="transcript-meta">${meta}</span>
+      </div>
+      <div class="transcript-actions">
+        <button class="btn-quiet btn-small" onClick=${handleCopy}>${copied ? "Copied" : "Copy"}</button>
+        <button class="btn-quiet btn-small" onClick=${() => onDelete(transcript.id)}>Delete</button>
+      </div>
     </div>
   `;
 }
@@ -207,164 +209,137 @@ export function DictationSection({ onOpenSettings }) {
     });
   }
 
+  function handleDeleteOne(id) {
+    window.clanceApp.deleteTranscripts({ id }).then(() => load());
+  }
+
   const isFiltered = Boolean(query.trim()) || rangeId !== "all";
 
-  // Built as one JS string, not several template interpolations: htm
-  // collapses the whitespace between adjacent expressions inside a flex
-  // container, which rendered as "Delete 48matchingtranscripts?".
   const confirmCount = stats ? stats.count : 0;
-  const confirmSentence =
-    `Delete ${confirmCount} ${isFiltered ? "matching " : ""}` +
-    `transcript${confirmCount === 1 ? "" : "s"}? This can't be undone.`;
 
-  const shortcutHint = (shortcut || "Alt+D")
-    .replace("Alt", "⌥")
-    .replace("CommandOrControl", "⌘")
-    .replace("Command", "⌘")
-    .replace("Control", "⌃")
-    .replace("Shift", "⇧")
-    .replace(/\+/g, "");
+  const keycaps = shortcutKeys(shortcut).map((key) => html`<span class="kbd">${key}</span>`);
+  // One JS string, not several template interpolations: htm collapses the
+  // whitespace between adjacent expressions inside a flex container.
+  const confirmTitle =
+    `Delete ${isFiltered ? "" : "all "}${confirmCount} ${isFiltered ? "matching " : ""}` +
+    `transcript${confirmCount === 1 ? "" : "s"}?`;
 
   return html`
     <div class="section-page">
-      <h1 class="page-title">Dictation</h1>
-      <p class="page-subtitle">
-        Press <span class="kbd">${shortcutHint}</span> anywhere in macOS to talk. Clance
-        transcribes on this Mac and types the result where your cursor is.
-      </p>
+      <header class="page-header">
+        <h1 class="page-title">Dictation</h1>
+        ${stats &&
+        html`<span class="page-meta"
+          >${`${stats.count} transcript${stats.count === 1 ? "" : "s"}${isFiltered ? " matching" : ""}` +
+          (stats.count > 0 ? ` · ${formatDuration(stats.totalDurationMs)} spoken` : "")}</span
+        >`}
+        <span class="page-header-aside">Press ${keycaps} anywhere</span>
+      </header>
 
       ${availability && !availability.ready
         ? html`
-            <div class="status-card status-card-warn dictation-notice">
-              <span class="status-card-icon">${Icon.warningTriangle(18)}</span>
-              <span class="status-card-body">
-                <span class="status-card-title">Dictation isn't ready yet</span>
-                <span class="status-card-description">${availability.message}</span>
+            <div class="notice notice-attention">
+              <span class="status-dot session-dot-attention"></span>
+              <span class="notice-body">
+                <span class="notice-title">Dictation isn't set up yet</span>
+                <span class="notice-text">${availability.message}</span>
               </span>
               ${onOpenSettings &&
-              html`<button class="btn-primary btn-small" onClick=${onOpenSettings}>
-                Open Settings
-              </button>`}
+              html`<button class="btn-secondary btn-small" onClick=${onOpenSettings}>Open Settings</button>`}
             </div>
           `
         : null}
 
-      <section class="extension-group">
-              <div class="group-title-row">
-                <h2 class="group-title">
-                  ${stats
-                    ? `${stats.count} transcript${stats.count === 1 ? "" : "s"}${
-                        isFiltered ? " matching" : ""
-                      }`
-                    : "History"}
-                </h2>
-                ${stats && stats.count > 0
-                  ? html`<span class="pill pill-muted">
-                      ${formatDuration(stats.totalDurationMs)} dictated
-                    </span>`
-                  : null}
-              </div>
-              <div class="search-row">
-                <div class="search-input">
-                  ${Icon.search(16)}
-                  <input
-                    type="text"
-                    placeholder="Search everything you've dictated…"
-                    value=${query}
-                    onInput=${(e) => handleQuery(e.target.value)}
-                  />
+      <div class="search-row">
+        <label class="search-input">
+          ${Icon.search(15)}
+          <input
+            type="text"
+            placeholder="Search what you've said"
+            aria-label="Search transcripts"
+            value=${query}
+            onInput=${(e) => handleQuery(e.target.value)}
+          />
+        </label>
+        <div class="segmented" role="tablist" aria-label="Date range">
+          ${DATE_RANGES.map(
+            (r) => html`
+              <button
+                role="tab"
+                aria-selected=${rangeId === r.id}
+                class="segmented-item ${rangeId === r.id ? "segmented-item-active" : ""}"
+                onClick=${() => handleRange(r.id)}
+              >
+                ${r.label}
+              </button>
+            `
+          )}
+        </div>
+        ${stats && stats.count > 0
+          ? html`<div class="dictation-bulk">
+              <button class="btn-quiet" onClick=${() => setConfirmingDeleteAll(!confirmingDeleteAll)}>
+                ${isFiltered ? "Delete matching…" : "Delete all…"}
+              </button>
+              ${confirmingDeleteAll &&
+              html`
+                <div class="confirm dictation-confirm" role="alertdialog" aria-label=${confirmTitle}>
+                  <span class="confirm-title">${confirmTitle}</span>
+                  <span class="confirm-body">They're removed from this Mac. This can't be undone.</span>
+                  <div class="confirm-actions">
+                    <button class="btn-quiet" onClick=${() => setConfirmingDeleteAll(false)}>Cancel</button>
+                    <button class="btn-danger-filled" disabled=${deleting} onClick=${handleDeleteAll}>
+                      ${deleting ? "Deleting…" : "Delete"}
+                    </button>
+                  </div>
                 </div>
-              </div>
+              `}
+            </div>`
+          : null}
+      </div>
 
-              <div class="dictation-filters">
-                <div class="segmented segmented-compact">
-                  ${DATE_RANGES.map(
-                    (r) => html`
-                      <button
-                        class="segmented-item ${rangeId === r.id ? "segmented-item-active" : ""}"
-                        onClick=${() => handleRange(r.id)}
-                      >
-                        ${r.label}
-                      </button>
-                    `
-                  )}
-                </div>
-                ${rangeId === "custom"
-                  ? html`
-                      <div class="dictation-custom-range">
-                        <input
-                          type="date"
-                          class="dictation-date"
-                          aria-label="From date"
-                          title="Type a date, or use the arrow keys"
-                          max=${customTo || undefined}
-                          value=${customFrom}
-                          onInput=${(e) => handleCustomDate("from", e.target.value)}
-                        />
-                        <span class="dictation-range-sep">–</span>
-                        <input
-                          type="date"
-                          class="dictation-date"
-                          aria-label="To date"
-                          title="Type a date, or use the arrow keys"
-                          min=${customFrom || undefined}
-                          value=${customTo}
-                          onInput=${(e) => handleCustomDate("to", e.target.value)}
-                        />
-                      </div>
-                    `
-                  : null}
-                ${stats && stats.count > 0
-                  ? html`
-                      <div class="dictation-bulk">
-                        ${confirmingDeleteAll
-                          ? html`
-                              <span class="preference-description">${confirmSentence}</span>
-                              <button
-                                class="btn-link dictation-danger"
-                                disabled=${deleting}
-                                onClick=${handleDeleteAll}
-                              >
-                                ${deleting ? "Deleting…" : "Yes, delete"}
-                              </button>
-                              <button
-                                class="btn-link"
-                                onClick=${() => setConfirmingDeleteAll(false)}
-                              >
-                                Cancel
-                              </button>
-                            `
-                          : html`
-                              <button
-                                class="btn-link dictation-danger"
-                                onClick=${() => setConfirmingDeleteAll(true)}
-                              >
-                                Delete all ${stats.count}
-                              </button>
-                            `}
-                      </div>
-                    `
-                  : null}
+      ${rangeId === "custom"
+        ? html`
+            <div class="dictation-custom-range">
+              <input
+                type="date"
+                class="dictation-date"
+                aria-label="From date"
+                title="Type a date, or use the arrow keys"
+                max=${customTo || undefined}
+                value=${customFrom}
+                onInput=${(e) => handleCustomDate("from", e.target.value)}
+              />
+              <span class="dictation-range-sep">to</span>
+              <input
+                type="date"
+                class="dictation-date"
+                aria-label="To date"
+                title="Type a date, or use the arrow keys"
+                min=${customFrom || undefined}
+                value=${customTo}
+                onInput=${(e) => handleCustomDate("to", e.target.value)}
+              />
+            </div>
+          `
+        : null}
+
+      ${transcripts === null
+        ? html`<p class="empty-note">Loading transcripts…</p>`
+        : transcripts.length === 0
+          ? html`<p class="empty-note">
+              ${query || rangeId !== "all"
+                ? "Nothing matches that search."
+                : html`No transcripts yet. Press ${keycaps} anywhere and start talking.`}
+            </p>`
+          : html`
+              <div class="transcript-list">
+                ${transcripts.map(
+                  (transcript) => html`
+                    <${TranscriptRow} key=${transcript.id} transcript=${transcript} onDelete=${handleDeleteOne} />
+                  `
+                )}
               </div>
-              ${transcripts === null
-                ? html`<p class="empty-note">Loading…</p>`
-                : transcripts.length === 0
-                  ? html`<p class="empty-note">
-                      ${query
-                        ? "Nothing matches that search."
-                        : html`No transcripts yet. Press
-                            <span class="kbd">${shortcutHint}</span> anywhere and start talking.`}
-                    </p>`
-                  : html`
-                      <div class="list-group">
-                        ${transcripts.map(
-                          (transcript) => html`
-                            <${TranscriptRow} key=${transcript.id} transcript=${transcript} />
-                          `
-                        )}
-                      </div>
-                    `}
-      </section>
+            `}
     </div>
   `;
 }

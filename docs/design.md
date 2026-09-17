@@ -16,7 +16,7 @@ One Electron app, three renderer surfaces:
 | Surface | Renderer | Preload | Role |
 |---|---|---|---|
 | Popup widget | `src/popup/` (vanilla JS) | `src/preload/popup.ts` | Floating terminal opened by ⌥Space |
-| Main window | `src/mainWindow/` (Preact + htm) | `src/preload/mainWindow.ts` | Sessions, Dictation, Skills & Plugins, Settings, terminal tabs |
+| Main window | `src/mainWindow/` (Preact + htm) | `src/preload/mainWindow.ts` | Sessions, Dictation, Tools, Settings, terminal tabs |
 | Dictation HUD | `src/dictationHud/` (vanilla JS) | `src/preload/dictationHud.ts` | Non-focusable recording indicator; also captures the audio |
 
 Everything with OS or process access lives in the main process
@@ -77,7 +77,7 @@ Every session Clance opens is a `claude --bg` background agent — a real
 process supervised by the CLI's own daemon. A terminal tab or the popup is
 only a `claude attach <id>` client onto it. Closing a tab, switching away
 from it, or quitting Clance kills the attach client, never the conversation.
-Ending a session is explicit: the Sessions tab's Close action runs
+Ending a session is explicit: the Sessions tab's Stop action runs
 `claude stop <id>`, which leaves it resumable.
 
 `src/main/agentSessions.ts` is the single place `claude` processes are
@@ -121,7 +121,7 @@ Every `claude` process gets:
 ### Working directory
 
 - New sessions open in `getDefaultDirectory()` — the Settings value, or
-  `~/.clance` if unset. Both "New Session" (Sessions tab) and the popup's
+  `~/.clance` if unset. Both "New session" (Sessions tab) and the popup's
   "Open in…" can instead mint in a picked directory; picks are remembered in
   `recentDirectories` (most recent first, max 8).
 - Reopening a session always uses the `cwd` recorded on its transcript's
@@ -152,12 +152,29 @@ real user message, read line by line rather than parsing whole transcripts
 (`<local-command-caveat>` etc.) and the ⌘⇧R context preamble
 (`REFRESH_CONTEXT_PREFIX`) are skipped so they never become a title.
 
-The Sessions tab (`ChatsSection.js`) shows an **Active** group from
-`claude agents --json`, polled every 5 s and titled from the matching
-transcript, above the day-grouped **Closed** history minus whatever is live.
-An All/Archived toggle filters by `archived-sessions.json`. Archiving is the
-only form of removal: deleting a transcript could destroy real work from an
-unrelated project.
+The Sessions tab (`ChatsSection.js`) is one table: session (title over its
+folder), project, state, updated. Live sessions come first, from
+`claude agents --json` polled every 5 s, titled from the matching transcript.
+Their project is the agent's `cwd` basename, and their state comes from the
+CLI's `state` field: `working` (signal dot), `blocked` shown as "needs you"
+(amber), `failed`, `done`, or the `busy`/`idle` status otherwise. Closed
+transcripts follow, newest first, minus whatever is live. A filter menu
+narrows to running, closed or archived (`archived-sessions.json`). Archiving
+is the only form of removal: deleting a transcript could destroy real work
+from an unrelated project.
+
+The page is keyboard-first. ⌘K focuses the search field, whose dropdown lists
+the top matches and then "start a new session in" the default folder (⌘↩),
+recent folders or a chosen one (⌘O). In the table ↑↓ select, ↩ opens in a tab,
+⌥↩ opens in the widget, ⌘⌫ archives (or stops a live session) and ⌘N starts a
+new session. Archiving shows a toast with Undo. Right-clicking a row adds
+Resume in Terminal, Copy folder path and Reveal in Finder. Those go through
+`sessionActions.ts`, which re-validates the renderer's ids and paths. Resume
+in Terminal writes a `.command` file under `~/.clance/terminal` that runs
+`claude attach <agent>` or `claude --resume <session>` in the session's folder
+through the login shell, and opens it; scripting Terminal with AppleScript
+would need the Automation permission. Loading shows skeleton rows; an empty
+history shows a New session and Choose folder… prompt.
 
 ## Terminals
 
@@ -260,7 +277,15 @@ every open would cost latency and be stale or irrelevant most of the time.
   session's attach args in the popup. It isn't offered on shell tabs.
 - **Open in…** resumes any session through `resolveOpenArgs`, or mints a new
   one in a chosen directory (never pooled — the directory isn't known in
-  advance). Nothing is typed into a resumed session.
+  advance). Nothing is typed into a resumed session. It's the toolbar title
+  itself: a status dot, the session's folder and title
+  (`popup:session-info`), and a chevron.
+
+If a session fails to start — a spawn error, or the CLI exiting non-zero
+within 8 s — the popup swaps the terminal for an error state with Try again
+(`popup:retry`) and Open Settings, rather than leaving a dead terminal. A
+hint bar under the terminal shows the hide and ⌘⇧R shortcuts and the
+session's folder.
 
 ### ⌘⇧R: hand over the current screen
 
@@ -281,8 +306,10 @@ pasting (in main and again in the renderer), so a title can't end the
 bracketed paste early and inject input. Selections are capped at 4,000
 characters.
 
-The toolbar's "See context" hover card shows what the last refresh captured:
-screenshot, window title, selection and the pasted text.
+The toolbar's `ctx` hover card shows what the last refresh captured:
+screenshot, window title, selection and the pasted text. The card is
+positioned against the widget itself, not the toolbar link, so it always stays
+inside the window.
 
 ## Local tools server
 
@@ -302,7 +329,7 @@ to the CLI's own file and shell tools. Handlers are in `frontApp.ts`.
 | `clear_focused_field(app?)` | approval | ⌘A, Delete |
 | `replace_focused_field(text, app?)` | approval | ⌘A, paste, as one call |
 
-`LOCAL_TOOLS` is the single list the server registration, the Custom Tools
+`LOCAL_TOOLS` is the single list the server registration, the Clance tools
 UI and the CLI arguments all read from.
 
 ### Approval and targeting
@@ -344,7 +371,7 @@ UI and the CLI arguments all read from.
 - **Gated on Accessibility.** The whole server is left out of `--mcp-config`
   unless Accessibility is granted, so the CLI never sees tools that would
   fail. The user's own MCP servers aren't affected by this gate.
-- **Health check.** Skills & Plugins shows whether the server is running and
+- **Health check.** Tools shows whether the server is running and
   can send a real authenticated `initialize` to it, to tell a broken server
   from a CLI configuration problem.
 - **Logging.** Every request and tool call is logged with timing. `text`
@@ -368,16 +395,16 @@ Three transport details matter, all found by testing against the real CLI:
 
 Sessions are ordinary Claude Code processes, so skills, hooks, plugins and
 MCP servers configured in `~/.claude/` or a project's `.mcp.json` just work.
-Skills & Plugins (`SkillsSection.js`) adds:
+Tools (`SkillsSection.js`) has three tabs:
 
 - **Skills** — a read-only list of `~/.claude/skills/*/SKILL.md`
   (`skills.ts`). There's no toggle because the CLI has no per-skill switch,
   only `--disable-slash-commands` for all of them.
-- **MCP Servers** — entries from `~/.clance/mcp.json`, each with an
+- **MCP servers** — entries from `~/.clance/mcp.json`, each with an
   `enabled` flag. Enabled servers are merged into the same `--mcp-config` as
   the local tools, so toggles apply to sessions minted afterwards. Servers are
   added by editing the file.
-- **Custom Tools** — per-tool on/off for the local tools
+- **Clance tools** (the default tab) — per-tool on/off for the local tools
   (`config.enabledLocalTools`, default `"all"`), plus the server's status and
   health check.
 
@@ -386,10 +413,20 @@ Skills & Plugins (`SkillsSection.js`) adds:
 ### Shell and navigation
 
 `Shell.js` renders a floating launcher in the top-right corner — Sessions,
-Dictation, Skills & Plugins, Settings, and a plain terminal — rather than a
+Dictation, Tools, Settings, and a plain terminal — rather than a
 sidebar, so it takes no layout space. Sections are singleton tabs: opening
 one that's already open focuses it, in whichever pane it's in. The terminal
 button opens `$SHELL -il` in the default directory.
+
+- The launcher's status dot shows whether Claude is signed in, re-checked
+  whenever the window gains focus. While it isn't, a banner under the
+  launcher pane's tab bar offers Sign in.
+- Session tabs show a live dot, and a status line under the terminal gives the
+  agent's folder, when it started, and a Pop out button that moves it to the
+  widget. There's no ⌥↩ inside a terminal: the CLI uses it for a newline.
+- Other windows open a section through `openMainWindowSection`, which waits for
+  the renderer before sending `open-section` (the HUD's "open settings", the
+  popup's error state).
 
 ### Panes
 
@@ -418,10 +455,87 @@ and splits (`{ direction, sizes, children }`, always two children).
 
 ### Visual design
 
-Tokens are in `src/shared/theme.css` (background `#F7F3EB`, accent
-`#D97757`). Fonts — Newsreader, Inter, JetBrains Mono — are vendored variable
-`.woff2` files, and icons are inline SVG in `src/shared/icons.js`; nothing
-loads from the network. Terminals use the same palette.
+The design language is **Quiet instrument**: ink on off-white paper, flat,
+keyboard-first, with a single live-signal colour. The reference mockups are
+page 5 of the design canvas
+(https://claude.ai/artifact/15LuB45Mh6gZq4Xz3q8WaS).
+
+Everything lives as custom properties in `src/shared/theme.css`, and shared
+controls (buttons, fields, menus, toggles, status, toasts) in
+`src/shared/components.css`, which all three windows load. UI code uses the
+properties, never literal colours, font sizes or weights; `npm run
+check:design` fails on any that slip in. xterm.js can't read CSS variables,
+so the terminal themes in `popup.js` and `TerminalSection.js` repeat the palette as literals
+(the check skips them) and must be kept in step.
+
+**Colour**
+
+| Role | Property | Value |
+|---|---|---|
+| Paper (window background) | `--app-bg` | `#FAFAF7` |
+| Wash (tab bar, selected row, hover) | `--surface-bg` | `#ECEBE5` |
+| Surface (cards, menus, inputs) | `--surface-card` | `#FFFFFF` |
+| Line | `--surface-border` | `#E9E8E3` |
+| Ink: text and the action colour | `--text-primary`, `--accent` | `#171614` |
+| Secondary text | `--text-secondary` | `#5F5D57` |
+| Tertiary text (hints, timestamps, labels) | `--text-tertiary` | `#75726B` |
+| Signal: live things only | `--signal` | `#E2632F` |
+| Recording dot | `--recording` | `#C8412F` |
+| OK / attention / danger | `--success`, `--warning`, `--danger` | `#2F7D4F`, `#9A5C00`, `#B3362B` |
+
+Rules:
+- Every text colour clears 4.5:1 on paper.
+- Ink is the action colour: primary buttons and switches are ink.
+- Signal orange marks only something live (a running session, focus, the text
+  cursor, a drop target) and is never used for text.
+- Amber means the user must act; red means something failed or will be
+  destroyed.
+- An optional thing that's off is neutral grey, never a warning.
+
+**Type.** Geist for UI and Geist Mono for anything technical (paths,
+timestamps, shortcuts, states, tool names), both vendored variable `.woff2`
+files under the SIL OFL. There are seven sizes (`--text-xs` 11 … `--text-2xl`
+28): 13 px is the UI base, 24 px page titles and 28 px setup headings, at
+−0.03em tracking. Three weights, as properties: `--weight-regular` 450,
+`--weight-medium` 550 (titles, buttons) and
+`--weight-semibold` 600 (headings). Every window renders text with grayscale
+antialiasing (`-webkit-font-smoothing: antialiased`), which is lighter than
+macOS's default smoothing; the in-between weights (450, not 400) make up for
+it. Sentence case everywhere; labels are lowercase mono, never all caps.
+
+**Space and shape.** Spacing comes from `--space-1`…`--space-7`
+(4, 8, 12, 16, 24, 32, 48). Radii: 4 small controls, 6 buttons, 10 cards and
+inputs, 12 windows. Four shadows: `--shadow-menu`, `--shadow-window`,
+`--shadow-overlay`, and `--shadow-field` for inputs.
+
+**Components.**
+- Buttons come in four kinds: primary (ink), secondary (white with a line),
+  quiet (text only) and destructive (red text; red fill only inside a
+  confirm). A primary action that Enter triggers shows a ↩ key hint.
+- Status is shown as a dot plus a mono word (`granted`, `needs you`,
+  `off · optional`) rather than icons.
+- Keyboard shortcuts render as keycaps.
+- Views within a page (Tools' Skills / MCP servers / Clance tools) are
+  underline tabs with counts; value choices (Dictation's date ranges) are a
+  segmented pill.
+- Menus are white with `--shadow-menu`: a lowercase mono section label, an
+  optional right-aligned mono detail and shortcut, and a wash highlight.
+
+**Layout.** The main window keeps tabs on the left of a 40 px bar, as
+rounded-top cards whose active one joins the page below, with the
+launcher icons and Claude status dot pinned to its top-right corner. The tab
+row has no scrollbar, which would take its height out of the tabs; when it
+overflows it scrolls by trackpad or wheel and keeps the active tab in view. Content
+columns are 880 px, centred. The dictation overlay is a 36 px white pill: a
+recording dot, an ink level meter and a mono timer while listening; a coloured
+dot and a short label otherwise.
+
+The menu-bar menu (`tray.ts`) is native, so it looks like macOS: Open Clance
+and Dictate with their current shortcuts shown, Open Dashboard, a disabled
+"Claude: connected / signed out / not installed" line kept current by the
+setup status check, and Quit.
+
+Icons are inline SVG in `src/shared/icons.js`; nothing loads from the network.
 
 The logo master is `packaging/clance-logo.svg`, drawn as shapes so it needs no
 font. `packaging/icon.png` (1024 px, Apple icon grid) is the app icon.
@@ -471,6 +585,13 @@ frontmost, and refocusing would move the text somewhere else.
 - The meter is driven by worklet messages, not `requestAnimationFrame`, which
   throttling would pause. Worklet output goes through a zero-gain node so the
   graph runs without macOS marking Clance as playing audio.
+- The window is resized to its content (`dictation:resize`, 120–560 px,
+  re-centred): a fixed width while recording, otherwise the label plus any
+  action. Labels are short — "Typed into <window>", "Copied · paste with ⌘V",
+  "Didn't catch that", "Install a speech model first" — and a missing model,
+  engine or microphone permission adds an "open settings" link
+  (`dictation:hud-action`), which opens the right Settings or System Settings
+  page and hides the HUD.
 - `warmDictation()` at startup pre-creates the HUD, loads the nut-js addon,
   and resolves the binary and machine specs, taking the first dictation from
   ~1 s to ~100 ms. The microphone is only opened on start.
@@ -566,9 +687,9 @@ CREATE VIRTUAL TABLE transcripts_fts USING fts5(text, content='transcripts', con
   2 strips emoji from stored window titles: browsers append a speaker glyph to
   the titles of tabs playing audio. `windowTitle.ts` removes pictographs and
   emoji modifiers at capture, keeping accented, CJK and Cyrillic text.
-- Queries and bulk delete share one `buildQuery` (search plus date range), so
-  "delete all N" deletes exactly what the filter matches, not just the loaded
-  page. The confirm step reuses the filter the visible list was built from,
+- Queries and deletes share one `buildQuery` (search, date range, or a single
+  `id`), so "delete all" deletes exactly what the filter matches, not just the
+  loaded page, and deleting one row goes through the same path. The confirm step reuses the filter the visible list was built from,
   so editing the search box mid-confirm can't change what gets deleted.
 - Date presets resolve at query time, and dates are formatted from local
   components (`toISOString()` would shift the day).
@@ -585,8 +706,19 @@ installed and signed in, Accessibility is granted, and shortcuts are
 confirmed. Nothing is cached as done — auth and permissions are re-checked
 live, since either can change outside Clance. Until complete, the main window
 opens the wizard (`SetupWizard.js`: Claude → Permissions → Shortcuts →
-Dictation) and the popup hotkey isn't registered. Dictation's hotkey doesn't
-depend on setup. The same step components render in Settings afterwards.
+Dictation) and the popup hotkey isn't registered. The wizard shows its steps
+as a numbered row and every step after the first has Back. Dictation's hotkey
+doesn't depend on setup. The same step components render in Settings
+afterwards, as status rows (`StatusCard.js`: title, description, a mono status
+word, an optional action) in one column of headed groups (access, general,
+shortcuts, dictation). Microphone access sits under Access with the other
+permissions; the speech model is one row that expands into the model list.
+
+In the wizard, Enter presses the step's primary button unless focus is in a
+text field, button or the shortcut recorder. Permissions are re-checked on
+window focus and every 2 s while any is missing, so the step advances without
+a Recheck button. The Dictation step offers the recommended model, a menu of
+the others, and lets the user finish while the download continues.
 
 ### Claude CLI
 
@@ -599,7 +731,7 @@ detection checks standard install directories first, then the login-shell
 
 `permissions.ts`:
 
-- **Accessibility** (required). "Open Settings" calls
+- **Accessibility** (required). "Grant" calls
   `isTrustedAccessibilityClient(true)`; checking with `false` never adds
   Clance to the list.
 - **Screen Recording** (optional). There's no request API, and checking the
@@ -692,14 +824,17 @@ tap.
 
 ### Updates
 
-Settings → Check for Updates (`updates.ts`) compares `app.getVersion()` with
-the latest GitHub release and, if newer, shows `brew upgrade --cask clance`
-and a release-notes link (only this repo's releases pages can be opened).
+`updates.ts` compares `app.getVersion()` with the latest GitHub release and,
+if newer, shows `brew upgrade --cask clance` and a release-notes link (only
+this repo's releases pages can be opened). The main window checks once per
+launch (`app:launch-update-check`, cached in main so reloads don't re-fetch)
+and shows a toast with Copy upgrade command; Settings has a manual check.
 Clance doesn't install updates itself: an app that replaces itself leaves
 Homebrew's record pointing at a missing app, and the next `brew upgrade`
 fails. Running `brew` from inside Clance would quit Clance before any error
-could be shown. The check is manual and unauthenticated (GitHub allows 60
-requests an hour); rate limiting gets its own message.
+could be shown. The check is unauthenticated (GitHub allows 60 requests an
+hour); rate limiting gets its own message, and the launch check stays silent
+on errors.
 
 ## Open questions
 

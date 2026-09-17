@@ -51,7 +51,7 @@ function metaLine(model, installing, progress) {
  * PermissionsStep): with `onComplete` it renders as a wizard step, without
  * it as plain rows for the Settings page and the Dictation tab.
  */
-export function DictationStep({ onComplete } = {}) {
+export function DictationStep({ onComplete, onBack } = {}) {
   const [data, setData] = useState(null);
   const [settings, setSettings] = useState(null);
   const [mic, setMic] = useState(null);
@@ -59,6 +59,13 @@ export function DictationStep({ onComplete } = {}) {
   const [error, setError] = useState(null);
   const [promptDraft, setPromptDraft] = useState(null);
   const [showAllModels, setShowAllModels] = useState(false);
+  const [dictateShortcut, setDictateShortcut] = useState("Alt+D");
+
+  useEffect(() => {
+    window.clanceApp.getPreferences().then((prefs) => {
+      if (prefs?.shortcuts?.dictate) setDictateShortcut(prefs.shortcuts.dictate);
+    });
+  }, []);
 
   function refresh() {
     return Promise.all([
@@ -135,6 +142,13 @@ export function DictationStep({ onComplete } = {}) {
     window.clanceApp.setActiveDictationModel(modelId).then(refresh).catch(() => refresh());
   }
 
+  // Microphone access can be granted in System Settings while this is open.
+  useEffect(() => {
+    const onFocus = () => window.clanceApp.recheckPermissions().then((p) => setMic(p.microphone));
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
   function handleMic() {
     window.clanceApp.requestMicrophone().then((granted) => {
       setMic(granted);
@@ -176,9 +190,10 @@ export function DictationStep({ onComplete } = {}) {
   const engineCard = !binaryAvailable
     ? html`
         <${StatusCard}
-          ok=${false}
-          title="Speech engine not installed"
+          title="Speech engine"
           description="Dictation runs on whisper.cpp. Install it with brew install whisper.cpp, then check again."
+          status="not installed"
+          tone="attention"
           actionLabel="Check again"
           onAction=${refresh}
         />
@@ -187,12 +202,11 @@ export function DictationStep({ onComplete } = {}) {
 
   const micCard = html`
     <${StatusCard}
-      ok=${Boolean(mic)}
       title="Microphone"
-      description=${mic
-        ? "Clance can record audio for dictation."
-        : "Required so Clance can hear you when you dictate."}
-      actionLabel=${mic ? null : "Grant Access"}
+      description="So Clance can hear you when you dictate."
+      status=${mic ? "granted" : "not granted"}
+      tone=${mic ? "ok" : "attention"}
+      actionLabel=${mic ? null : "Grant"}
       onAction=${handleMic}
     />
   `;
@@ -209,9 +223,9 @@ export function DictationStep({ onComplete } = {}) {
               <span class="item-card-title">
                 ${model.label}
                 ${model.active
-                  ? html`<span class="dictation-badge">Active</span>`
+                  ? html`<span class="dictation-badge">active</span>`
                   : isRecommended
-                    ? html`<span class="dictation-badge dictation-badge-muted">Recommended</span>`
+                    ? html`<span class="dictation-badge dictation-badge-muted">recommended</span>`
                     : null}
               </span>
               <span class="item-card-description">${model.note}</span>
@@ -236,7 +250,7 @@ export function DictationStep({ onComplete } = {}) {
             <span class="item-card-actions">
               ${installing
                 ? html`<button
-                    class="btn-link"
+                    class="btn-quiet btn-small"
                     onClick=${() => window.clanceApp.cancelDictationInstall(model.id)}
                   >
                     Cancel
@@ -244,15 +258,15 @@ export function DictationStep({ onComplete } = {}) {
                 : model.installed
                   ? html`
                       ${!model.active &&
-                      html`<button class="btn-link" onClick=${() => handleActivate(model.id)}>
+                      html`<button class="btn-secondary btn-small" onClick=${() => handleActivate(model.id)}>
                         Use
                       </button>`}
-                      <button class="btn-link" onClick=${() => handleRemove(model.id)}>
+                      <button class="btn-quiet btn-small" onClick=${() => handleRemove(model.id)}>
                         Remove
                       </button>
                     `
                   : html`<button
-                      class="btn-primary btn-small"
+                      class="btn-secondary btn-small"
                       disabled=${!binaryAvailable}
                       onClick=${() => handleInstall(model.id)}
                     >
@@ -264,59 +278,69 @@ export function DictationStep({ onComplete } = {}) {
   }
 
   const modelList = html`<div class="list-group">${models.map(renderModelRow)}</div>`;
+  const activeModel = models.find((m) => m.active);
+  const anyInstalling = Boolean(progress && progress.phase !== "done" && progress.phase !== "error");
 
+  // Settings shows the model as one row; the full list opens from Change…
+  // (and stays open while a download is running, so its progress is visible).
   const modelSection = html`
-    <div class="dictation-subsection">
-      <div class="list-group-label">Speech model</div>
-      <p class="preference-description dictation-recommendation">
-        Recommended for this Mac: <strong>${
-          (models.find((m) => m.id === recommendation.modelId) || {}).label
-        }</strong> — ${recommendation.reason}
-      </p>
-      ${modelList}
+    <div class="preference-row">
+      <div>
+        <div class="preference-title">Speech model</div>
+        <div class="preference-description">
+          ${activeModel
+            ? activeModel.id === recommendation.modelId
+              ? "Runs on this Mac. Recommended for your GPU."
+              : "Runs on this Mac."
+            : recommendation.reason}
+        </div>
+      </div>
+      <div class="preference-row-actions">
+        <span class="preference-value">${activeModel ? `${activeModel.id} · ${formatBytes(activeModel.bytes)}` : "none"}</span>
+        <button
+          class="btn-secondary btn-small"
+          aria-expanded=${showAllModels}
+          onClick=${() => setShowAllModels(!showAllModels)}
+        >
+          ${showAllModels ? "Done" : activeModel ? "Change…" : "Choose…"}
+        </button>
+      </div>
     </div>
+    ${(showAllModels || anyInstalling) && html`<div class="dictation-model-list">${modelList}</div>`}
   `;
 
   const preferenceRows = html`
-    <div class="dictation-subsection">
-      <div class="list-group-label">Preferences</div>
-    </div>
     <div class="preference-row">
       <div>
-        <div class="preference-title">Type the transcript automatically</div>
+        <div class="preference-title">Type the transcript for me</div>
         <div class="preference-description">
-          ${settings.insertMode === "paste"
-            ? "Dictated text is pasted straight into whatever app you're in."
-            : "Dictated text is only copied to the clipboard — paste it yourself with ⌘V."}
+          Off copies it to the clipboard instead.
         </div>
       </div>
       <${Toggle}
         checked=${settings.insertMode === "paste"}
+        label="Type the transcript for me"
         onChange=${(on) => patchSettings({ insertMode: on ? "paste" : "clipboard" })}
       />
     </div>
     <div class="preference-row">
       <div>
-        <div class="preference-title">Keep the audio files too</div>
+        <div class="preference-title">Keep recordings</div>
         <div class="preference-description">
-          Your transcripts are always saved to History. This is about the raw
-          recording, which is deleted right after it's transcribed unless you
-          turn this on — only useful for debugging a mis-transcription.
+          Audio is deleted after transcribing. Transcripts are always saved.
         </div>
       </div>
       <${Toggle}
         checked=${settings.keepAudio}
+        label="Keep recordings"
         onChange=${(on) => patchSettings({ keepAudio: on })}
       />
     </div>
     <div class="dictation-prompt-row">
       <div class="preference-title">Transcription prompt</div>
       <div class="preference-description">
-        Passed to whisper as its initial prompt. It primes the model's
-        expected <em>vocabulary</em> — it is not an instruction the model
-        follows, so terms and example phrasing help, but directions like
-        "remove filler words" will not. Measurably improves code
-        identifiers, camelCase, and file paths.
+        Words whisper should expect, like names, code identifiers and file paths. It shapes the
+        vocabulary; it isn't an instruction, so "remove filler words" won't work.
       </div>
       <textarea
         class="dictation-prompt"
@@ -327,16 +351,16 @@ export function DictationStep({ onComplete } = {}) {
       ></textarea>
       <div class="dictation-prompt-actions">
         ${promptDraft !== settings.vocabulary
-          ? html`<button class="btn-primary btn-small" onClick=${savePrompt}>Save prompt</button>`
+          ? html`<button class="btn-secondary btn-small" onClick=${savePrompt}>Save prompt</button>`
           : html`<span class="preference-description">Saved</span>`}
-        <button class="btn-link" onClick=${resetPrompt}>Reset to default</button>
+        <button class="btn-quiet btn-small" onClick=${resetPrompt}>Reset to default</button>
       </div>
     </div>
   `;
 
   if (!onComplete) {
     return html`
-      ${engineCard} ${micCard} ${modelSection}
+      ${engineCard} ${modelSection}
       ${error && html`<p class="setup-error">${error}</p>`}
       ${anyInstalled ? preferenceRows : null}
     `;
@@ -344,43 +368,136 @@ export function DictationStep({ onComplete } = {}) {
 
   // Onboarding leads with a single recommended model rather than the full
   // catalog: a new user shouldn't have to weigh four speech models to try
-  // the feature. The rest are one click away for anyone who wants to choose.
+  // the feature. The rest are one click away in a menu. The card follows
+  // whichever model is downloading or active, so a different pick shows too.
   const recommended = models.find((m) => m.id === recommendation.modelId);
+  const cardModel =
+    models.find((m) => progress?.modelId === m.id) ?? models.find((m) => m.active) ?? recommended;
   const downloading = Boolean(progress && progress.phase !== "done" && progress.phase !== "error");
+  const cardInstalling = downloading && progress.modelId === cardModel?.id;
+  const shortcutGlyphs = dictateShortcut
+    .split("+")
+    .map((part) => ({ Alt: "⌥", Option: "⌥", Command: "⌘", CommandOrControl: "⌘", Control: "⌃", Shift: "⇧" })[part] ?? part)
+    .join("");
 
-  let finishLabel = "Skip for now";
-  if (anyInstalled) finishLabel = "Finish setup";
-  else if (downloading) finishLabel = "Finish — download continues in the background";
+  const finishLabel = anyInstalled || downloading ? "Finish setup" : "Skip for now";
+  const pct =
+    cardInstalling && progress.phase === "downloading" && progress.totalBytes
+      ? Math.round((progress.receivedBytes / progress.totalBytes) * 100)
+      : null;
 
   return html`
     <div class="setup-step">
-      <h2>Set up dictation <span class="setup-optional">Optional</span></h2>
+      <h2>Dictate anywhere</h2>
       <p>
-        Press your dictation shortcut anywhere, talk, and Clance types it where your cursor
-        is. It runs entirely on this Mac, using a speech model you download once.
+        Press ${shortcutGlyphs}, talk, and Clance types what you said where your cursor is. Optional,
+        and it never leaves this Mac.
       </p>
       ${engineCard}
-      ${recommended
-        ? html`
-            <p class="preference-description dictation-recommendation">
-              ${recommendation.reason}
-            </p>
-            <div class="list-group">${renderModelRow(recommended)}</div>
-          `
-        : null}
-      <button class="btn-link" onClick=${() => setShowAllModels(!showAllModels)}>
-        ${showAllModels ? "Hide other models" : "Choose a different model"}
-      </button>
-      ${showAllModels
-        ? html`<div class="list-group">
-            ${models.filter((m) => m.id !== recommendation.modelId).map(renderModelRow)}
-          </div>`
-        : null}
+      ${cardModel &&
+      html`
+        <div class="model-card">
+          <div class="model-card-head">
+            <span class="model-card-name">${cardModel.id}</span>
+            <span class="model-card-tag ${cardModel.installed ? "model-card-tag-ok" : ""}">
+              ${cardModel.active
+                ? "active"
+                : cardModel.installed
+                  ? "installed"
+                  : cardModel.id === recommendation.modelId
+                    ? "recommended for this Mac"
+                    : ""}
+            </span>
+            <span class="model-card-spacer"></span>
+            ${cardInstalling
+              ? html`<button class="btn-quiet btn-small" onClick=${() => window.clanceApp.cancelDictationInstall(cardModel.id)}>
+                  Cancel
+                </button>`
+              : cardModel.installed
+                ? !cardModel.active &&
+                  html`<button class="btn-secondary btn-small" onClick=${() => handleActivate(cardModel.id)}>Use</button>`
+                : html`<button
+                    class="btn-secondary btn-small"
+                    disabled=${!binaryAvailable}
+                    onClick=${() => handleInstall(cardModel.id)}
+                  >
+                    Install
+                  </button>`}
+          </div>
+          <span class="model-card-text">
+            ${cardModel.id === recommendation.modelId ? recommendation.reason : cardModel.note}
+          </span>
+          ${cardInstalling &&
+          html`
+            <div class="model-card-progress">
+              <div class="model-card-progress-row">
+                <span>${progress.phase === "downloading" ? "downloading" : progressLabel(progress)}</span>
+                <span class="model-card-progress-detail">
+                  ${pct === null
+                    ? ""
+                    : `${formatBytes(progress.receivedBytes)} / ${formatBytes(progress.totalBytes)} · ${pct}%`}
+                </span>
+              </div>
+              <span class="progress" role="progressbar" aria-valuenow=${pct ?? undefined}>
+                <span
+                  class="progress-fill ${pct === null ? "progress-fill-indeterminate" : ""}"
+                  style=${`width: ${pct ?? 100}%`}
+                ></span>
+              </span>
+            </div>
+          `}
+        </div>
+      `}
+      <div class="model-menu-wrap">
+        <button
+          class="btn-quiet btn-small setup-more"
+          aria-haspopup="menu"
+          aria-expanded=${showAllModels}
+          onClick=${() => setShowAllModels(!showAllModels)}
+        >
+          Use a different model
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+        </button>
+        ${showAllModels &&
+        html`
+          <div class="menu model-menu" role="menu">
+            ${models.map(
+              (model) => html`
+                <button
+                  class="menu-item"
+                  role="menuitemradio"
+                  aria-checked=${model.id === cardModel?.id}
+                  onClick=${() => {
+                    setShowAllModels(false);
+                    if (model.installed) handleActivate(model.id);
+                    else handleInstall(model.id);
+                  }}
+                >
+                  <span class="menu-check">${model.id === cardModel?.id ? "✓" : ""}</span>
+                  <span class="menu-item-title">${model.id}</span>
+                  <span class="menu-item-detail">
+                    ${[
+                      formatBytes(model.bytes),
+                      model.id === recommendation.modelId ? "recommended" : model.installed ? "installed" : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </button>
+              `
+            )}
+          </div>
+        `}
+      </div>
       ${micCard}
       ${error && html`<p class="setup-error">${error}</p>`}
       <div class="setup-step-actions">
-        <button class=${anyInstalled ? "" : "btn-secondary"} onClick=${onComplete}>
-          ${finishLabel}
+        ${downloading &&
+        !anyInstalled &&
+        html`<span class="setup-step-actions-status mono-label">download continues if you finish</span>`}
+        ${onBack && html`<button class="btn-quiet" onClick=${onBack}>Back</button>`}
+        <button class=${anyInstalled || downloading ? "btn-primary" : "btn-secondary"} onClick=${onComplete}>
+          ${finishLabel}${(anyInstalled || downloading) && html` <span class="key-hint">↩</span>`}
         </button>
       </div>
     </div>

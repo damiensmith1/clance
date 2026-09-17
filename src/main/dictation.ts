@@ -324,7 +324,7 @@ export async function handleAudio(samples: Float32Array): Promise<void> {
       inserted,
     });
 
-    sendToHud("dictation:done", { text, inserted, transcribeMs });
+    sendToHud("dictation:done", { text, inserted, transcribeMs, targetApp: targetApp ?? null });
     for (const listener of listeners) listener(transcript);
 
     setTimeout(() => {

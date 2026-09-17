@@ -150,6 +150,8 @@ export type TranscriptFilter = {
   // Inclusive epoch-ms bounds. Absent means unbounded on that side.
   from?: number;
   to?: number;
+  // A single transcript, for deleting one row. Ignored unless an integer.
+  id?: number;
 };
 
 type QueryParts = { from: string; where: string; params: (string | number)[] };
@@ -193,6 +195,10 @@ function buildQuery(filter: TranscriptFilter, fts: boolean): QueryParts {
   if (typeof filter.to === "number") {
     clauses.push("t.created_at <= ?");
     params.push(filter.to);
+  }
+  if (Number.isInteger(filter.id)) {
+    clauses.push("t.id = ?");
+    params.push(filter.id as number);
   }
 
   return {

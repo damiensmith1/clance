@@ -174,7 +174,7 @@ function glyphsFromMods(mods) {
 
 // ---- component ----
 
-export function ShortcutsStep({ onComplete } = {}) {
+export function ShortcutsStep({ onComplete, onBack } = {}) {
   const [actions, setActions] = useState(null);
   const [values, setValues] = useState({});
   const [recordingId, setRecordingId] = useState(null);
@@ -343,7 +343,7 @@ export function ShortcutsStep({ onComplete } = {}) {
       <div class="preference-row" key=${action.id}>
         <div>
           <div class="preference-title">${action.label}</div>
-          <div class="preference-description">${action.description}</div>
+          ${onComplete && html`<div class="preference-description">${action.description}</div>`}
         </div>
         <div class="shortcut-field-wrap">
           ${isRecording
@@ -351,9 +351,9 @@ export function ShortcutsStep({ onComplete } = {}) {
                 <button class="shortcut-field shortcut-field-recording" onClick=${stopRecording}>
                   ${liveGlyphs.length > 0
                     ? liveGlyphs.map((g) => html`<span class="shortcut-key">${g}</span>`)
-                    : html`<span class="shortcut-prompt">Press a shortcut…</span>`}
+                    : html`<span class="shortcut-prompt">press keys…</span>`}
                 </button>
-                <span class="shortcut-hint">⎋ cancel · ⌫ default</span>
+                <span class="shortcut-hint">esc cancel · ⌫ default</span>
               `
             : html`
                 <button
@@ -365,7 +365,7 @@ export function ShortcutsStep({ onComplete } = {}) {
                   ${key && html`<span class="shortcut-key">${keyLabel(key)}</span>`}
                 </button>
                 ${savedId === action.id
-                  ? html`<span class="shortcut-hint shortcut-hint-ok">Saved</span>`
+                  ? html`<span class="shortcut-hint shortcut-hint-ok">saved</span>`
                   : null}
               `}
         </div>
@@ -383,16 +383,15 @@ export function ShortcutsStep({ onComplete } = {}) {
 
   return html`
     <div class="setup-step">
-      <h2>Set your shortcuts</h2>
-      <p>
-        Click a shortcut and press the keys you want. Each needs ⌘, ⌥ or ⌃ so it can't
-        fire while you're typing.
-      </p>
+      <h2>Choose your shortcuts</h2>
+      <p>Click one and press new keys. Each needs ⌘, ⌥ or ⌃ so it can't fire while you type.</p>
       ${rows}
       ${!recordingId && error && html`<p class="setup-error">${error}</p>`}
       <div class="setup-step-actions">
-        <button disabled=${confirming} onClick=${confirmAndContinue}>
-          ${confirming ? "Saving…" : "Continue"}
+        <span class="setup-step-actions-status mono-label">changes save instantly</span>
+        ${onBack && html`<button class="btn-quiet" onClick=${onBack}>Back</button>`}
+        <button class="btn-primary" disabled=${confirming} onClick=${confirmAndContinue}>
+          ${confirming ? "Saving…" : html`Continue <span class="key-hint">↩</span>`}
         </button>
       </div>
     </div>

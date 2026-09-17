@@ -31,15 +31,15 @@ function UpdateCheck() {
   }
 
   if (checking) {
-    return html`<span class="update-check">Checking…</span>`;
+    return html`<span class="update-check">checking…</span>`;
   }
   if (check?.status === "available") {
     return html`
       <span class="update-check">
-        <span class="update-available">${`Clance ${check.latest} is available`}</span>
+        <span class="update-available">${`clance ${check.latest} available`}</span>
         <code class="update-command">${check.command}</code>
-        <button class="btn-link" onClick=${copyCommand}>${copied ? "Copied" : "Copy"}</button>
-        <button class="btn-link" onClick=${() => window.clanceApp.openReleasePage(check.releaseUrl)}>
+        <button class="btn-secondary btn-small" onClick=${copyCommand}>${copied ? "Copied" : "Copy"}</button>
+        <button class="btn-quiet btn-small" onClick=${() => window.clanceApp.openReleasePage(check.releaseUrl)}>
           Release notes
         </button>
       </span>
@@ -48,8 +48,8 @@ function UpdateCheck() {
   if (check?.status === "up-to-date") {
     return html`
       <span class="update-check">
-        <span>You're on the latest version</span>
-        <button class="btn-link" onClick=${runCheck}>Check again</button>
+        <span>up to date</span>
+        <button class="btn-quiet btn-small" onClick=${runCheck}>Check again</button>
       </span>
     `;
   }
@@ -57,11 +57,11 @@ function UpdateCheck() {
     return html`
       <span class="update-check">
         <span>${check.message}</span>
-        <button class="btn-link" onClick=${runCheck}>Try again</button>
+        <button class="btn-quiet btn-small" onClick=${runCheck}>Try again</button>
       </span>
     `;
   }
-  return html`<button class="btn-link" onClick=${runCheck}>Check for Updates</button>`;
+  return html`<button class="btn-quiet btn-small" onClick=${runCheck}>Check for updates</button>`;
 }
 
 export function SettingsSection() {
@@ -73,32 +73,37 @@ export function SettingsSection() {
   }, []);
 
   return html`
-    <div class="section-page">
-      <h1 class="page-title">Settings</h1>
-      <p class="page-subtitle">Configure your workspace and monitor system health.</p>
+    <div class="settings-layout">
+      <header class="page-header">
+        <h1 class="page-title">Settings</h1>
+      </header>
 
       <section class="extension-group">
-        <h2 class="group-title">System Health</h2>
+        <h2 class="group-title">access</h2>
         <${ConnectClaudeStep} />
         <${PermissionsStep} />
       </section>
 
       <section class="extension-group">
-        <h2 class="group-title">Preferences</h2>
+        <h2 class="group-title">general</h2>
         <${LaunchAtLoginRow} prefs=${prefs} setPrefs=${setPrefs} />
         <${DefaultDirectoryRow} prefs=${prefs} setPrefs=${setPrefs} />
+      </section>
+
+      <section class="extension-group">
+        <h2 class="group-title">shortcuts</h2>
         <${ShortcutsStep} />
       </section>
 
       <section class="extension-group">
-        <h2 class="group-title">Dictation</h2>
+        <h2 class="group-title">dictation</h2>
         <${DictationStep} />
       </section>
 
       <footer class="settings-footer">
         <span class="settings-footer-brand">
-          ${Logo(16)}
-          <span>${version ? `Clance v${version} · Built for macOS` : "Clance · Built for macOS"}</span>
+          ${Logo(14)}
+          <span>${version ? `clance ${version}` : "clance"}</span>
         </span>
         <${UpdateCheck} />
       </footer>

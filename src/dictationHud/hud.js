@@ -7,6 +7,7 @@ const hudEl = document.getElementById("hud");
 const labelEl = document.getElementById("label");
 const meterEl = document.getElementById("meter");
 const elapsedEl = document.getElementById("elapsed");
+const actionEl = document.getElementById("action");
 
 const METER_BARS = 11;
 for (let i = 0; i < METER_BARS; i += 1) {
@@ -39,11 +40,32 @@ let stopping = false;
 const SILENCE_RMS = 0.006;
 const SPEECH_RMS = 0.02;
 
+// The pill's side padding plus its dot and gaps, beyond the label itself.
+const HUD_CHROME_PX = 52;
+// While recording the pill holds the meter and timer, so its width is fixed.
+const RECORDING_WIDTH_PX = 210;
+
+let actionHandler = null;
+actionEl.addEventListener("click", () => actionHandler?.());
+
 // One text slot. While recording it's hidden entirely and the meter does
-// the talking; every other state gets a short phrase.
-function setState(state, label) {
+// the talking; every other state gets a short phrase, and the states that
+// need the user to fix something get an action. After each change main is
+// told how wide the pill needs to be, so a sentence widens it instead of
+// being cut off.
+function setState(state, label, action) {
   hudEl.className = `state-${state}`;
   if (label !== undefined) labelEl.textContent = label;
+  actionHandler = action?.onClick ?? null;
+  actionEl.hidden = !action;
+  actionEl.textContent = action?.label ?? "";
+  requestAnimationFrame(() => {
+    const needed =
+      state === "recording"
+        ? RECORDING_WIDTH_PX
+        : HUD_CHROME_PX + labelEl.scrollWidth + (action ? actionEl.getBoundingClientRect().width + 10 : 0);
+    window.clanceDictation.resize(needed);
+  });
 }
 
 // Bar heights are capped at METER_HEIGHT_PX to match the CSS box — they
@@ -62,7 +84,7 @@ function renderMeter(level) {
     const centreBias = 0.55 + 0.45 * (1 - Math.abs(i - (bars.length - 1) / 2) / (bars.length / 2));
     const height = active ? 3 + scaled * (METER_HEIGHT_PX - 3) * centreBias : 2.5;
     bars[i].style.height = `${Math.round(height * 10) / 10}px`;
-    bars[i].classList.toggle("hot", scaled > 0.75 && active);
+    bars[i].classList.toggle("on", active);
   }
 }
 
@@ -110,7 +132,10 @@ async function startCapture() {
     });
   } catch (error) {
     window.clanceDictation.micError(error && error.message ? error.message : String(error));
-    setState("error", "No microphone access");
+    setState("error", "Allow microphone access", {
+      label: "open settings",
+      onClick: () => window.clanceDictation.action("open-microphone-settings"),
+    });
     return;
   }
 
@@ -244,20 +269,42 @@ window.clanceDictation.onState((payload) => {
   }
 });
 
+// The target's title arrives with the result: it's still being read when
+// recording starts.
 window.clanceDictation.onDone((payload) => {
-  setState("done", payload && payload.inserted ? "Inserted" : "Copied to clipboard");
+  const typed = payload && payload.targetApp ? `Typed into ${payload.targetApp}` : "Typed";
+  setState("done", payload && payload.inserted ? typed : "Copied · paste with ⌘V");
 });
 
 window.clanceDictation.onEmpty(() => {
-  setState("error", "Didn't catch that");
+  setState("empty", "Didn't catch that");
 });
 
 window.clanceDictation.onError((payload) => {
-  setState("error", "Dictation failed");
+  setState("failed", "Dictation failed");
 });
 
 // The only state that genuinely needs the full sentence, since it's
 // telling the user how to fix something.
+// Short labels by reason; main's full sentence is the fallback. Each points
+// at the one place that fixes it.
 window.clanceDictation.onUnavailable((payload) => {
-  setState("unavailable", (payload && payload.message) || "Dictation isn't set up");
+  const reason = payload && payload.reason;
+  if (reason === "no-microphone") {
+    setState("unavailable", "Allow microphone access", {
+      label: "open settings",
+      onClick: () => window.clanceDictation.action("open-microphone-settings"),
+    });
+    return;
+  }
+  const label =
+    reason === "no-model"
+      ? "Install a speech model first"
+      : reason === "no-binary"
+        ? "Install the speech engine first"
+        : (payload && payload.message) || "Dictation isn't set up";
+  setState("unavailable", label, {
+    label: "open settings",
+    onClick: () => window.clanceDictation.action("open-settings"),
+  });
 });

@@ -5,10 +5,10 @@ import { captureAndSaveActiveDisplay } from "./screenCapture";
 import { checkPermissions } from "./permissions";
 import { ensureLocalToolsServer, listLocalTools } from "./localToolsServer";
 import { getActiveMcpServers, type StoredMcpServerConfig } from "./mcpConfig";
-import { spawnBackgroundAgent, resolveSessionId, stopAgent, rmAgent } from "./agentSessions";
+import { spawnBackgroundAgent, resolveSessionId, stopAgent, rmAgent, listAgents } from "./agentSessions";
 import { claimPoolSpare, refillPool } from "./agentPool";
-import { hasRealUserMessage, REFRESH_CONTEXT_PREFIX } from "./chatHistory";
-import { getDefaultDirectory, addRecentDirectory } from "./config";
+import { hasRealUserMessage, listSessions, REFRESH_CONTEXT_PREFIX } from "./chatHistory";
+import { getDefaultDirectory, addRecentDirectory, readConfig } from "./config";
 
 const DEFAULT_WIDTH = 560;
 const DEFAULT_HEIGHT = 480;
@@ -31,7 +31,10 @@ type PopupShownPayload =
   // agent-spawn work below has even started — so the widget is never just a
   // blank frame while the user waits on that chain (see toggleClancePopup).
   | { mode: "loading" }
-  | { mode: "new"; args: string[]; contextPreview?: ContextPreview; visibleContext?: string };
+  | { mode: "new"; args: string[]; contextPreview?: ContextPreview; visibleContext?: string }
+  // Minting or claiming the session failed; the widget shows why, with a
+  // retry that runs the same open again.
+  | { mode: "error"; message: string };
 
 let popup: BrowserWindow | null = null;
 let popupReady: Promise<void> | null = null;
@@ -205,6 +208,8 @@ ipcMain.on("popup:close", () => {
 });
 
 ipcMain.on("popup:hide", () => hideWidgetKeepAlive());
+ipcMain.handle("popup:retry", () => toggleClancePopup());
+ipcMain.handle("popup:session-info", (_event, args: unknown) => popupSessionInfo(args));
 
 // Creates/positions the window but never shows it — safe to run concurrently
 // with screen-context capture (captureContextText below), since it has no
@@ -583,7 +588,12 @@ async function toggleClancePopupInner(): Promise<void> {
     // Clance-launched session (see docs/design.md's "Sessions") —
     // the popup terminal that opens below is just an `attach` viewport onto
     // it, so closing the widget or the app never ends the conversation.
-    id = await spawnBackgroundAgent(popupSessionName(), spawnArgs, dir);
+    try {
+      id = await spawnBackgroundAgent(popupSessionName(), spawnArgs, dir);
+    } catch (error) {
+      if (currentMode === "loading") sendToPopup({ mode: "error", message: startFailureMessage(error) });
+      return;
+    }
   }
   // The user may have hit the hotkey again (hiding the widget) while all of
   // the above was in flight — don't resurrect it out from under them.
@@ -597,6 +607,37 @@ async function toggleClancePopupInner(): Promise<void> {
   }
   currentAgentId = id;
   sendToPopup({ mode: "new", args: ["attach", id] });
+}
+
+// A short, human reason for a failed mint. The CLI's own stderr is the most
+// useful detail, but it can be long, so only its first line is kept.
+function startFailureMessage(error: unknown): string {
+  const stderr = (error as { stderr?: string })?.stderr?.trim();
+  const detail = stderr?.split("\n")[0] || (error instanceof Error ? error.message : "");
+  if (/not found|ENOENT/i.test(detail)) return "Claude Code wasn't found. Check it's installed, then try again.";
+  if (/log ?in|auth|unauthori[sz]ed/i.test(detail)) return "Claude Code needs to sign in again. Open Clance's Settings to sign in.";
+  return detail ? `Claude Code couldn't start: ${detail}` : "Claude Code couldn't start.";
+}
+
+/**
+ * What the widget's header and hint bar show for a session: its folder and,
+ * for a session that already has a conversation, its title. `args` are the
+ * `attach <agentId>` args the widget was opened with.
+ */
+export async function popupSessionInfo(
+  args: unknown
+): Promise<{ folder: string | null; title: string | null; toggleShortcut: string }> {
+  const toggleShortcut = readConfig().shortcuts.togglePopup;
+  if (!Array.isArray(args) || args[0] !== "attach" || typeof args[1] !== "string") {
+    return { folder: null, title: null, toggleShortcut };
+  }
+  const agent = (await listAgents({ all: true })).find((a) => a.id === args[1]);
+  if (!agent) return { folder: null, title: null, toggleShortcut };
+  let title: string | null = null;
+  if (!isPopupSessionName(agent.name) || (await hasRealUserMessage(agent.sessionId))) {
+    title = (await listSessions()).find((session) => session.id === agent.sessionId)?.title ?? null;
+  }
+  return { folder: agent.cwd ?? null, title, toggleShortcut };
 }
 
 // Reopens an already-running terminal tab's session in the popup — used by
@@ -634,7 +675,13 @@ export async function openNewSessionInDirectory(dir: string): Promise<void> {
 
     addRecentDirectory(dir);
     const { args: mcpArgs } = await sessionMcpArgs();
-    const id = await spawnBackgroundAgent(popupSessionName(), mcpArgs, dir);
+    let id: string;
+    try {
+      id = await spawnBackgroundAgent(popupSessionName(), mcpArgs, dir);
+    } catch (error) {
+      if (currentMode === "loading") sendToPopup({ mode: "error", message: startFailureMessage(error) });
+      return;
+    }
 
     // Same as toggleClancePopupInner: the widget may have been dismissed
     // while the mint was in flight — don't resurrect it, and don't leak

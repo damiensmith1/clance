@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <title>Clance</title>
     <link rel="stylesheet" href="../shared/theme.css" />
+    <link rel="stylesheet" href="../shared/components.css" />
     <link rel="stylesheet" href="../shared/vendor/xterm/xterm.css" />
     <style>
       html, body {
@@ -11,25 +12,23 @@
         height: 100%;
         background: transparent;
         font-family: var(--font-sans);
+        font-weight: var(--weight-regular);
         -webkit-font-smoothing: antialiased;
       }
 
-      /* The window is now user-resizable (drag its edges/corners) instead
-         of sized to fit its content — #app just fills whatever size the
-         window is, rather than growing up to a fixed max-height. */
+      /* The window is user-resizable (drag its edges/corners); #app just
+         fills whatever size the window is. One flat surface: the toolbar
+         sits directly on the terminal's paper, no card inside a card. */
       #app {
         position: relative;
         display: flex;
         flex-direction: column;
         height: 100%;
         box-sizing: border-box;
-        padding: 14px;
-        border-radius: var(--radius-lg);
+        border-radius: var(--radius-xl);
         overflow: hidden;
-        background: var(--surface-card);
-        border: 1px solid var(--surface-border);
-        box-shadow: 0 8px 30px rgba(51, 44, 34, 0.16);
-        gap: 10px;
+        background: var(--app-bg);
+        box-shadow: inset 0 0 0 1px var(--surface-border);
       }
 
       #session {
@@ -39,40 +38,51 @@
         min-height: 0;
         box-sizing: border-box;
         flex-direction: column;
-        border: 1px solid var(--surface-border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
       }
       #app.has-messages #session {
         display: flex;
       }
 
-      /* Persistent across both modes (unlike the old #session-header,
-         which only existed inside the terminal view) — this is the
-         widget's only chrome now that dismissal is never automatic, so a
-         close button has to live somewhere always on-screen. It's also
-         the widget's drag handle (-webkit-app-region: drag), since there's
-         no native title bar to grab (frame: false) — buttons inside it
-         opt back out with no-drag so they stay clickable. */
+      /* The widget's only chrome, and its drag handle
+         (-webkit-app-region: drag) since there's no native title bar
+         (frame: false) — buttons inside it opt back out with no-drag. */
       #toolbar {
         order: 1;
         display: flex;
         align-items: center;
-        gap: 6px;
-        padding: 2px;
-        font-size: 10.5px;
-        font-weight: 700;
-        letter-spacing: 0.06em;
-        color: var(--text-secondary);
+        gap: var(--space-2);
+        height: 36px;
+        padding: 0 var(--space-2) 0 14px;
         flex-shrink: 0;
+        font-size: var(--text-md);
+        color: var(--text-secondary);
         -webkit-app-region: drag;
       }
-      .status-dot {
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
+      #toolbar .status-dot {
         background: var(--success);
+      }
+      /* A live session is the one thing that gets the signal colour. */
+      #app.has-messages #toolbar .status-dot {
+        background: var(--signal);
+        box-shadow: 0 0 0 3px var(--signal-soft);
+      }
+      .toolbar-label {
         flex-shrink: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+      .toolbar-title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        color: var(--text-tertiary);
+      }
+      .toolbar-title:empty {
+        display: none;
       }
       .toolbar-spacer {
         flex: 1 1 auto;
@@ -81,12 +91,12 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 22px;
-        height: 22px;
+        width: 26px;
+        height: 24px;
         padding: 0;
         background: transparent;
         border: none;
-        border-radius: var(--radius-sm);
+        border-radius: 5px;
         color: var(--text-secondary);
         cursor: pointer;
         -webkit-app-region: no-drag;
@@ -112,57 +122,72 @@
         display: flex;
       }
 
-      /* "Open in…" — a plain toolbar button (unlike #context-link, this one
-         actually does something on click) that opens an anchored dropdown
-         (not a full mode swap, the way the old full-screen session picker
-         worked). Sits near the CLAUDE label on the left, with extra
-         breathing room (margin-left, beyond #toolbar's own flex gap)
-         between the two so it doesn't read as part of the label. */
+      /* "Open in…" opens an anchored menu: new session in a folder, then
+         past conversations to resume. */
       #open-in-wrap {
         position: relative;
-        margin-left: 4px;
+        min-width: 0;
+        flex-shrink: 1;
         -webkit-app-region: no-drag;
       }
-      .toolbar-text-btn {
-        background: transparent;
+      .toolbar-title-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+        max-width: 100%;
+        height: 26px;
+        margin-left: -6px;
+        padding: 0 6px;
         border: none;
-        padding: 0;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--text-tertiary);
+        cursor: pointer;
+      }
+      .toolbar-title-btn:hover {
+        background: var(--surface-hover);
+      }
+      .toolbar-title-btn svg {
+        flex-shrink: 0;
+      }
+      .toolbar-text-btn {
+        flex-shrink: 0;
+        white-space: nowrap;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 24px;
+        padding: 0 var(--space-2);
         margin: 0;
-        font: inherit;
-        font-size: 9px;
-        color: inherit;
+        border: none;
+        border-radius: 5px;
+        background: transparent;
+        font-family: var(--font-sans);
+        font-size: var(--text-md);
+        color: var(--text-secondary);
         cursor: pointer;
       }
       .toolbar-text-btn:hover {
+        background: var(--surface-hover);
         color: var(--text-primary);
       }
       #open-in-dropdown {
         display: none;
         position: absolute;
         top: 100%;
-        /* Anchored from the left edge — it sits near the left side of the
-           toolbar now, so extending rightward from the button is what
-           keeps it clear of the window's edges (the opposite reasoning
-           from #context-dialog, which sits on the right and anchors from
-           its own right edge instead). */
-        left: 0;
-        margin-top: 6px;
-        width: 460px;
+        left: -6px;
+        margin-top: var(--space-1);
+        width: 380px;
         max-height: 340px;
         flex-direction: column;
-        gap: 6px;
         box-sizing: border-box;
+        padding: var(--space-1);
         background: var(--surface-card);
-        border: 1px solid var(--surface-border);
-        border-radius: var(--radius-md);
-        box-shadow: 0 8px 30px rgba(51, 44, 34, 0.16);
-        padding: 8px;
+        border-radius: 8px;
+        box-shadow: var(--shadow-menu);
         text-align: left;
-        font-weight: 400;
-        letter-spacing: normal;
-        text-transform: none;
         color: var(--text-primary);
-        font-size: 13px;
         cursor: default;
         z-index: 10;
       }
@@ -170,127 +195,135 @@
         display: flex;
       }
       #open-in-search {
-        width: 100%;
+        height: 30px;
+        margin: var(--space-1) var(--space-1) 2px;
         box-sizing: border-box;
-        background: var(--surface-bg);
+        padding: 0 var(--space-2);
+        background: var(--surface-card);
         border: 1px solid var(--surface-border);
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-md);
         color: var(--text-primary);
-        font-family: inherit;
-        font-size: 13px;
-        padding: 7px 9px;
+        font-family: var(--font-sans);
+        font-size: var(--text-md);
         outline: none;
         flex-shrink: 0;
+      }
+      #open-in-search:focus {
+        border-color: var(--text-primary);
       }
       #open-in-list {
         flex: 1 1 auto;
         min-height: 0;
-        max-height: 280px;
+        max-height: 240px;
         overflow-y: auto;
         display: flex;
         flex-direction: column;
-        gap: 3px;
       }
-      /* "New session in..." — a directory, not a past conversation, so it's
-         visually separated from #open-in-list below rather than mixed into
-         the same scrollable list. #open-in-recent-dirs reuses .open-in-row
-         styling for its entries (rendered by renderRecentDirs in popup.js). */
       #open-in-new-section {
         display: flex;
         flex-direction: column;
-        gap: 3px;
         flex-shrink: 0;
       }
       #open-in-divider {
         height: 1px;
         background: var(--surface-border);
-        margin: 2px 0;
+        margin: var(--space-1) 0;
         flex-shrink: 0;
       }
+      /* Same shape as the shared .menu-item: title left, mono detail right. */
       .open-in-row {
         display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 2px;
+        align-items: center;
+        gap: 10px;
         width: 100%;
+        min-height: 30px;
         box-sizing: border-box;
+        padding: 0 10px;
         text-align: left;
         background: transparent;
         border: none;
-        border-radius: var(--radius-sm);
-        padding: 6px 8px;
+        border-radius: 5px;
         cursor: pointer;
-        font-family: inherit;
+        font-family: var(--font-sans);
       }
       .open-in-row:hover {
-        background: var(--surface-hover);
+        background: var(--surface-bg);
       }
       .open-in-row-title {
-        font-size: 13px;
+        flex-shrink: 1;
+        min-width: 0;
+        font-size: var(--text-md);
         color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .open-in-row-meta {
-        font-size: 11px;
-        color: var(--text-secondary);
+        flex: 1 0 auto;
+        max-width: 55%;
+        margin-left: auto;
+        text-align: right;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
-      /* Plain text, not a button — hovering reveals what was actually
-         captured and handed to the CLI at invocation, so the wording
-         doesn't imply a click does anything. */
+      /* Hovering reveals what was captured and handed to the CLI at
+         invocation. The card is positioned against #app (the link itself
+         isn't positioned), so it always stays inside the window. It starts
+         flush under the toolbar: a gap would be a dead zone that drops
+         :hover on the way from the link to the card. */
       #context-link {
-        position: relative;
-        -webkit-app-region: no-drag;
-        cursor: default;
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        height: 24px;
+        padding: 0 var(--space-2);
+        border-radius: 5px;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
         color: var(--text-secondary);
+        background: var(--surface-bg);
+        cursor: default;
+        -webkit-app-region: no-drag;
       }
       #context-link:hover {
-        color: var(--text-primary);
+        color: var(--accent-contrast);
+        background: var(--accent);
       }
-      /* No margin-top gap between the link and the card on purpose — a
-         real gap is a dead zone the mouse has to cross in a straight line
-         to get from the text to the card, and leaving either one during
-         that crossing (easy to do, especially aiming for a scrollbar)
-         drops :hover and closes it. Flush against the link instead, so
-         there's no gap to fall through; the card's own padding still
-         gives its content breathing room. */
       #context-dialog {
         display: none;
         position: absolute;
-        top: 100%;
-        right: 0;
-        width: 480px;
-        max-height: 560px;
+        top: 32px;
+        left: var(--space-3);
+        right: var(--space-3);
+        max-height: calc(100% - 48px);
         overflow-y: auto;
         box-sizing: border-box;
-        background: var(--surface-card);
-        border: 1px solid var(--surface-border);
-        border-radius: var(--radius-md);
-        box-shadow: 0 8px 30px rgba(51, 44, 34, 0.16);
-        margin-top: 0;
         padding: 14px;
+        background: var(--surface-card);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-menu);
         text-align: left;
-        font-weight: 400;
-        letter-spacing: normal;
-        text-transform: none;
+        font-family: var(--font-sans);
+        font-size: var(--text-md);
         color: var(--text-primary);
-        font-size: 13px;
         cursor: default;
         z-index: 10;
       }
       #context-link:hover #context-dialog {
         display: block;
       }
-      /* One scrollbar for the whole card (#context-dialog's own
-         overflow-y) rather than nested scroll areas per section — simpler
-         to use, and avoids the mouse-wheel-bubbling ambiguity of a
-         scrollable block inside a scrollable card. */
+      /* One scrollbar for the whole card rather than nested scroll areas. */
       .context-dialog-label {
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-        color: var(--text-secondary);
         margin: 14px 0 5px;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        text-transform: lowercase;
+        color: var(--text-tertiary);
       }
       .context-dialog-label:first-child {
         margin-top: 0;
@@ -298,36 +331,32 @@
       #context-dialog-image {
         width: 100%;
         display: block;
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-md);
         border: 1px solid var(--surface-border);
       }
-      /* This ID selector's own `display: block` above outranks the
-         browser default `[hidden] { display: none }` rule (attribute
-         selector loses to ID selector), so renderContextPreview's
-         `.hidden = true` for the no-context-captured case (popup.js)
-         silently did nothing — the broken-image icon and "Screenshot at
-         invocation" alt text rendered anyway, right next to the "No
-         context was captured" message it was supposed to replace. */
+      /* This ID selector's own `display: block` above outranks the browser
+         default `[hidden] { display: none }` rule, so without this the
+         broken-image icon rendered next to "No context was captured". */
       #context-dialog-image[hidden] {
         display: none;
       }
       #context-dialog-title {
-        font-weight: 600;
+        font-weight: var(--weight-medium);
         word-break: break-word;
       }
       #context-dialog-selection,
       #context-dialog-system-prompt {
         white-space: pre-wrap;
         word-break: break-word;
-        background: var(--surface-bg);
-        border-radius: var(--radius-sm);
         padding: 10px;
+        border-radius: var(--radius-md);
+        background: var(--surface-bg);
         font-family: var(--font-mono);
-        font-size: 11.5px;
+        font-size: var(--text-sm);
+        color: var(--text-primary);
       }
       #context-dialog-empty {
         color: var(--text-secondary);
-        font-style: italic;
       }
 
       /* FitAddon sizes rows/cols off the mount element's *direct parent*
@@ -339,8 +368,8 @@
       #term-mount {
         flex: 1 1 auto;
         min-height: 0;
-        background: #F7F3EB;
-        padding: 14px;
+        background: var(--app-bg);
+        padding: var(--space-1) 14px var(--space-3);
         box-sizing: border-box;
       }
       #term-inner {
@@ -348,61 +377,120 @@
         height: 100%;
       }
 
-      .note {
-        font-size: 12px;
-        font-style: italic;
+      /* Shortcut reminders and the session's folder, under the terminal. */
+      #hint-bar {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        height: 26px;
+        flex-shrink: 0;
+        padding: 0 14px;
+        border-top: 1px solid var(--surface-border);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        white-space: nowrap;
+        overflow: hidden;
+      }
+      .hint-bar-spacer {
+        flex: 1;
+      }
+      #hint-bar-folder {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* Starting and error screens fill the terminal area. */
+      .popup-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-3);
+        height: 100%;
+        padding: 0 var(--space-7);
+        box-sizing: border-box;
+        text-align: center;
+      }
+      .popup-state-title {
+        font-size: var(--text-lg);
+        font-weight: var(--weight-medium);
+        color: var(--text-primary);
+      }
+      .popup-state-text {
+        font-size: var(--text-md);
+        line-height: 1.6;
         color: var(--text-secondary);
-        padding: 0 12px;
+      }
+      .popup-state-actions {
+        display: flex;
+        gap: var(--space-2);
+      }
+      #app.has-error #toolbar .status-dot {
+        background: var(--danger);
+        box-shadow: none;
+      }
+
+      .note {
+        padding: 0 var(--space-1);
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        color: var(--text-tertiary);
       }
     </style>
   </head>
   <body>
     <div id="app">
       <div id="toolbar">
-        <span class="status-dot"></span>CLAUDE
         <span id="open-in-wrap">
-          <button id="open-in-btn" class="toolbar-text-btn" title="Open a past conversation">
-            Open in…
+          <button id="open-in-btn" class="toolbar-title-btn" title="Start or resume a session" aria-haspopup="menu">
+            <span class="status-dot"></span><span class="toolbar-label" id="toolbar-label">claude</span><span class="toolbar-title" id="toolbar-title"></span>
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
           </button>
-          <div id="open-in-dropdown">
+          <div id="open-in-dropdown" role="menu">
             <div id="open-in-new-section">
-              <button id="open-in-browse-btn" class="open-in-row">
-                <span class="open-in-row-title">New session in…</span>
-                <span class="open-in-row-meta">Choose a folder</span>
-              </button>
+              <div class="menu-label">new session in</div>
               <div id="open-in-recent-dirs"></div>
+              <button id="open-in-browse-btn" class="open-in-row">
+                <span class="open-in-row-title">Choose folder…</span>
+                <span class="open-in-row-meta"></span>
+              </button>
             </div>
             <div id="open-in-divider"></div>
-            <input id="open-in-search" type="text" placeholder="Search conversations…" />
+            <div class="menu-label">resume</div>
+            <input id="open-in-search" type="text" placeholder="Search sessions" aria-label="Search sessions" />
             <div id="open-in-list"></div>
           </div>
         </span>
         <div class="toolbar-spacer"></div>
-        <span id="context-link">
-          See context
+        <span id="context-link" title="Captured context">
+          ctx
           <div id="context-dialog">
+            <div class="context-dialog-label">captured when you opened clance</div>
+            <div id="context-dialog-window-label" class="context-dialog-label" hidden>window</div>
             <div id="context-dialog-title" hidden></div>
-            <div id="context-dialog-image-label" class="context-dialog-label" hidden>Screenshot</div>
+            <div id="context-dialog-image-label" class="context-dialog-label" hidden>screenshot</div>
             <img id="context-dialog-image" hidden alt="Screenshot at invocation" />
-            <div id="context-dialog-selection-label" class="context-dialog-label" hidden>Highlighted text</div>
+            <div id="context-dialog-selection-label" class="context-dialog-label" hidden>selection</div>
             <div id="context-dialog-selection" hidden></div>
-            <div id="context-dialog-system-prompt-label" class="context-dialog-label" hidden>System prompt</div>
+            <div id="context-dialog-system-prompt-label" class="context-dialog-label" hidden>system prompt</div>
             <div id="context-dialog-system-prompt" hidden></div>
             <div id="context-dialog-empty" hidden>No context was captured for this session.</div>
           </div>
         </span>
-        <button id="open-in-app-btn" class="toolbar-btn" title="Open in App">
+        <button id="open-in-app-btn" class="toolbar-btn" title="Open in Clance window" aria-label="Open in Clance window">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M19 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6" />
             <path d="M20 4L10 14M10 8v6h6" />
           </svg>
         </button>
-        <button id="hide-btn" class="toolbar-btn" title="Hide (⌥Space to reopen)">
+        <button id="hide-btn" class="toolbar-btn" title="Hide (⌥Space to reopen)" aria-label="Hide">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M5 12h14" />
           </svg>
         </button>
-        <button id="close-btn" class="toolbar-btn" title="Close">
+        <button id="close-btn" class="toolbar-btn" title="Close" aria-label="Close">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M6 6l12 12M18 6L6 18" />
           </svg>
@@ -410,6 +498,9 @@
       </div>
       <div id="session">
         <div id="term-mount"><div id="term-inner"></div></div>
+        <div id="hint-bar">
+          <span id="hint-bar-toggle">⌥Space hide</span><span>⌘⇧R add screen</span><span class="hint-bar-spacer"></span><span id="hint-bar-folder"></span>
+        </div>
       </div>
     </div>
     <script src="../shared/vendor/xterm/xterm.js"></script>
