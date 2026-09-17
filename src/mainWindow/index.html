@@ -541,17 +541,39 @@
         position: relative;
         margin-left: auto;
       }
+      /* Both labels share one grid cell so the button is always as wide as
+         the longer one: switching between "Delete all…" and "Delete
+         matching…" mustn't resize the search field. */
+      .dictation-bulk-label {
+        display: inline-grid;
+      }
+      .dictation-bulk-label > span {
+        grid-area: 1 / 1;
+        justify-self: center;
+      }
+      .dictation-bulk-label-sizer {
+        visibility: hidden;
+      }
       .dictation-confirm {
         position: absolute;
         top: calc(100% + 6px);
         right: 0;
         z-index: 20;
       }
+      .dictation-range {
+        position: relative;
+        align-self: center;
+      }
+      .dictation-range-menu {
+        position: absolute;
+        top: calc(100% + 6px);
+        right: 0;
+      }
       .dictation-custom-range {
         display: flex;
         align-items: center;
         gap: var(--space-2);
-        margin: calc(-1 * var(--space-3)) 0 var(--space-5);
+        padding: var(--space-1) 10px 10px;
       }
       .dictation-range-sep {
         font-family: var(--font-mono);

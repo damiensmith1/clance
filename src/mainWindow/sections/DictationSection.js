@@ -116,6 +116,10 @@ export function DictationSection({ onOpenSettings }) {
   const [rangeId, setRangeId] = useState("all");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  // The custom range's dates open in a dropdown under the date filter, so
+  // picking them doesn't push the list down.
+  const [customOpen, setCustomOpen] = useState(false);
+  const rangeRef = useRef(null);
   const [confirmingDeleteAll, setConfirmingDeleteAll] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const searchTimer = useRef(null);
@@ -162,6 +166,22 @@ export function DictationSection({ onOpenSettings }) {
     });
   }, []);
 
+  useEffect(() => {
+    if (!customOpen) return;
+    const onPointerDown = (e) => {
+      if (!rangeRef.current?.contains(e.target)) setCustomOpen(false);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") setCustomOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [customOpen]);
+
   function handleQuery(value) {
     setQuery(value);
     // Debounced: every keystroke would otherwise run an FTS query over the
@@ -171,7 +191,14 @@ export function DictationSection({ onOpenSettings }) {
   }
 
   function handleRange(id) {
+    // Clicking Custom again just shows or hides its dates.
+    if (id === "custom" && rangeId === "custom") {
+      setCustomOpen(!customOpen);
+      setConfirmingDeleteAll(false);
+      return;
+    }
     setRangeId(id);
+    setCustomOpen(id === "custom");
 
     // Prefill the custom range the first time it's opened. Two reasons:
     // an empty date input renders Chromium's "yyyy-mm-dd" placeholder,
@@ -261,24 +288,68 @@ export function DictationSection({ onOpenSettings }) {
             onInput=${(e) => handleQuery(e.target.value)}
           />
         </label>
-        <div class="segmented" role="tablist" aria-label="Date range">
-          ${DATE_RANGES.map(
-            (r) => html`
-              <button
-                role="tab"
-                aria-selected=${rangeId === r.id}
-                class="segmented-item ${rangeId === r.id ? "segmented-item-active" : ""}"
-                onClick=${() => handleRange(r.id)}
-              >
-                ${r.label}
-              </button>
-            `
-          )}
+        <div class="dictation-range" ref=${rangeRef}>
+          <div class="segmented" role="tablist" aria-label="Date range">
+            ${DATE_RANGES.map(
+              (r) => html`
+                <button
+                  role="tab"
+                  aria-selected=${rangeId === r.id}
+                  aria-haspopup=${r.id === "custom" ? "dialog" : undefined}
+                  aria-expanded=${r.id === "custom" ? customOpen : undefined}
+                  title=${r.id === "custom" && rangeId === "custom" && customFrom && customTo
+                    ? `${customFrom} to ${customTo}`
+                    : undefined}
+                  class="segmented-item ${rangeId === r.id ? "segmented-item-active" : ""}"
+                  onClick=${() => handleRange(r.id)}
+                >
+                  ${r.label}
+                </button>
+              `
+            )}
+          </div>
+          ${rangeId === "custom" &&
+          customOpen &&
+          html`
+            <div class="menu dictation-range-menu" role="dialog" aria-label="Custom date range">
+              <span class="menu-label">custom range</span>
+              <div class="dictation-custom-range">
+                <input
+                  type="date"
+                  class="dictation-date"
+                  aria-label="From date"
+                  title="Type a date, or use the arrow keys"
+                  max=${customTo || undefined}
+                  value=${customFrom}
+                  onInput=${(e) => handleCustomDate("from", e.target.value)}
+                />
+                <span class="dictation-range-sep">to</span>
+                <input
+                  type="date"
+                  class="dictation-date"
+                  aria-label="To date"
+                  title="Type a date, or use the arrow keys"
+                  min=${customFrom || undefined}
+                  value=${customTo}
+                  onInput=${(e) => handleCustomDate("to", e.target.value)}
+                />
+              </div>
+            </div>
+          `}
         </div>
-        ${stats && stats.count > 0
+        ${stats
           ? html`<div class="dictation-bulk">
-              <button class="btn-quiet" onClick=${() => setConfirmingDeleteAll(!confirmingDeleteAll)}>
-                ${isFiltered ? "Delete matching…" : "Delete all…"}
+              <button
+                class="btn-quiet"
+                disabled=${stats.count === 0}
+                onClick=${() => setConfirmingDeleteAll(!confirmingDeleteAll)}
+              >
+                <span class="dictation-bulk-label">
+                  <span>${isFiltered ? "Delete matching…" : "Delete all…"}</span>
+                  <span class="dictation-bulk-label-sizer" aria-hidden="true">
+                    ${isFiltered ? "Delete all…" : "Delete matching…"}
+                  </span>
+                </span>
               </button>
               ${confirmingDeleteAll &&
               html`
@@ -296,32 +367,6 @@ export function DictationSection({ onOpenSettings }) {
             </div>`
           : null}
       </div>
-
-      ${rangeId === "custom"
-        ? html`
-            <div class="dictation-custom-range">
-              <input
-                type="date"
-                class="dictation-date"
-                aria-label="From date"
-                title="Type a date, or use the arrow keys"
-                max=${customTo || undefined}
-                value=${customFrom}
-                onInput=${(e) => handleCustomDate("from", e.target.value)}
-              />
-              <span class="dictation-range-sep">to</span>
-              <input
-                type="date"
-                class="dictation-date"
-                aria-label="To date"
-                title="Type a date, or use the arrow keys"
-                min=${customFrom || undefined}
-                value=${customTo}
-                onInput=${(e) => handleCustomDate("to", e.target.value)}
-              />
-            </div>
-          `
-        : null}
 
       ${transcripts === null
         ? html`<p class="empty-note">Loading transcripts…</p>`
