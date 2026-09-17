@@ -2,6 +2,8 @@
 
 Claude Code, one hotkey away, anywhere on your Mac.
 
+![The Clance popup over a browser, explaining the highlighted text](docs/images/popup.png)
+
 Press **⌥Space** in any app and a small floating terminal opens with a fresh
 Claude Code session. It's the real `claude` CLI — your skills, MCP servers and
 settings included — with extra tools to see your screen, read what you've
@@ -30,6 +32,12 @@ the text at your cursor.
   you've dictated.
 - **Works with your Claude Code setup.** Skills, hooks, plugins and MCP
   servers you've configured for Claude Code work in Clance unchanged.
+
+![Every Claude Code session on your Mac in the main window](docs/images/sessions.png)
+
+![Two sessions side by side in split panes](docs/images/split.png)
+
+![Dictating into a Mail reply](docs/images/dictation.png)
 
 ## Requirements
 
