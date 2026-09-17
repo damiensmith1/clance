@@ -425,10 +425,13 @@
         max-width: 880px;
         margin: 0 auto;
       }
+      /* Titled pages (Dictation, Tools, Settings) sit a little lower than the
+         content padding alone would put them. */
       .page-header {
         display: flex;
         align-items: baseline;
         gap: 14px;
+        margin-top: var(--space-6);
         margin-bottom: var(--space-5);
       }
       .page-title {
