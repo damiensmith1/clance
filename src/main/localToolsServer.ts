@@ -1,7 +1,10 @@
+import { app } from "electron";
 import { checkPermissions } from "./permissions";
-import { createServer } from "http";
+import { createServer, type Server } from "http";
 import type { AddressInfo } from "net";
 import { randomBytes, timingSafeEqual } from "crypto";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
+import { join } from "path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
@@ -17,6 +20,7 @@ import {
 } from "./frontApp";
 import { captureActiveDisplay } from "./screenCapture";
 import { readConfig, writeConfig } from "./config";
+import { SESSION_CWD } from "./paths";
 
 // The single source of truth for what local tools exist, both for
 // popupWindow.ts's --allowedTools/--disallowedTools wiring (which needs
@@ -116,19 +120,121 @@ export function setLocalToolEnabled(name: string, enabled: boolean): LocalToolSt
 // tool call the model actually wanted. Real sessions, each with their own
 // long-lived transport instance kept in `sessions` below, is the fix:
 // exactly the pattern the SDK's own reference server uses.
-const sessions = new Map<string, { mcpServer: McpServer; transport: StreamableHTTPServerTransport }>();
+const sessions = new Map<
+  string,
+  { mcpServer: McpServer; transport: StreamableHTTPServerTransport; lastActivity: number }
+>();
 
-// The listening port is picked randomly but isn't a secret — anything else
-// on the machine (another local process, or a malicious page in a browser,
-// via DNS rebinding) could still guess/scan for it and, without a check
-// here, get to type into whatever app the user last had focused. A random
-// per-launch bearer token closes that off: it's generated fresh each run,
-// known only to this process and the `claude` CLI child process it hands
-// the token to via --mcp-config's `headers`, and checked with a
-// constant-time comparison to avoid leaking it through timing. The Host
-// header check is defense in depth against DNS-rebinding specifically,
-// independent of the token.
-let server: { url: string; token: string } | undefined;
+// Sessions nobody has used in this long are closed. A Clance restart leaves
+// every running `claude` process to re-initialize, and its background
+// reconnect can race the tool call's own recovery, so one restart can create
+// two or three sessions of which only one is ever used again.
+const SESSION_IDLE_MS = 60 * 60 * 1000;
+
+// The listening port isn't a secret — anything else on the machine (another
+// local process, or a malicious page in a browser, via DNS rebinding) could
+// scan for it and, without a check here, get to type into whatever app the
+// user last had focused. A random per-launch bearer token closes that off,
+// checked with a constant-time comparison. The Host header check is defense
+// in depth against DNS rebinding specifically, independent of the token.
+//
+// Sessions must keep working across Clance restarts, and the CLI persists a
+// background agent's --mcp-config and reuses it whenever the agent restarts.
+// So nothing per-launch goes into that config: the port and server key are
+// saved once per install (see readPersistentIdentity), and the token reaches
+// the CLI through `headersHelper` — a command the CLI runs to read the
+// current token from a headers file, re-running it after a 401. A running
+// session hitting a restarted Clance gets 401 (old token), re-reads the
+// token, reconnects and retries the call.
+let server:
+  | { url: string; token: string; serverKey: string; headersHelper: string; headersPath: string }
+  | undefined;
+
+// Dev and packaged builds each get their own port, key and token file, so a
+// dev run next to the installed app never takes its port or hands its token
+// to the other's sessions.
+const CHANNEL_SUFFIX = app.isPackaged ? "" : ".dev";
+const IDENTITY_PATH = join(SESSION_CWD, `local-tools${CHANNEL_SUFFIX}.json`);
+
+// The token file is named after the port it belongs to. Sessions minted with
+// a port Clance has since had to give up (see listenOnSavedPort) still run
+// their headersHelper when they call that port; with a per-port file (and
+// the old one deleted) they find nothing to send, instead of handing the
+// current token to whatever process — possibly another user's — now listens
+// there.
+function headersPathForPort(port: number): string {
+  return join(SESSION_CWD, `local-tools-headers-${port}${CHANNEL_SUFFIX}.json`);
+}
+const HEADERS_FILE_PATTERN = new RegExp(`^local-tools-headers(-\\d+)?${CHANNEL_SUFFIX.replace(".", "\\.")}\\.json$`);
+
+type PersistentIdentity = {
+  port: number;
+  keySuffix: string;
+  // Set when the saved port was taken and the server moved; shown as a
+  // warning in Settings until dismissed.
+  portChangedFrom?: number;
+};
+
+// `keySuffix` makes the server key (`clance-<suffix>`) unpredictable to a
+// project's .mcp.json — see sessionMcpArgs in popupWindow.ts. `port` 0 means
+// none has been bound yet.
+function readPersistentIdentity(): PersistentIdentity {
+  try {
+    const parsed = JSON.parse(readFileSync(IDENTITY_PATH, "utf8"));
+    if (
+      Number.isInteger(parsed?.port) &&
+      parsed.port >= 0 &&
+      parsed.port < 65536 &&
+      typeof parsed?.keySuffix === "string" &&
+      /^[0-9a-f]{16}$/.test(parsed.keySuffix)
+    ) {
+      return {
+        port: parsed.port,
+        keySuffix: parsed.keySuffix,
+        ...(Number.isInteger(parsed.portChangedFrom) ? { portChangedFrom: parsed.portChangedFrom } : {}),
+      };
+    }
+  } catch {
+    // Missing or unreadable — start a new identity below.
+  }
+  const identity = { port: 0, keySuffix: randomBytes(8).toString("hex") };
+  writePersistentIdentity(identity);
+  return identity;
+}
+
+function writePersistentIdentity(identity: PersistentIdentity): void {
+  mkdirSync(SESSION_CWD, { recursive: true });
+  writeFileSync(IDENTITY_PATH, JSON.stringify(identity, null, 2), "utf8");
+}
+
+// Written only after the server is listening: a second Clance that fails to
+// bind must never overwrite the token the running one checks. Written to a
+// temp file and renamed so the CLI never reads a half-written file, and
+// created 0600 so other users on the Mac can't read the token. Every other
+// token file for this build channel is deleted (see headersPathForPort).
+function writeHeadersFile(headersPath: string, token: string): void {
+  const tmpPath = `${headersPath}.${process.pid}.tmp`;
+  writeFileSync(tmpPath, JSON.stringify({ Authorization: `Bearer ${token}` }), { mode: 0o600 });
+  chmodSync(tmpPath, 0o600);
+  renameSync(tmpPath, headersPath);
+
+  for (const name of readdirSync(SESSION_CWD)) {
+    const path = join(SESSION_CWD, name);
+    if (path === headersPath || !HEADERS_FILE_PATTERN.test(name)) continue;
+    try {
+      unlinkSync(path);
+    } catch (error) {
+      console.warn(`[localToolsServer ${new Date().toISOString()}] couldn't delete old token file ${name}:`, error);
+    }
+  }
+}
+
+// The CLI runs headersHelper through a shell, so the path is single-quoted
+// (with any embedded single quote escaped) rather than trusted to be
+// shell-safe.
+function headersHelperCommand(headersPath: string): string {
+  return `cat '${headersPath.replace(/'/g, `'\\''`)}'`;
+}
 
 // insert_text/replace_focused_field's `text` param is arbitrary user
 // content typed into another app — could be a password, a personal
@@ -165,6 +271,17 @@ function withLogging<A extends unknown[], R>(
   return async (...args: A) => {
     const start = Date.now();
     console.log(`[localToolsServer ${new Date().toISOString()}] ${name} called`, args[0] ? JSON.stringify(redactForLogging(args[0])) : "");
+    // --disallowedTools is fixed when a session is minted and persisted with
+    // it, so a tool switched off in Settings afterwards would stay callable
+    // in older sessions. Checked here on every call, the setting applies to
+    // all sessions immediately.
+    if (!listLocalTools().find((tool) => tool.name === name)?.enabled) {
+      console.log(`[localToolsServer ${new Date().toISOString()}] ${name} refused: turned off in Settings`);
+      return {
+        content: [{ type: "text" as const, text: `The user has turned off ${name} in Clance's Settings.` }],
+        isError: true,
+      } as R;
+    }
     try {
       const result = await handler(...args);
       console.log(`[localToolsServer ${new Date().toISOString()}] ${name} returned (${Date.now() - start}ms)`);
@@ -436,13 +553,88 @@ function isAuthorized(req: import("http").IncomingMessage, expectedHost: string,
   return provided.length === expectedBuf.length && timingSafeEqual(provided, expectedBuf);
 }
 
-// Starts (once) and returns the local URL + bearer token a launched CLI
-// session's --mcp-config should use. 127.0.0.1 + a random free port, chosen
-// fresh per app launch, plus a random per-launch token (see the note above
-// `server` for why the port alone isn't enough).
-export async function ensureLocalToolsServer(): Promise<{ url: string; token: string }> {
-  if (server) return server;
+// An unknown Mcp-Session-Id means this server lost the session — almost
+// always because Clance restarted while the `claude` process kept running.
+// The MCP spec's signal for that is 404, which makes the client
+// re-initialize and carry on; a 400 is read as a bad request, and the
+// session stays broken for good (both confirmed against the real CLI).
+function rejectUnknownSession(res: import("http").ServerResponse, method: string, sessionId: string): void {
+  console.warn(`[localToolsServer ${new Date().toISOString()}] ${method} for unknown session ${sessionId}: 404, client should re-initialize`);
+  res.writeHead(404, { "Content-Type": "application/json" }).end(
+    JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "Session not found" } })
+  );
+}
 
+// Binds the saved port if there is one, so the URL persisted in every
+// session's --mcp-config stays valid. If another app has taken it, falls
+// back to a new random port and saves that; sessions persisted with the old
+// port then lose their tools until they're stopped and reopened (see
+// resolveOpenArgs in agentSessions.ts).
+async function listenOnSavedPort(httpServer: Server, identity: PersistentIdentity): Promise<number> {
+  const listen = (port: number) =>
+    new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => {
+        httpServer.off("listening", onListening);
+        reject(error);
+      };
+      const onListening = () => {
+        httpServer.off("error", onError);
+        resolve();
+      };
+      httpServer.once("error", onError);
+      httpServer.once("listening", onListening);
+      httpServer.listen(port, "127.0.0.1");
+    });
+
+  if (identity.port !== 0) {
+    try {
+      await listen(identity.port);
+      return identity.port;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
+      console.warn(
+        `[localToolsServer ${new Date().toISOString()}] saved port ${identity.port} is in use; picking a new one — sessions minted with the old port need reopening`
+      );
+    }
+  }
+  await listen(0);
+  const { port } = httpServer.address() as AddressInfo;
+  writePersistentIdentity({
+    ...identity,
+    port,
+    ...(identity.port !== 0 ? { portChangedFrom: identity.port } : {}),
+  });
+  return port;
+}
+
+// Starts (once) and returns what a launched CLI session's --mcp-config
+// should use: the URL on the per-install port, the per-install server key,
+// and the headersHelper command that reads this launch's token (see the
+// note above `server`). The token itself is returned only for the health
+// check below. Started at app launch (index.ts), not lazily on the first
+// mint, since sessions from earlier launches may call in at any time.
+let starting: Promise<{ url: string; token: string; serverKey: string; headersHelper: string }> | undefined;
+
+export function ensureLocalToolsServer(): Promise<{
+  url: string;
+  token: string;
+  serverKey: string;
+  headersHelper: string;
+}> {
+  if (server) return Promise.resolve(server);
+  starting ??= startLocalToolsServer().finally(() => {
+    starting = undefined;
+  });
+  return starting;
+}
+
+async function startLocalToolsServer(): Promise<{
+  url: string;
+  token: string;
+  serverKey: string;
+  headersHelper: string;
+}> {
+  const identity = readPersistentIdentity();
   const token = randomBytes(32).toString("hex");
 
   let expectedHost = "";
@@ -511,8 +703,12 @@ export async function ensureLocalToolsServer(): Promise<{ url: string; token: st
         }
         if (req.method === "DELETE") {
           if (!existing) {
-            console.warn(`[localToolsServer ${new Date().toISOString()}] rejected DELETE: no known session (id: ${sessionId})`);
-            res.writeHead(400).end();
+            if (sessionId) {
+              rejectUnknownSession(res, "DELETE", sessionId);
+            } else {
+              console.warn(`[localToolsServer ${new Date().toISOString()}] rejected DELETE: no session id`);
+              res.writeHead(400).end();
+            }
             return;
           }
           await existing.transport.handleRequest(req, res);
@@ -531,6 +727,7 @@ export async function ensureLocalToolsServer(): Promise<{ url: string; token: st
         }
 
         if (existing) {
+          existing.lastActivity = Date.now();
           // Reusing the same transport instance the session was created
           // with — not a fresh one — is exactly what makes this stateful:
           // the SDK's own internal session/stream bookkeeping only works
@@ -540,13 +737,18 @@ export async function ensureLocalToolsServer(): Promise<{ url: string; token: st
           return;
         }
 
-        if (!sessionId && isInitializeRequest(parsedBody)) {
+        if (sessionId) {
+          rejectUnknownSession(res, "POST", sessionId);
+          return;
+        }
+
+        if (isInitializeRequest(parsedBody)) {
           const mcpServer = createMcpServer();
           const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomBytes(16).toString("hex"),
             onsessioninitialized: (newSessionId) => {
               console.log(`[localToolsServer ${new Date().toISOString()}] session ${newSessionId} initialized`);
-              sessions.set(newSessionId, { mcpServer, transport });
+              sessions.set(newSessionId, { mcpServer, transport, lastActivity: Date.now() });
             },
           });
           transport.onerror = (error) => {
@@ -568,8 +770,9 @@ export async function ensureLocalToolsServer(): Promise<{ url: string; token: st
           return;
         }
 
-        // Neither an existing session nor a fresh initialize — nothing
-        // valid to do with this request.
+        // No session and not an initialize — nothing valid to do with this
+        // request. (The CLI sends a `server/discover` probe like this before
+        // initializing; the 400 is harmless.)
         console.warn(`[localToolsServer ${new Date().toISOString()}] rejected: no session and not an initialize request`);
         res.writeHead(400, { "Content-Type": "application/json" }).end(
           JSON.stringify({
@@ -620,30 +823,63 @@ export async function ensureLocalToolsServer(): Promise<{ url: string; token: st
   httpServer.keepAliveTimeout = 60 * 60 * 1000;
   httpServer.headersTimeout = 60 * 60 * 1000 + 1000;
 
-  await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
-  const { port } = httpServer.address() as AddressInfo;
+  const port = await listenOnSavedPort(httpServer, identity);
   expectedHost = `127.0.0.1:${port}`;
-  server = { url: `http://127.0.0.1:${port}/mcp`, token };
+  const headersPath = headersPathForPort(port);
+  writeHeadersFile(headersPath, token);
+
+  setInterval(() => {
+    const cutoff = Date.now() - SESSION_IDLE_MS;
+    for (const [sid, session] of sessions) {
+      if (session.lastActivity >= cutoff) continue;
+      console.log(`[localToolsServer ${new Date().toISOString()}] closing idle session ${sid}`);
+      void session.transport.close();
+    }
+  }, 10 * 60 * 1000).unref();
+
+  server = {
+    url: `http://127.0.0.1:${port}/mcp`,
+    token,
+    serverKey: `clance-${identity.keySuffix}`,
+    headersHelper: headersHelperCommand(headersPath),
+    headersPath,
+  };
+  console.log(`[localToolsServer ${new Date().toISOString()}] listening on ${server.url}`);
   return server;
 }
 
-// Whether the server has actually been started yet — it's lazy (only
-// `ensureLocalToolsServer()`, called from a real mint, starts it), so a
-// user checking Settings before ever invoking the popup would otherwise
-// have no way to tell "not started yet" apart from "broken." Doesn't start
-// it itself; that's what the health check below is for.
-export function getLocalToolsServerStatus(): { running: boolean; url?: string } {
-  return server ? { running: true, url: server.url } : { running: false };
+// Whether the server has started yet. It's started at app launch, so "not
+// running" means startup failed or hasn't finished. Doesn't start it itself;
+// that's what the health check below is for.
+//
+// `portChange` is set when the saved port was taken at some launch and the
+// server moved: sessions minted with the old port have no local tools, and
+// nothing else would tell the user why.
+export function getLocalToolsServerStatus(): {
+  running: boolean;
+  url?: string;
+  portChange: { from: number; to: number } | null;
+} {
+  const identity = readPersistentIdentity();
+  const portChange =
+    identity.portChangedFrom !== undefined ? { from: identity.portChangedFrom, to: identity.port } : null;
+  return server ? { running: true, url: server.url, portChange } : { running: false, portChange };
 }
 
-// Exercises the exact same HTTP+auth+MCP path a launched CLI session uses
-// (ensureLocalToolsServer → POST the /mcp URL with the bearer token →
-// StreamableHTTPServerTransport), so a failure here narrows down whether a
-// reported "tool call failed" is this server's fault or something in how
-// the CLI was configured to reach it (wrong args, a stale token from a
-// previous launch, etc.) — starts the server first if it isn't running yet
-// (unlike getLocalToolsServerStatus above), since "can it even start" is
-// itself part of what's being checked.
+export function dismissLocalToolsPortChange(): ReturnType<typeof getLocalToolsServerStatus> {
+  const { portChangedFrom: _dismissed, ...identity } = readPersistentIdentity();
+  writePersistentIdentity(identity);
+  return getLocalToolsServerStatus();
+}
+
+// Exercises the same path a launched CLI session uses — the token read from
+// the headers file headersHelper serves, then an `initialize` POST to the
+// /mcp URL — so a failure here narrows down whether a reported "tool call
+// failed" is this server's fault or something in how the CLI was configured
+// to reach it. Starts the server first if it isn't running yet (unlike
+// getLocalToolsServerStatus above), since "can it even start" is itself part
+// of what's being checked. Ends the session it opens, so checks don't leave
+// sessions behind.
 export async function checkLocalToolsServerHealth(): Promise<{
   ok: boolean;
   detail: string;
@@ -656,6 +892,19 @@ export async function checkLocalToolsServerHealth(): Promise<{
     return { ok: false, detail: `Couldn't start the server: ${(error as Error).message}` };
   }
 
+  let authorization: unknown;
+  try {
+    authorization = JSON.parse(readFileSync(server!.headersPath, "utf8"))?.Authorization;
+  } catch (error) {
+    return { ok: false, detail: `Couldn't read the token file sessions use: ${(error as Error).message}` };
+  }
+  if (authorization !== `Bearer ${token}`) {
+    return {
+      ok: false,
+      detail: "The token file sessions read doesn't match this server — another Clance may have overwritten it.",
+    };
+  }
+
   const start = Date.now();
   try {
     const res = await fetch(url, {
@@ -663,7 +912,7 @@ export async function checkLocalToolsServerHealth(): Promise<{
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json, text/event-stream",
-        Authorization: `Bearer ${token}`,
+        Authorization: authorization,
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
@@ -678,6 +927,13 @@ export async function checkLocalToolsServerHealth(): Promise<{
     });
     const latencyMs = Date.now() - start;
     const bodyText = await res.text();
+    const sessionId = res.headers.get("mcp-session-id");
+    if (sessionId) {
+      void fetch(url, {
+        method: "DELETE",
+        headers: { Authorization: authorization, "Mcp-Session-Id": sessionId },
+      }).catch(() => {});
+    }
     if (!res.ok) {
       return {
         ok: false,

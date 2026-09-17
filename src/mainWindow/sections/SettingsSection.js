@@ -101,10 +101,28 @@ function ClanceToolsGroup({ onReady }) {
     window.clanceApp.setLocalToolEnabled(name, enabled).then(setTools);
   }
 
+  function dismissPortChange() {
+    window.clanceApp.dismissLocalToolsPortChange().then(setStatus);
+  }
+
   const enabledCount = tools ? tools.filter((t) => t.enabled).length : 0;
   const host = status?.url ? status.url.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : null;
 
   return html`
+    ${status?.portChange &&
+    html`
+      <div class="notice notice-attention">
+        <span class="status-dot session-dot-attention"></span>
+        <span class="notice-body">
+          <span class="notice-title">Local tools moved to a new port</span>
+          <span class="notice-text">
+            Another app was using port ${status.portChange.from}, so Clance switched to ${status.portChange.to}.
+            Sessions started before the switch no longer have local tools; start a new session to use them.
+          </span>
+        </span>
+        <button class="btn-secondary btn-small" onClick=${dismissPortChange}>Dismiss</button>
+      </div>
+    `}
     <div class="preference-row">
       <div>
         <div class="preference-title">Local tools</div>
@@ -116,7 +134,7 @@ function ClanceToolsGroup({ onReady }) {
       </div>
       <div class="preference-row-actions">
         <span class="status-card-status ${status?.running ? "status-card-status-ok" : ""}">
-          ${status === null ? "" : status.running ? "running" : "starts with a session"}
+          ${status === null ? "" : status.running ? "running" : "not running"}
         </span>
         <button class="btn-secondary btn-small" aria-expanded=${expanded} onClick=${() => setExpanded(!expanded)}>
           ${expanded ? "Hide" : "Show"}
@@ -128,7 +146,7 @@ function ClanceToolsGroup({ onReady }) {
       <div class="clance-tools-detail">
         <div class="tool-server">
           <span class="status-dot ${status?.running ? "status-dot-ok" : ""}"></span>
-          <span class="tool-server-text">${status?.running ? "Local tools server is running" : "Local tools server starts when a session opens"}</span>
+          <span class="tool-server-text">${status?.running ? "Local tools server is running" : "Local tools server isn't running"}</span>
           ${host && html`<span class="mono-label">${host}</span>`}
           <span class="tool-server-spacer"></span>
           ${health &&

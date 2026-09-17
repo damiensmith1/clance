@@ -43,6 +43,8 @@ import {
   setLocalToolEnabled,
   getLocalToolsServerStatus,
   checkLocalToolsServerHealth,
+  ensureLocalToolsServer,
+  dismissLocalToolsPortChange,
 } from "./localToolsServer";
 import {
   createPtySession,
@@ -145,6 +147,13 @@ app.whenReady().then(async () => {
   // shell sourcing .zshrc/.zprofile/nvm/etc.), and doing it now instead of
   // on the widget's critical path is pure upside.
   warmLoginShellPath();
+
+  // Started now rather than on the first mint: sessions from earlier
+  // launches (running, or restarted by `claude attach`) call in on the saved
+  // port whenever they use a tool — see localToolsServer.ts.
+  void ensureLocalToolsServer().catch((error) =>
+    console.error(`[localToolsServer ${new Date().toISOString()}] failed to start:`, error)
+  );
 
   Menu.setApplicationMenu(createAppMenu());
   createTray({
@@ -471,6 +480,7 @@ ipcMain.handle(
 );
 
 ipcMain.handle("extensibility:local-tools-server-status", () => getLocalToolsServerStatus());
+ipcMain.handle("extensibility:dismiss-local-tools-port-change", () => dismissLocalToolsPortChange());
 
 ipcMain.handle("extensibility:check-local-tools-server-health", () => checkLocalToolsServerHealth());
 

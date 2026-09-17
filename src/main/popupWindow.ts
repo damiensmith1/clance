@@ -380,7 +380,7 @@ export async function refreshContext(): Promise<{ text: string; preview: Context
 // --strict-mcp-config), so the MCP servers the user configured in Claude
 // Code, and a project's own `.mcp.json`, still load too.
 export async function sessionMcpArgs(): Promise<{ args: string[]; localToolsAvailable: boolean }> {
-  const mcpServers: Record<string, { type: "http"; url: string; headers: Record<string, string> }> = {};
+  const mcpServers: Record<string, { type: "http"; url: string; headersHelper: string }> = {};
   let allowedNames: string[] = [];
   let disallowedNames: string[] = [];
 
@@ -391,33 +391,38 @@ export async function sessionMcpArgs(): Promise<{ args: string[]; localToolsAvai
   // that silently fail.
   const localToolsAvailable = checkPermissions().accessibility;
   if (localToolsAvailable) {
-    const { url, token } = await ensureLocalToolsServer();
-    // The mcpServers key becomes the "clance" segment of the CLI's
+    const { url, serverKey, headersHelper } = await ensureLocalToolsServer();
+    // The CLI persists these args with a background agent and reuses them
+    // whenever it restarts, so every value here is stable across Clance
+    // launches: the URL and key are saved per install, and the token isn't
+    // passed at all — headersHelper reads the current one (see
+    // localToolsServer.ts).
+    //
+    // The mcpServers key becomes the middle segment of the CLI's
     // mcp__<key>__<tool> naming convention — exactly what the
     // --allowedTools/--disallowedTools lists below reference, by name. A
     // static, guessable key (this used to be the literal string "clance")
     // could collide with a same-named server a project's own .mcp.json
-    // defines — Clance sessions can now open in real project directories
-    // (see docs/design.md's "Working directory"), so that's not a
-    // hypothetical, it's an actual file a session's cwd could contain.
-    // Since --mcp-config is additive, a colliding project-supplied
-    // "clance" server could load alongside ours; if the CLI's precedence
-    // rules ever let it win the name, our allowlist — which only ever
-    // checks a tool name string — would silently pre-approve calls into
-    // that attacker-controlled tool instead of ours, no prompt ever shown.
-    // Deriving the key from the same per-launch random token already used
-    // for the bearer auth (unpredictable, not a secret in this context)
-    // makes it impossible for a static project file to predict or target.
-    const serverKey = `clance-${token.slice(0, 16)}`;
+    // defines — Clance sessions can open in real project directories
+    // (see docs/design.md's "Working directory"), so that's an actual file
+    // a session's cwd could contain. Since --mcp-config is additive, a
+    // colliding project-supplied "clance" server could load alongside ours;
+    // if the CLI's precedence rules ever let it win the name, our allowlist
+    // — which only ever checks a tool name string — would silently
+    // pre-approve calls into that attacker-controlled tool instead of ours,
+    // no prompt ever shown. A random per-install suffix makes it impossible
+    // for a static project file to predict or target.
     const toolName = (name: string) => `mcp__${serverKey}__${name}`;
-    mcpServers[serverKey] = { type: "http", url, headers: { Authorization: `Bearer ${token}` } };
+    mcpServers[serverKey] = { type: "http", url, headersHelper };
 
     // Settings' clance tools list (SettingsSection.js, backed by
     // localToolsServer.ts's listLocalTools()) decides which tools are
     // offered at all, checked fresh at mint time same as everything here
     // — a tool that's off is passed via --disallowedTools so the CLI
     // refuses it outright, not just left unapproved (which would still
-    // let the user approve it through a prompt).
+    // let the user approve it through a prompt). These lists are fixed
+    // when the session is minted; the server also refuses a disabled tool
+    // on every call, so a later change in Settings reaches older sessions.
     const tools = listLocalTools();
     allowedNames = tools.filter((t) => t.enabled && t.tier === "auto").map((t) => toolName(t.name));
     disallowedNames = tools.filter((t) => !t.enabled).map((t) => toolName(t.name));

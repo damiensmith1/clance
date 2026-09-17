@@ -57,6 +57,8 @@ which is also the working directory for sessions that have no project:
 | `window-layout.json` | Main window pane/tab tree; tabs for sections that no longer exist are dropped on restore | `windowLayout.ts` |
 | `pool.json` | The pre-warmed popup session | `agentPool.ts` |
 | `loginShellPath.json` | Cached login-shell `PATH` | `ptyManager.ts` |
+| `local-tools.json` | Local tools server port and server key suffix, saved once per install | `localToolsServer.ts` |
+| `local-tools-headers-<port>.json` | This launch's local tools bearer token, as the header `headersHelper` returns (mode `0600`) | `localToolsServer.ts` |
 | `dictation.db` | Transcript history | `dictationStore.ts` |
 | `models/` | Speech model weights | `whisperModels.ts` |
 | `dictation/` | Per-utterance WAVs (deleted after transcription unless `keepAudio`) | `dictation.ts` |
@@ -66,7 +68,10 @@ which is also the working directory for sessions that have no project:
 Session transcripts are never written by Clance — the CLI writes them to
 `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl` like any other session.
 Config readers merge defaults per nested object (`shortcuts`, `dictation`)
-so a config written by an older version picks up new keys.
+so a config written by an older version picks up new keys. A dev build
+(`!app.isPackaged`) uses `local-tools.dev.json` and
+`local-tools-headers-<port>.dev.json` instead, so it can run next to the installed
+app.
 
 ## Sessions
 
@@ -99,9 +104,11 @@ started:
 `attach` accepts no other flags, so settings (`--settings`, which tells the
 CLI the terminal background is light — it emits truecolor diff colours that
 xterm's palette can't remap), local tools (`--mcp-config`, `--allowedTools`)
-and the popup's system prompt are passed to `--bg`. A session that's already
-live when Clance attaches keeps whatever it started with until it's stopped
-and reopened.
+and the popup's system prompt are passed to `--bg`. The CLI saves those flags
+with the agent and reuses them whenever `attach` restarts a stopped one, and
+a live session keeps them until it's stopped. The local tools config is
+therefore identical across Clance launches (see "Local tools server"), so
+old sessions keep reaching the server.
 
 Every `claude` process gets:
 
@@ -354,6 +361,10 @@ UI and the CLI arguments all read from.
   tools go in `--allowedTools`, so the CLI never prompts for them; `approval`
   tools keep Claude Code's Allow / Deny / Always allow prompt; tools the user
   switched off go in `--disallowedTools`, so they're refused outright.
+- **Switched-off tools are also refused per call.** The flags are fixed at
+  mint, so the server checks `enabledLocalTools` on every call and returns a
+  tool error for a disabled tool; a Settings change reaches existing
+  sessions immediately.
 - **Why this split.** Reading the screen is non-destructive, and a click can
   only land on something already on screen. `insert_text` and `activate_app`
   can reach an app the user never mentioned — auto-allowing them would let
@@ -375,29 +386,94 @@ UI and the CLI arguments all read from.
 
 ### Server
 
-- **Lazy, local, authenticated.** Started on first mint. Listens on
-  `127.0.0.1` on a random port and rejects non-loopback peers. Every request
-  must carry a per-launch random bearer token (compared in constant time) and
-  a matching `Host`/`Origin`, which also blocks DNS rebinding from a browser.
-- **Unpredictable server key.** The server is registered as
-  `clance-<token prefix>`, not `clance`. `--allowedTools` authorizes by name
-  (`mcp__<key>__<tool>`), `--mcp-config` is additive, and sessions run in
-  real project directories — a project's `.mcp.json` defining a server with a
-  guessable name could otherwise collide with the pre-authorized tool names.
+- **Started at launch, local, authenticated.** `index.ts` starts it when the
+  app is ready, since sessions from earlier launches can call in at any time.
+  Listens on `127.0.0.1` and rejects non-loopback peers. Every request must
+  carry the bearer token (compared in constant time) and a matching
+  `Host`/`Origin`, which also blocks DNS rebinding from a browser.
+- **Nothing per-launch in a session's config.** The CLI persists a background
+  agent's `--mcp-config` and reuses it on every restart, so:
+  - **Port:** saved once per install in `local-tools.json`. If another app
+    has taken it, the server picks a new random port, saves that, and records
+    the old one so Settings can explain it (see "Port changes"); sessions
+    minted with the old port lose their tools.
+  - **Token:** new every launch, but never put in the config. The config
+    carries `headersHelper: "cat '<local-tools-headers-<port>.json>'"`, a
+    command the CLI runs to get request headers. The file is written only
+    after the server is listening, so a second Clance that fails to bind
+    can't overwrite the token the running one checks; it's written to a temp
+    file, created `0600`, then renamed. It's named after the port it belongs
+    to, and every other token file for the same build channel is deleted, so
+    a session still configured for a port Clance has given up has no token
+    to send to whatever listens there now.
+  - **Server key:** `clance-<suffix>`, with a random suffix saved once per
+    install. `--allowedTools` authorizes by name (`mcp__<key>__<tool>`),
+    `--mcp-config` is additive, and sessions run in real project
+    directories — a project's `.mcp.json` defining a server with a guessable
+    name could otherwise collide with the pre-authorized tool names.
 - **Gated on Accessibility.** The whole server is left out of `--mcp-config`
   unless Accessibility is granted, so the CLI never sees tools that would
   fail. MCP servers the user configured in Claude Code aren't affected.
-- **Health check.** Settings → clance tools shows whether the server is running and
-  can send a real authenticated `initialize` to it, to tell a broken server
-  from a CLI configuration problem.
+- **Health check.** Settings → clance tools shows whether the server is
+  running and can send a real `initialize` using the token from the headers
+  file (the same path the CLI takes), then ends that session. It reports a
+  headers file that doesn't match the running server.
 - **Logging.** Every request and tool call is logged with timing. `text`
   arguments are redacted to their length; results are never logged.
 
-Three transport details matter, all found by testing against the real CLI:
+### Port changes
+
+Losing the saved port breaks every session minted with it, with nothing on
+screen to explain why, so `local-tools.json` records `portChangedFrom` and
+Settings → Local tools shows a notice ("Another app was using port X, so
+Clance switched to Y…") until the user dismisses it, which clears the field.
+
+### Why this shape
+
+Everything above follows from one constraint: the CLI persists a session's
+`--mcp-config` and reuses it on every restart, while the server lives inside
+Clance and restarts with it. Alternatives, and why they lost:
+
+| Option | Why not |
+|---|---|
+| Per-launch port and token (the original) | Only sessions minted in the current launch can connect — the bug this replaced |
+| Stateless server (no session ids) | Also survives restarts, but gives up session identity, which `GET` notifications, elicitation and per-session state would need |
+| Token saved on disk instead of `headersHelper` | Simpler, but a token that never changes; `headersHelper` keeps rotation |
+| Register the server in Claude Code's own user config | Read fresh at session start, but adds Clance's tools to every Claude Code session on the machine, and running sessions still need the work above |
+| Stdio helper per session, forwarding over a Unix socket | Doesn't depend on the CLI's reconnect behavior at all, and needs no port. But a helper process per session, a helper that must track the tool list, and files outside the bundle — kept in reserve if the CLI's behavior changes |
+| A relay outside the Mac (edge function) | Screen content, selections and typed text would leave the machine, and tools would need the network — against `background.md`'s local-first principle |
+
+### Surviving restarts
+
+Sessions keep their local tools when Clance quits or restarts while they're
+running. Verified against Claude Code 2.1.274 with the real server under
+repeated restarts and a 3.5-minute outage:
+
+- **Token changed (every restart).** The session's next call gets **401**.
+  The CLI re-runs `headersHelper`, reconnects from scratch (`initialize`,
+  new session id) and retries once; the call succeeds.
+- **Session lost, token unchanged.** A `POST` or `DELETE` with an unknown
+  `Mcp-Session-Id` gets **404** with a JSON-RPC "Session not found" body. The
+  CLI treats 404 as an expired session, re-initializes and the call
+  succeeds. A 400 here leaves the session broken for good — the CLI never
+  reconnects.
+- **Clance not running.** Calls fail with "Unable to connect"; the first call
+  after Clance is back succeeds. The CLI doesn't give up after repeated
+  failures.
+- **Idle sessions expire.** A restart can create two or three sessions per
+  `claude` process (its background reconnect races the tool call's own), so
+  sessions idle for an hour are closed, checked every 10 minutes.
+
+A request with no session id that isn't `initialize` still gets 400 — the
+CLI sends a `server/discover` probe like that before initializing, and the
+400 is harmless.
+
+Three more transport details, all found by testing against the real CLI:
 
 - **Stateful sessions.** Transports are kept per `Mcp-Session-Id`, created on
   `initialize`. A stateless server can't give `GET` or `DELETE` a session to
-  belong to.
+  belong to, and later per-session features (notifications, elicitation,
+  per-session approvals) need one.
 - **`GET` returns 405.** The server has nothing to push, and an idle SSE
   stream gets timed out by the client, which then marks the whole server
   broken and stops sending tool calls. The SDK client treats 405 as "no
@@ -888,5 +964,18 @@ on errors.
 - **Approval for multi-step computer use** — chains of individually harmless
   actions toward one risky outcome inside an app the user already has open
   aren't covered by per-call prompts.
+- **Sessions minted before stable local tools config.** Agents minted with
+  the old per-launch port and token keep that config forever: `attach`
+  restarts a stopped agent with its saved flags. Re-resuming instead doesn't
+  help — `claude --bg --resume` on a session that has a stopped agent starts a
+  new agent under a new session id, forking the conversation. `claude rm`
+  on the stopped agent (transcript kept) followed by `--bg --resume` does
+  continue the same session id, but `rm` also deletes the agent's worktree,
+  and detecting stale flags means reading the CLI's internal
+  `~/.claude/jobs/<id>/state.json`. Not automated; affected sessions have no
+  local tools.
+- **`resolveOpenArgs`'s wrong-cwd branch forks.** For the same reason, a
+  stopped agent minted in the wrong directory is revived under a new session
+  id rather than continued.
 - **Dead code.** `src/shared/markdown.js` and the `chatHistory:get-session`
   handler are left over from the old chat UI and have no callers.

@@ -99,6 +99,7 @@ contextBridge.exposeInMainWorld("clanceApp", {
   setLocalToolEnabled: (name: string, enabled: boolean) =>
     ipcRenderer.invoke("extensibility:set-local-tool-enabled", name, enabled),
   localToolsServerStatus: () => ipcRenderer.invoke("extensibility:local-tools-server-status"),
+  dismissLocalToolsPortChange: () => ipcRenderer.invoke("extensibility:dismiss-local-tools-port-change"),
   checkLocalToolsServerHealth: () =>
     ipcRenderer.invoke("extensibility:check-local-tools-server-health"),
 
