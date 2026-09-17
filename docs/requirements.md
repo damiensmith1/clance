@@ -39,8 +39,9 @@ What Clance does. Why is in `background.md`; how is in `design.md`.
   - **ctx** — hover card showing what the last ⌘⇧R captured.
   - **Open in App** — move the live terminal into a main-window tab without
     restarting it.
-  - **Hide** — tuck the widget away with the session still running and
-    return focus to the previous app. The next ⌥Space brings it back.
+  - **Hide** (or ⌥Space while the widget is open) — tuck the widget away
+    with the session still running and return focus to the previous app.
+    The next ⌥Space brings the same widget back.
   - **Close** — dismiss it. A session with no user message is deleted;
     anything else stays resumable.
 - A hint bar under the terminal shows the shortcuts and the session's folder.

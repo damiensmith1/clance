@@ -90,8 +90,8 @@ export function hidePopup(): void {
   currentMode = null;
 }
 
-// The toolbar's Hide button. Unlike hidePopup() (the close button, and the
-// hotkey's own toggle-while-visible), this deliberately leaves currentMode
+// The toolbar's Hide button and the hotkey on a visible widget. Unlike
+// hidePopup() (the close button), this deliberately leaves currentMode
 // and currentAgentId untouched — the conversation isn't being abandoned,
 // just tucked away. The window itself is only ever hide()'d here, never
 // reloaded, so its terminal/xterm state stays fully alive underneath;
@@ -113,9 +113,14 @@ export function hidePopup(): void {
 // activate_app's own app-targeting) re-focuses whatever was captured as
 // frontmost right before this widget last took focus — a plain OS-level
 // window activation with no notion of "Clance" as an app at all.
+//
+// Focus is only handed back when the widget had it. It stays on screen when
+// the user clicks into another app, and the hotkey can hide it from there;
+// refocusing then would pull them out of the app they're now using.
 export async function hideWidgetKeepAlive(): Promise<void> {
+  const hadFocus = !popup || popup.isDestroyed() || popup.isFocused();
   if (popup && !popup.isDestroyed()) popup.hide();
-  await focusTarget();
+  if (hadFocus) await focusTarget();
 }
 
 // If the session that's about to close was minted/claimed by this popup
@@ -506,12 +511,13 @@ export async function warmAgentPool(cwd: string = getDefaultDirectory()): Promis
 let opening = false;
 
 export async function toggleClancePopup(): Promise<void> {
+  // The hotkey on a visible widget is Hide, not Close: the session stays
+  // live and the next press brings the same widget back (below).
   if (popup && !popup.isDestroyed() && popup.isVisible() && currentMode === "new") {
-    hidePopup();
-    cleanupIfAbandoned();
+    await hideWidgetKeepAlive();
     return;
   }
-  // The toolbar's Hide button (hideWidgetKeepAlive above) leaves the widget
+  // Hide (the hotkey above, or the toolbar button) leaves the widget
   // hidden but its conversation still fully live and attached — reopen the
   // same window instead of falling through to claim/mint below, which
   // would otherwise abandon it in favor of a brand-new session every time.

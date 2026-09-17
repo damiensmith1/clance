@@ -607,6 +607,13 @@ function showSessionInfo(args) {
   });
 }
 
+// Bringing a hidden widget back (⌥Space) restores focus to whatever last had
+// it, which can be a toolbar button, drawn with a focus ring because the last
+// input was a key press. Typing should go to the terminal instead.
+window.addEventListener("focus", () => {
+  if (term && !openInDropdownEl.classList.contains("open")) term.focus();
+});
+
 window.clance.onShown((payload) => {
   appEl.classList.remove("has-messages");
   closeOpenInDropdown();

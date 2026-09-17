@@ -254,13 +254,15 @@ every open would cost latency and be stale or irrelevant most of the time.
 
 ### Dismissing
 
-- **Close** (and ⌥Space while open) hides the window, forgets the session,
-  and removes it if it never got a real user message.
-- **Hide** keeps the session live. It calls `popup.hide()` then
-  `focusTarget()` to refocus the window the user came from. `app.hide()`
+- **Close** hides the window, forgets the session, and removes it if it never
+  got a real user message.
+- **Hide** (and ⌥Space while open) keeps the session live. It calls
+  `popup.hide()` then, if the widget had focus, `focusTarget()` to refocus the
+  window the user came from. `app.hide()`
   isn't used: it deactivates the whole app, and the next reveal reactivates
   it, which reopens the main window alongside the popup. The next ⌥Space
-  re-captures the frontmost window and reveals the same conversation.
+  re-captures the frontmost window and reveals the same conversation, with
+  focus in the terminal rather than whichever toolbar button last had it.
 - The popup never hides on blur. It used to, and vanished mid-drag or
   whenever another app briefly took focus.
 - `index.ts`'s `activate` handler only opens the main window when no other
