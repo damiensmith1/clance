@@ -23,7 +23,7 @@ export const MODELS_DIR = join(SESSION_CWD, "models");
 
 // ggml weights from whisper.cpp's own Hugging Face repo. Sizes and hashes
 // are the *measured* values of the exact files the Phase 0 spike ran
-// against (see docs/dictation.md) — not copied from a README — so a
+// against (see docs/design.md's "Dictation") — not copied from a README — so a
 // verified install is byte-identical to what those numbers describe.
 const HF_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
@@ -180,8 +180,8 @@ const GB = 1024 ** 3;
 /**
  * Picks one model for this machine, with a reason the user can read.
  *
- * Keyed off GPU cores rather than RAM — see docs/dictation.md's Phase 0
- * findings. RAM and free disk are guards only: they can push the pick
+ * Keyed off GPU cores rather than RAM — see the benchmark in docs/design.md's
+ * "Engine" section. RAM and free disk are guards only: they can push the pick
  * *down* a tier but never up.
  */
 export async function recommendModel(): Promise<Recommendation> {
@@ -230,7 +230,7 @@ let cachedBinary: string | undefined;
  * Not bundled into the app. Clance is distributed from the command line, so
  * the engine is a Homebrew dependency rather than a static binary built
  * with cmake and shipped inside the bundle (decided 2026-09-16 — see
- * docs/dictation.md). Returns undefined when it isn't installed, so callers
+ * docs/design.md's "Dictation"). Returns undefined when it isn't installed, so callers
  * can surface that instead of a spawn error.
  */
 export async function resolveWhisperBinary(): Promise<string | undefined> {

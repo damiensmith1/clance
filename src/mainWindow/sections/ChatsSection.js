@@ -121,7 +121,7 @@ function dayGroupLabel(iso) {
 // CLI's own storage and may belong to a project that has nothing to do
 // with Clance. That's also why there's no permanent-delete action here.
 // Orthogonal to the Active/Closed split below (see
-// docs/background-agent-architecture.md) — composes with either.
+// docs/design.md's "Sessions") — composes with either.
 function SessionList({ sessions, emptyNote, showingArchived, onOpen, onSetArchived }) {
   if (sessions.length === 0) {
     return html`<p class="empty-note">${emptyNote}</p>`;
@@ -234,7 +234,7 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
   const liveSessionIds = useMemo(() => new Set(agents.map((a) => a.sessionId)), [agents]);
 
   // Every Clance-minted agent gets a generic mint-time name ("New Chat",
-  // "Clance popup") — see docs/background-agent-architecture.md — since
+  // "Clance popup") — see docs/design.md's "Sessions" — since
   // there's no real conversation yet to title it from. Once one exists,
   // prefer the same first-user-message title chatHistory.ts already
   // derives for the Closed list, so a live row reads the same way it will
@@ -253,7 +253,7 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
   }, [agents, query, sessionTitleById]);
 
   // "Closed" is everything with history that isn't currently a live
-  // background agent — see docs/background-agent-architecture.md. Opening
+  // background agent — see docs/design.md's "Sessions". Opening
   // either kind goes through the same resolveOpenArgs lookup (Shell.js),
   // so there's no UI-level branching between "known stopped id" and
   // "never had one."
@@ -293,7 +293,7 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
       return;
     }
     // Optimistic — this is exactly what moves the row from Active to
-    // Closed (see docs/background-agent-architecture.md req. 6); the next
+    // Closed (see docs/design.md's "Session list"); the next
     // poll would confirm it, but there's no reason to wait on that.
     setAgents((prev) => prev.filter((a) => a.id !== agent.id));
     await window.clanceApp.stopAgent(agent.id);

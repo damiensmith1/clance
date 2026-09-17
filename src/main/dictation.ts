@@ -142,7 +142,7 @@ export async function checkAvailability(): Promise<DictationAvailability> {
  *
  * Press-to-start/press-to-stop rather than hold-to-talk, because Electron's
  * globalShortcut delivers no key-up event — genuine push-to-talk needs a
- * native key listener (see docs/dictation.md's Phase 3).
+ * native key listener (see docs/design.md's open questions).
  */
 export async function toggleDictation(): Promise<void> {
   if (state === "recording") {
@@ -307,7 +307,7 @@ export async function handleAudio(samples: Float32Array): Promise<void> {
       }
     } else {
       // Clipboard-only: either the user's preference, or Accessibility
-      // isn't granted. Degrades rather than failing — see docs/dictation.md.
+      // isn't granted. Degrades rather than failing — see docs/design.md's "Dictation".
       clipboard.writeText(text);
     }
 

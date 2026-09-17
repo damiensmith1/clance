@@ -122,8 +122,8 @@ function injectContextIntoTerminal(terminalId, text, screenshotPath) {
 
 // Cmd+Shift+R while the popup terminal has focus — re-captures screen
 // context for the *already-running* session instead of only ever
-// photographing the moment the hotkey was pressed (see docs/ideas.md's
-// "Context capture is one-shot and frozen"). Cmd+R alone is already
+// photographing the moment the hotkey was pressed (see docs/design.md's
+// "⌘⇧R: hand over the current screen"). Cmd+R alone is already
 // Electron's default "reload" accelerator (see appMenu.ts), which would
 // blow away this whole renderer, so this needs a different combo.
 let refreshingContext = false;

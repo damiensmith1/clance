@@ -6,7 +6,8 @@ Thanks for your interest in improving Clance.
 
 1. Fork the repository and create a branch from `main`.
 2. Make your change. Run `npm run build` to check that it compiles, and
-   `npm start` to try it.
+   `npm start` to try it. For anything that needs macOS permissions, see
+   "Building from source" in the [README](README.md).
 3. Open a pull request against `main` that explains what it changes and why.
 
 Every pull request needs the maintainer's approval before it can be merged.

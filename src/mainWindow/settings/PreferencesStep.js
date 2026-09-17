@@ -30,7 +30,7 @@ export function LaunchAtLoginRow({ prefs, setPrefs }) {
 // pre-warmed pool spare, and the main window's "New Chat" all read this
 // (see config.ts's getDefaultDirectory). Doesn't affect resuming an
 // existing session, which always reopens in whatever directory it already
-// belongs to. See docs/working-directory-design.md.
+// belongs to. See docs/design.md's "Working directory".
 export function DefaultDirectoryRow({ prefs, setPrefs }) {
   if (!prefs) return html`<p class="empty-note">Loading…</p>`;
 

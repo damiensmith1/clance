@@ -4,7 +4,7 @@ import { join } from "path";
 import { SESSION_CWD } from "./paths";
 import { sanitizeWindowTitle } from "./windowTitle";
 
-// Node's built-in SQLite rather than better-sqlite3 (see docs/dictation.md):
+// Node's built-in SQLite rather than better-sqlite3 (see docs/design.md's "Dictation"):
 // verified working in Electron 44's Node 24.20, including FTS5, which means
 // no second native addon to rebuild against Electron's ABI on every bump —
 // node-pty is already enough of that. It's still flagged experimental

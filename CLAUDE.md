@@ -1,26 +1,27 @@
 # Clance
 
-A macOS menu-bar app (Apple Silicon, Electron + Node.js) that opens a
-hotkey-triggered popup, reads the current screen for context, and uses the
-Claude Agent SDK to either respond conversationally or type/act on the
-user's behalf. Sessions are stored in a Claude Code CLI-compatible JSONL
-format so they're resumable from either surface. Local-first, pluggable via
-the Claude Agent SDK's own skills/tools/MCP/hooks/subagents primitives.
+A macOS menu-bar app (Apple Silicon, Electron + TypeScript) that opens the
+real Claude Code CLI in a floating terminal from a global hotkey. Every
+session is a `claude --bg` background agent that Clance attaches to, so
+sessions are ordinary Claude Code sessions, resumable from either surface.
+Clance adds local MCP "computer use" tools (screenshot, selection, typing,
+clicking), a main window for all Claude Code sessions on the machine, and
+system-wide on-device dictation (whisper.cpp).
 
-See `docs/` for the full requirements, background, and design — that's the
-source of truth for scope, architecture, and open questions, not this file.
+See `docs/` for background, requirements and design — that's the source of
+truth for scope, architecture, and open questions, not this file.
 
 ## Keeping docs in sync
 
 Everything under docs/ is this project's source of truth, not a one-time
-snapshot — including any file added there after initial setup, not just
-background.md/requirements.md/design.md. In the SAME turn as a code
-change (not a followup), update the relevant doc when you:
+snapshot. Docs describe the current system only — no dated changelogs,
+reverted attempts or bug-hunt narratives; that history belongs in git. In
+the SAME turn as a code change (not a followup), update the relevant doc
+when you:
 - resolve or add an open question in design.md
 - make or change an architecture/approach decision
 - add, change, or drop a requirement or non-goal
 - learn something that changes the "why" in background.md
-- create a new doc under docs/ for a topic that doesn't fit the above
 
 Don't fabricate a decision that wasn't actually made. If it's unclear
 whether something is doc-worthy, ask instead of guessing.

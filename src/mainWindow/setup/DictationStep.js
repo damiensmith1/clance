@@ -20,7 +20,7 @@ function progressLabel(progress) {
     case "verifying":
       return "Verifying checksum…";
     // The warm-up is a real ~18s wait on first install (Metal shader
-    // compilation — see docs/dictation.md Phase 0), so it gets its own
+    // compilation — see docs/design.md's "Models"), so it gets its own
     // label rather than looking like the download stalled at 100%.
     case "warming":
       return "Preparing model (one-time, ~20s)…";

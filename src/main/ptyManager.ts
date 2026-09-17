@@ -195,7 +195,7 @@ export function writeToPty(terminalId: string, data: string): void {
 // the PNG to the OS clipboard, then injects a single Ctrl+V byte (0x16)
 // directly into the pty. The CLI polls the clipboard for image data on
 // Ctrl+V the same way it would for a human pasting a screenshot — confirmed
-// by a live spike (see docs/sep10talks.md) that only that one byte crosses
+// by a live spike (see docs/design.md's "Terminals") that only that one byte crosses
 // the pty, nowhere near enough to carry inlined image bytes itself; the CLI
 // reads the clipboard out-of-band. No keystroke simulation or window focus
 // needed, unlike insert_text — the terminal already holds focus.

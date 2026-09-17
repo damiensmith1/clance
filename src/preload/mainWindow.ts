@@ -95,7 +95,7 @@ contextBridge.exposeInMainWorld("clanceApp", {
   checkLocalToolsServerHealth: () =>
     ipcRenderer.invoke("extensibility:check-local-tools-server-health"),
 
-  // ---- dictation (see docs/dictation.md) ----
+  // ---- dictation (see docs/design.md's "Dictation") ----
   dictationToggle: () => ipcRenderer.invoke("dictation:toggle"),
   dictationAvailability: () => ipcRenderer.invoke("dictation:availability"),
   getDictationSettings: () => ipcRenderer.invoke("dictation:get-settings"),

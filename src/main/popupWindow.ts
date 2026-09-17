@@ -313,7 +313,7 @@ async function captureContextText(
 
 // Re-captures screen context for the *live* session already showing in the
 // popup, instead of only ever photographing the moment the hotkey was
-// pressed (see docs/ideas.md's "Context capture is one-shot and frozen").
+// pressed (see docs/design.md's "⌘⇧R: hand over the current screen").
 // Triggered from the popup's own Cmd+Shift+R handler (popup.js) rather than
 // a hotkey, since Cmd+Space-style global shortcuts are already spoken for by
 // togglePopup. The result rides into the pty exactly like a resumed
@@ -371,7 +371,7 @@ export async function refreshContext(): Promise<{ text: string; preview: Context
 // for the full list) plus whatever the user has enabled in Settings' "MCP
 // Servers" tab (`mcpConfig.ts`'s `getActiveMcpServers()` — previously
 // configured but never actually reached a launched session, see
-// docs/requirements.md's "Config surface" gap, closed 2026-09-14). Additive
+// docs/design.md's "Extensibility"). Additive
 // (not --strict-mcp-config), so a project's own `.mcp.json` still loads too.
 // `localToolsAvailable` is returned separately from `args` rather than
 // folded into "args is non-empty" — a user's own custom MCP servers can
@@ -400,7 +400,7 @@ export async function sessionMcpArgs(): Promise<{ args: string[]; localToolsAvai
     // static, guessable key (this used to be the literal string "clance")
     // could collide with a same-named server a project's own .mcp.json
     // defines — Clance sessions can now open in real project directories
-    // (see docs/working-directory-design.md), so that's not a
+    // (see docs/design.md's "Working directory"), so that's not a
     // hypothetical, it's an actual file a session's cwd could contain.
     // Since --mcp-config is additive, a colliding project-supplied
     // "clance" server could load alongside ours; if the CLI's precedence
@@ -556,7 +556,7 @@ async function toggleClancePopupInner(): Promise<void> {
   // default, or SESSION_CWD if never set (see config.ts's
   // getDefaultDirectory). Resumed/attached sessions never consult this —
   // they inherit their own recorded cwd instead (agentSessions.ts's
-  // resolveOpenArgs). See docs/working-directory-design.md.
+  // resolveOpenArgs). See docs/design.md's "Working directory".
   const dir = getDefaultDirectory();
   const spawnArgs = await popupMintArgs();
 
@@ -580,7 +580,7 @@ async function toggleClancePopupInner(): Promise<void> {
     warmAgentPool(dir).catch(() => {});
   } else {
     // Minted as a background agent immediately, same as every other
-    // Clance-launched session (see docs/background-agent-architecture.md) —
+    // Clance-launched session (see docs/design.md's "Sessions") —
     // the popup terminal that opens below is just an `attach` viewport onto
     // it, so closing the widget or the app never ends the conversation.
     id = await spawnBackgroundAgent(popupSessionName(), spawnArgs, dir);
@@ -623,7 +623,7 @@ let openingNewInDirectory = false;
 // invoked Clance and here's what they were looking at" — it's a
 // deliberate "open a session somewhere" action, and whatever happened to
 // be on screen when the dropdown was opened has no particular relevance
-// to the directory being picked now. See docs/working-directory-design.md.
+// to the directory being picked now. See docs/design.md's "Working directory".
 export async function openNewSessionInDirectory(dir: string): Promise<void> {
   if (openingNewInDirectory) return;
   openingNewInDirectory = true;

@@ -414,7 +414,7 @@ ipcMain.handle("settings:set-default-directory", (_event, dir: string | null) =>
   // fresh (picking up what was just written above) and refillPool's own
   // cwd-mismatch handling stops+removes the stale spare rather than
   // leaving it as an orphaned, untracked process. See
-  // docs/working-directory-design.md.
+  // docs/design.md's "Working directory".
   warmAgentPool().catch(() => {});
   return config.defaultDirectory;
 });
@@ -530,7 +530,7 @@ ipcMain.handle("files:copy-dropped", (_event, sourcePath: string) =>
   copyDroppedFile(sourcePath)
 );
 
-// ---- dictation (see docs/dictation.md) ----
+// ---- dictation (see docs/design.md's "Dictation") ----
 
 // Audio arrives as a raw ArrayBuffer from the HUD renderer, which owns the
 // microphone (the main process has no getUserMedia).

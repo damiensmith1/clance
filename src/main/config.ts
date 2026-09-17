@@ -25,7 +25,7 @@ export type ClanceConfig = {
   dictation: DictationConfig;
 };
 
-// Dictation settings (see docs/dictation.md). `activeModel` null means no
+// Dictation settings (see docs/design.md's "Dictation"). `activeModel` null means no
 // model has been installed yet, which is what gates the feature — the
 // shortcut stays registered either way so pressing it can explain itself
 // rather than doing nothing.

@@ -12,7 +12,7 @@ const SKILLS_DIR = join(homedir(), ".claude", "skills");
 // version had one anyway (`enabledSkills` in config.ts, a `setSkillEnabled`
 // export here): it wrote real config that no launched session ever read —
 // exactly the "toggle that looks like it works but doesn't" trust bug this
-// replaced (2026-09-14, see docs/requirements.md's "Config surface" note).
+// replaced (see docs/design.md's "Extensibility").
 // Skills are managed the same way a bare `claude` session manages them: add
 // or remove a folder under `~/.claude/skills/`.
 export type SkillInfo = {

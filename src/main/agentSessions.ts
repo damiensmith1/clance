@@ -19,7 +19,7 @@ const execFileAsync = promisify(execFile);
 //   default for a brand-new session (see config.ts's getDefaultDirectory),
 //   or the target session's own recorded cwd for a resume (see
 //   resolveOpenArgs below) — rather than unconditionally forcing
-//   SESSION_CWD the way this used to. See docs/working-directory-design.md.
+//   SESSION_CWD the way this used to. See docs/design.md's "Working directory".
 // - CLAUDE_CODE_AUTO_CONNECT_IDE: "false", same reasoning as ptyManager's
 //   pty spawn — a Clance session has nothing to do with whatever file a
 //   running VS Code/JetBrains instance has open.
@@ -154,7 +154,7 @@ export async function rmAgent(id: string): Promise<void> {
 const inFlightOpens = new Map<string, Promise<string[]>>();
 
 // Every Clance-opened terminal is now purely a `claude attach <id>` viewport
-// onto a background agent (see docs/background-agent-architecture.md) —
+// onto a background agent (see docs/design.md's "Sessions") —
 // this is the single place that decides which agent id a session id maps
 // to, minting one if none exists yet. Collapses what the design doc
 // describes as two Closed-section sub-cases into one lookup: `--all`

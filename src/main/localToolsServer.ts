@@ -85,7 +85,7 @@ export function setLocalToolEnabled(name: string, enabled: boolean): LocalToolSt
 }
 
 // Gives a Clance-launched terminal session (the real `claude` CLI, not the
-// Agent SDK — see docs/design.md "Terminal-embedding architecture") a set of
+// Agent SDK — see docs/background.md) a set of
 // "computer use" tools — reading and acting on the user's screen — beyond
 // what the CLI's own Read/Bash/Edit tools already cover (those act on the
 // filesystem; these act on the GUI). The CLI process has no other route back

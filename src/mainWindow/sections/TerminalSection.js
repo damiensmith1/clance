@@ -9,7 +9,7 @@ let terminalCounter = 0;
 // unmounts TerminalSection. Without this registry that unmount used to kill
 // the pty and dispose xterm, losing the shell (a plain `$SHELL -il` tab has
 // no backing process the way a `claude attach <id>` tab does — see
-// docs/background-agent-architecture.md — so killing its one-and-only pty
+// docs/design.md's "Sessions" — so killing its one-and-only pty
 // really did end the session). Now the xterm.Terminal instance, its DOM
 // node, and the pty stay alive here for as long as the tab exists; mounting
 // just moves the existing DOM node into view instead of recreating
@@ -174,7 +174,7 @@ export function TerminalSection({ terminalId, args = [], shell = false, onPopOut
     window.clanceApp.resizeTerminal(terminalId, entry.term.cols, entry.term.rows);
 
     // Every terminal is an `attach <id>` client onto a background agent now
-    // (see docs/background-agent-architecture.md), so resize is always
+    // (see docs/design.md's "Sessions"), so resize is always
     // forwarded — there's no longer a "this one isn't really attached"
     // case to special-case. This does mean two clients simultaneously
     // attached to the *same* agent (two panes, or Clance + Remote Control)

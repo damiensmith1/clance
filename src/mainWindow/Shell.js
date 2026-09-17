@@ -523,7 +523,7 @@ export function Shell() {
     try {
       const terminalId = nextTerminalId();
       // Every Clance-launched session is a background agent from birth
-      // (see docs/background-agent-architecture.md) — mint one first, then
+      // (see docs/design.md's "Sessions") — mint one first, then
       // this tab is purely an `attach` viewport onto it, so tab-switch/
       // close can never kill the underlying process.
       const id = await window.clanceApp.spawnNewAgent("New Chat", [], dir);

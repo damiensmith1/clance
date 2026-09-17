@@ -1,575 +1,209 @@
 ---
 title: Requirements
 tags: [clance, requirements]
-status: draft
 ---
 
 # Requirements
 
-## Scope for v1
+What Clance does. Why is in `background.md`; how is in `design.md`.
 
-**In scope:**
+## Platform
 
-- macOS only, Apple Silicon
-- Electron + Node.js
-- Global hotkey opens a popup widget
-- Free-text goal input (open-ended, not fixed actions like "Rewrite"/"Explain")
-- Dictation — speak instead of typing, anywhere in macOS, not just into
-  Clance (local speech-to-text; see `docs/dictation.md`)
-- No screen content — window title, selection, or screenshot — is captured
-  or described to the model automatically at invocation anymore (revisited
-  2026-09-14; see §"Screen context capture"). Instead, every popup session
-  gets a static system prompt (baked in invisibly at mint time) telling it
-  about its on-demand `look_at_screen`/`read_selection`/`list_open_windows`
-  tools (see `docs/design.md` §"Local tools server") and when to reach for
-  them, offloading "what's actually on screen right now" entirely to the
-  model calling a tool when it needs to know — rather than front-loading a
-  snapshot that's often irrelevant and immediately stale. `Cmd+Shift+R`
-  still explicitly re-captures everything, screenshot included,
-  mid-conversation (see `docs/design.md` §"Context injection"). When a
-  screenshot rides in (via that refresh, or a `look_at_screen` tool call),
-  it reaches the CLI as a real image content block via clipboard + pty
-  injection (refresh) or a normal MCP tool result (the tool call) — not an
-  SDK call and not a path it has to `Read()`.
-- The real Claude Code CLI, embedded as a terminal (`node-pty` + `xterm.js`)
-  and run as a real child process, handles all reasoning/looping/UI
-  rendering — **supersedes the original Claude Agent SDK plan**, see
-  `docs/design.md` §"Terminal-embedding architecture" for why
-- ~~Two response modes: **type it out** (inject text into the focused app)
-  and **talk back** (respond conversationally in the popup, no
-  injection)~~ — **removed.** There is no more app-mediated
-  propose/accept/reject text-injection flow; a Clance-launched session is
-  just a normal terminal-based Claude Code session
-- Multi-turn conversations *within one open* — the popup keeps context
-  turn-to-turn while it's open, but every hotkey-open starts a brand new
-  conversation (see §"Multi-turn conversations" — this reverses the
-  originally-planned "reopen continues last session" behavior)
-- In-app chat history view (all past conversations, browsable, resumable)
-- Session storage compatible with Claude Code CLI's format, so a session
-  started in this app can be resumed via `claude` in the terminal, and
-  vice versa
-- A pluggable extensibility layer (skills, tools, MCP servers, hooks,
-  subagents — see §4.8) — now met almost incidentally, since every
-  Clance-launched session is a real CLI process reading `~/.claude/`
-  conventions natively; Clance's own toggle UI over this is a real gap,
-  see §"Extensibility layer"
-- **Packaged, ad-hoc signed, and distributed as a Homebrew cask** from a
-  personal tap (`brew install --cask damiensmith1/tap/clance`). Changed
-  2026-09-16:
-  - **No notarization** — it needs a paid Apple Developer membership,
-    which is out of scope. Homebrew quarantines every cask download, so the
-    cask removes the quarantine flag after install; see `design.md`
-    §"Distribution".
-  - **Never signed with a certificate belonging to an organisation.**
-    `package.json` sets `mac.identity: "-"` explicitly so electron-builder
-    can't auto-discover one from the keychain.
-  - **Releases are signed with a self-signed certificate** ("Clance Code
-    Signing", free) so users keep Accessibility, Screen Recording and
-    Microphone permissions across upgrades. Ad-hoc signing identifies an
-    app by a hash of its contents, which would reset those permissions on
-    every update.
-  - Installed to `/Applications` even for dev use, because the raw dev
-    Electron binary's TCC permission flakiness made manual-grant-during-dev
-    unworkable in practice.
+- macOS 13 (Ventura) or later, Apple Silicon only.
+- Requires the Claude Code CLI, installed separately and signed in. Clance
+  never handles Claude credentials; sign-in goes through `claude auth login`.
+- Distributed as a Homebrew cask (`brew install --cask damiensmith1/tap/clance`),
+  which also installs `whisper.cpp` for dictation.
+- Not notarized. Releases are signed with a stable self-signed certificate
+  so macOS keeps permission grants across upgrades.
+- Lives in the menu bar and the Dock. Closing every window leaves it running;
+  ⌘Q or the menu-bar Quit item quits it. Optional launch at login.
 
-**Explicitly out of scope for v1:**
+## Popup
 
-- Full notarization for distribution (`npm run dist` produces a signed but
-  unnotarized build; notarization — Apple ID/App Store Connect API key,
-  `notarytool` — is not wired up)
-- Windows/Linux support
-- Ambient/background screen watching
-- Cloud sync of any kind
-- A built-in plugin marketplace/installer UI (the extensibility *mechanism*
-  ships in v1; a discoverable marketplace/UI for installing others' plugins
-  is later)
-- Shipping a large bundled library of first-party skills/tools beyond a
-  couple of examples (the point of v1 is that the community can add their own)
+- A global shortcut (⌥Space by default) opens a floating widget near the
+  cursor from any app, immediately, showing a loading state until the session
+  is ready.
+- The widget is a terminal running a new Claude Code session in the default
+  working directory. The user talks to the CLI directly.
+- The session is told, invisibly, that it was opened from the popup and which
+  local tools it has. Nothing about the screen is sent automatically.
+- The widget can be dragged and resized and stays where the user puts it. It
+  never closes on losing focus.
+- Toolbar:
+  - **Open in…** — resume any past session in the widget, or start a new
+    session in a recent or chosen directory.
+  - **See context** — hover card showing what the last ⌘⇧R captured.
+  - **Open in App** — move the live terminal into a main-window tab without
+    restarting it.
+  - **Hide** — tuck the widget away with the session still running and
+    return focus to the previous app. The next ⌥Space brings it back.
+  - **Close** — dismiss it. A session with no user message is deleted;
+    anything else stays resumable.
+- **⌘⇧R** pastes a fresh screenshot (as an image), the frontmost window's
+  title and the highlighted text into the input, unsent, for the user to ask
+  about.
+- Dropping a file onto any Clance terminal pastes its path into the input.
 
-## Core user flow
+## Local tools
 
-1. User presses global hotkey from anywhere on macOS
-2. Small popup widget appears (spotlight-style) with a text input
-3. User types or dictates their goal in natural language (e.g. "reply to
-   this email politely declining", "summarize what's on my screen", "fill
-   this form with my address")
-4. The app captures the frontmost window (just enough to know where
-   `insert_text` and friends should default to acting, see §"Screen context
-   capture") and mints a session — no screenshot, no selection read, no
-   description of any of it handed to the model
-5. An embedded terminal opens running the real `claude` CLI as a child
-   process — the goal isn't sent separately; the user types/talks to the
-   CLI directly inside that terminal, same as any Claude Code session
-6. A static system prompt, identical every time, rides in invisibly via
-   `--append-system-prompt` telling the model about its on-demand
-   screen/selection/window tools and when to use them — see
-   `docs/design.md` §"Context injection"
-7. Claude Code's own CLI handles everything from here: reasoning, tool
-   use, rendering, permission prompts. Text injection into other apps (if
-   the user wants it) happens however it would in any terminal-based
-   Claude Code session — there is no app-level propose/accept flow anymore
-8. The CLI itself writes the session transcript (JSONL, its own native
-   format) — Clance never writes session files
-9. The terminal session persists exactly as long as the user keeps it
-   open/running — the popup's one hotkey always opens a fresh
-   terminal/session; its "Open in…" dropdown resumes or attaches to an
-   existing one instead, in place, without a separate hotkey
-10. User can reopen the app's Chats tab to browse any past session
-    (Clance's own or any real Claude Code CLI session on the machine) and
-    open it as a resumed terminal tab
+Sessions Clance starts get these tools when Accessibility is granted:
 
-## Functional requirements
+| Tool | Does | Asks for approval |
+|---|---|---|
+| `look_at_screen` | Screenshot of the display under the cursor | No |
+| `read_selection` | The currently highlighted text | No |
+| `list_open_windows` | Titles of open windows | No |
+| `click_at` | Click at a position on the current display | No |
+| `insert_text` | Type text into the app the popup was opened over, or a named app | Yes |
+| `activate_app` | Bring an app to the front | Yes |
+| `clear_focused_field` | Clear the focused field | Yes |
+| `replace_focused_field` | Replace the focused field's contents | Yes |
 
-### Hotkey & activation
+- Approval is Claude Code's own Allow / Deny / Always allow prompt. Tools
+  that can act on an app the user didn't point at, or that destroy content,
+  always ask.
+- Each tool can be switched off (Skills & Plugins → Custom Tools). A
+  switched-off tool is refused, not just prompted.
+- Screen Recording is optional. Without it, `look_at_screen` says how to
+  enable it and ⌘⇧R omits the screenshot.
+- Tool, MCP and settings changes apply to sessions started afterwards. A
+  session that's already running keeps what it started with.
 
-- Global hotkey listener (Electron `globalShortcut`), works regardless of
-  focused app
-- Configurable hotkey binding
-- Popup appears near cursor or centered (spotlight-style), always-on-top,
-  transparent background
+## Sessions
 
-### Dictation
+- Every session Clance opens runs as a Claude Code background agent, so
+  closing a tab, the widget or Clance itself never ends a conversation.
+- The Sessions tab lists:
+  - **Active** — every running background agent on the machine, with a Close
+    action that stops it (it stays resumable).
+  - **Closed** — every Claude Code transcript on the machine, from any
+    project, newest first, grouped by day, searchable.
+- Opening a session attaches to it if it's running, or resumes it in its own
+  recorded working directory.
+- Sessions can be archived and restored. Clance never deletes a transcript
+  that has user messages — the list includes other projects' Claude Code
+  history.
+- New sessions open in a default directory set in Settings (`~/.clance` if
+  unset). "New Session" and "Open in…" can choose another; recent choices are
+  remembered.
+- Any session started in Clance can be resumed with `claude --resume` in a
+  terminal, and vice versa.
 
-- ✅ Implemented 2026-09-16 (Phases 0–2 of `docs/dictation.md`). Global
-  shortcut (`⌥D` by default) → non-focusable recording HUD → on-device
-  whisper.cpp transcription → pasted at the cursor in whatever app was
-  frontmost, with every transcript kept in a SQLite database and browsable,
-  searchable, and re-insertable from a new Dictation tab. **Two caveats:**
-  hold-to-talk isn't possible with Electron's `globalShortcut` (no key-up
-  event) so it's press-to-start/press-to-stop for now, and accuracy has
-  only been validated against synthesized speech so far.
-- **Scope decided 2026-09-16, and it widened:** dictation is not a
-  terminal-input feature. It's a *system-wide* one — a global shortcut
-  anywhere in macOS records, transcribes locally, and types the transcript
-  into whatever app was already frontmost (Wispr Flow / superwhisper
-  shaped), plus a Dictation tab in the main window holding every past
-  transcript in an on-disk SQLite database. That sidesteps the question
-  this section was parked on ("how does dictation map onto a terminal's
-  stdin?") rather than answering it: the transcript is pasted into the
-  frontmost app, and Clance's own terminals are just one such app, with
-  no special-casing.
-- Local speech-to-text remains the plan — no audio sent to any cloud
-  service, consistent with the local-first principle. **Engine resolved:**
-  whisper.cpp running ggml models, with a model catalog Clance recommends
-  from based on detected machine specs and installs on demand. See
-  `docs/dictation.md` for why, and for the alternatives rejected.
+## Main window
 
-### File drag-and-drop
+- Opens from the Dock icon or the menu-bar menu. While setup is incomplete it
+  opens on launch.
+- A launcher opens Sessions, Dictation, Skills & Plugins, Settings, or a
+  plain shell terminal. Sections open as tabs; reopening one focuses it.
+- Tabs can be split into up to four panes by dragging to an edge (at most a
+  2×2 grid), resized by dragging dividers, and reordered. The layout is
+  restored on launch.
+- Terminal tabs survive tab switches and window reloads. A session tab can
+  be popped out into the widget.
 
-- ✅ implemented. Dropping a file (a screenshot, most commonly) onto either
-  terminal surface (popup or a main-window terminal tab) resolves its real
-  filesystem path (`webUtils.getPathForFile`, exposed from the preload
-  scripts — `File#path` no longer exists in the renderer as of this
-  Electron version), **copies it immediately into `~/.clance/dropped-files/`
-  (`src/main/dropFiles.ts`)**, and pastes the copy's path into the CLI's
-  input as unsubmitted bracketed-paste text, the same technique used for
-  context injection — the user can add a prompt around it before hitting
-  Enter, and the CLI reads the file itself via its own Read tool.
-- The eager copy exists because a file dragged from macOS system UI (e.g.
-  the floating screenshot thumbnail) is often only a **file promise**
-  (`NSFilePromiseProvider`), not a real file — Chromium's HTML5 drag-and-drop
-  (all Electron exposes) doesn't implement Apple's promise-resolution
-  protocol, so what resolves is a transient staging copy under
-  `TemporaryItems/NSIRD_screencaptureui_.../` that can vanish moments after
-  the drop. Copying it out immediately, before the CLI ever tries to read
-  the original path, is the only mitigation available at this layer — it's
-  a race, not a guarantee; if the source is already gone by drop time, the
-  copy (and thus the paste) is silently skipped.
-- This is the answer to "I'm driving Clance's own development through a
-  Clance terminal and can't drag a screenshot to Claude" — no separate
-  upload/attachment mechanism, just a real (now Clance-owned) path handed
-  to the CLI the same way any typed path would be.
-- The popup surface also needed a fix here beyond the drop handler itself:
-  it hides on window blur, and starting an OS drag from Finder shifts key
-  window focus to Finder first, hiding the popup out from under the drag
-  before it could ever land. Blur now waits ~500ms before hiding, cancelled
-  by regaining focus or by the renderer reporting an active drag/drop
-  (`popup:hold-open` IPC). See `docs/design.md` for the mechanism.
+## Extensibility
 
-### Screen context capture
+- Skills, hooks, plugins and MCP servers configured for Claude Code (in
+  `~/.claude/` or a project's `.mcp.json`) work in Clance sessions with no
+  Clance-specific setup.
+- Skills & Plugins shows:
+  - installed skills (read-only — Claude Code has no per-skill switch);
+  - MCP servers from `~/.clance/mcp.json`, each with an on/off toggle;
+  - Clance's local tools, with per-tool toggles and a health check for the
+    local tools server.
 
-- **Revisited 2026-09-14: a plain hotkey-open no longer captures or
-  describes any screen content to the model at all.** It used to capture
-  the frontmost window's title and any highlighted selection and fold both
-  into the request context on every invocation; now the only thing invocation
-  still captures is the frontmost window itself (not its title as text, and
-  nothing handed to the model) — purely so `insert_text`/`click_at`/
-  `activate_app`/`clear_focused_field`/`replace_focused_field` have
-  something to default-target when the model doesn't pass an explicit
-  `app` (see `docs/design.md` §"Context injection"). Selection and screen
-  content are offloaded entirely to the model's own on-demand
-  `read_selection`/`look_at_screen`/`list_open_windows` tools (see
-  `docs/design.md` §"Local tools server"), called only when actually
-  needed rather than front-loaded on every open. A static system prompt,
-  identical across every session, tells the model these tools exist and
-  when to reach for them — it doesn't (and can't) describe anything
-  specific to this particular invocation.
-- **`Cmd+Shift+R` mid-conversation is the one remaining path that captures
-  and hands over a full snapshot** — frontmost window title, current
-  selection, and a screenshot, all at once (see `docs/design.md`
-  §"Context injection", "Refreshing context mid-conversation"). This is
-  still an explicit, user-triggered action, typed/pasted visibly into the
-  terminal so it's part of the conversation the same way anything else the
-  user adds is.
-  - The screenshot piece of a refresh is saved to `~/.clance/screenshots/`
-    and delivered to the CLI as a real image content block (clipboard + a
-    `Ctrl+V` byte written into the pty), not a path it has to `Read()`
-    itself — this predates and is unrelated to the 2026-09-14 change above
-    (see `docs/design.md`'s 2026-09-12 note on why a screenshot was already
-    dropped from automatic invocation capture before selection/title were).
-  - The widget's "Open in…" dropdown (switching to a *different* existing
-    session) types nothing in at all — no fresh capture, and no reuse of
-    whatever a refresh or the original mint happened to know, since the
-    session being switched to already has its own tools and history; see
-    `docs/design.md`'s "Open in… dropdown" section.
-- Read-only and on-demand — never persistent/background capture, unchanged
-  from the original plan
-- Accessibility-tree / focused-element content read is still deferred — a
-  model-called `read_selection` tool (simulated copy, not the accessibility
-  tree) has been sufficient so far; revisit if it proves insufficient for
-  structured-app goals
+## Dictation
 
-### Claude Code CLI integration (supersedes "Claude Agent SDK integration")
+- A global shortcut (⌥D by default) starts recording in any app; pressing it
+  again stops and transcribes. Escape cancels, including during
+  transcription.
+- Recording stops by itself after 1.5 s of silence following speech, and
+  after 5 minutes regardless.
+- A small HUD shows the input level and progress, and never takes focus, so
+  the text lands where the cursor was. The menu bar shows a dot while
+  recording, and the app menu has Start/Stop and Cancel.
+- Transcription runs on the Mac with whisper.cpp. Audio is deleted after
+  transcription unless "keep audio" is on.
+- The transcript is pasted at the cursor (needs Accessibility), or only
+  copied to the clipboard if the user prefers.
+- Clance recommends one speech model for the machine. Any catalog model can
+  be installed (resumable, verified, cancellable, with progress), made active
+  or removed.
+- The shortcut is only claimed once a model is installed.
+- An editable transcription prompt improves recognition of names and
+  technical terms.
+- The Dictation tab keeps every transcript — text, time, duration, target
+  app, model — with full-text search, date filters (today, 7 days, 30 days,
+  custom range), copy, and delete-all-matching behind a confirmation.
+- Dictation works without Claude being set up.
 
-- ✅ implemented, replacing the originally-planned direct Claude Agent SDK
-  embedding. The real `claude` CLI binary runs as a child pty process
-  (`node-pty`), rendered via an embedded `xterm.js` terminal — see
-  `docs/design.md` §"Terminal-embedding architecture" for why this
-  replaced the SDK approach and what it changed.
-- All reasoning, tool use, streaming, and rendering is the CLI's own —
-  Clance no longer parses SDK message events or renders any response UI of
-  its own.
-- Screen context reaches the CLI without the SDK: a refresh's screenshot as
-  a real image content block (clipboard + pty injection), everything else
-  via the model's own on-demand tool calls — see `docs/design.md`
-  §"Context injection".
+## First-run setup
 
-### Response modes (removed — superseded by the terminal pivot)
+- Until setup is complete, the main window shows a wizard and the popup
+  shortcut isn't registered:
+  1. **Connect Claude** — detect the CLI (with a link to install it if
+     missing) and sign in.
+  2. **Permissions** — Accessibility (required) and Screen Recording
+     (optional, with a restart once granted).
+  3. **Shortcuts** — record shortcuts by pressing the keys.
+  4. **Dictation** (optional, skippable) — microphone access and the
+     recommended model.
+- Claude sign-in and permissions are re-checked on every launch, never
+  remembered as done. Settings keeps every wizard step available afterwards,
+  alongside launch at login and the default directory.
+- The CLI must be found when Clance is opened from Finder or the Dock, not
+  only from a terminal.
+- A shortcut needs ⌘, ⌥ or ⌃ (⌘ on its own isn't enough), unless it's a
+  function key. System shortcuts and duplicates are rejected with a reason.
 
-- ~~**Talk back** / **Type it out**~~ — the old app-mediated
-  propose/accept/reject text-injection flow (model-decided, with a custom
-  `proposeText` tool and keystroke-injection-on-accept) is gone and stays
-  gone. What replaced it: an `insert_text` **MCP tool**, part of the local
-  tools server every Clance-minted or -revived session gets (a fresh
-  hotkey-open, the main window's "New Chat," or reviving a dormant session
-  — see `docs/design.md` §"Local tools server"), that types text into
-  whatever app was frontmost when the *popup* specifically was opened (the
-  only entry point that captures a frontmost-window target at all — see
-  §"Screen context capture" above), or an explicit `app` hint otherwise.
-  The model decides when to call it, the same way it decides to call any
-  other tool; there's no app-level accept/reject step. A session that's
-  already *live* as a background agent can't gain this after the fact
-  (see `docs/design.md` §"Local tools server"), and Clance still doesn't
-  mediate text delivery for plain talking in the terminal — same as any
-  terminal-based Claude Code session.
+## Updates
 
-### Multi-turn conversations
+- Settings → Check for Updates compares the running version with the latest
+  GitHub release and shows the `brew upgrade --cask clance` command. Clance
+  never updates itself.
 
-- A terminal session's conversation lifetime is now just the lifetime of
-  its underlying `claude` process/session, the same as any terminal-based
-  Claude Code usage — there is no separate app-level "conversation state"
-  to reason about anymore.
-- **One hotkey opens a new session; an in-widget dropdown resumes one.**
-  `Option+Space` opens a fresh terminal running a brand-new `claude`
-  session (no `--resume`) — there is no separate hotkey for resuming
-  anymore (an earlier "Continue a Conversation" hotkey/searchable-picker
-  mode was removed in favor of this). Instead, the widget's toolbar has an
-  "Open in…" button that opens a small anchored dropdown (search + list,
-  not a full mode swap) over the current conversation; picking a session
-  from it opens a terminal that resumes (or attaches to, if it's a live
-  background agent — see `docs/design.md` §"Attach vs. resume") that
-  session in place, with nothing typed into the terminal input on the way
-  in — the session picked already has its own tools and history, so there's
-  no fresh context to hand it (see `docs/design.md`'s "Open in… dropdown"
-  section).
-- **A session can also be continued directly from the main window's Chats
-  tab** — clicking a session row opens the same kind of resumed/attached
-  terminal tab, just without the popup's screen-context capture (there's
-  no "just invoked from where" moment when opening from a persistent
-  window's session list).
-### Session storage (Claude Code-compatible — now trivially true, not app-maintained)
+## Non-functional
 
-- ✅ Sessions are resumable both directions, but not because Clance writes
-  compatible JSONL — **Clance never writes session files at all now.**
-  Every session is a real `claude` CLI process, so it writes its own
-  transcript in its own native format, in its own location
-  (`~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl`). Compatibility
-  is structural, not a format Clance has to keep in sync by hand.
-- A Clance-launched session's `cwd` is no longer unconditionally
-  `~/.clance/` — see `docs/working-directory-design.md` (implemented): a
-  configurable default directory (Settings), a directory picker in the
-  widget's "Open in…" dropdown for minting a session elsewhere, and a
-  resumed/attached session always inherits its own recorded `cwd` off its
-  transcript rather than any Clance-side default. `~/.clance/` remains the
-  pseudo-project bucket only for sessions that never had a real project
-  directory to use — the fallback, not the rule. The storage path itself
-  is still purely a function of the CLI process's own `cwd`, not something
-  Clance writes.
-- Sessions started in a bare terminal (any real `claude` invocation
-  anywhere on the machine) are already visible in Clance's own chat
-  history browser — full compatibility, not "in principle."
+- **Responsive.** The popup appears the instant the shortcut is pressed; a
+  pre-warmed session keeps the CLI ready within a second or two. The dictation
+  HUD appears in about 100 ms, and a 10-second utterance transcribes in under
+  1.5 s on the recommended model.
+- **Private.** No screen content is captured unless a session calls a screen
+  tool or the user presses ⌘⇧R. No audio leaves the Mac. No telemetry.
+- **Local.** Works offline apart from the Claude API, speech model downloads
+  and the update check.
+- **Light when idle.** No background capture of any kind; one spare `claude`
+  process is kept warm.
 
-### In-app chat history
+## Out of scope
 
-- ✅ implemented. A session list (most recent first, grouped by day, in
-  the main window's Chats tab) covering both Clance's own sessions and
-  real Claude Code CLI sessions from any project on the machine.
-- Click a session to open it as a **resumed/attached terminal tab**, not a
-  rendered transcript view — the CLI renders its own history when a
-  session resumes. This supersedes the earlier "live chat rendered inside
-  a closable tab" design (`ChatDetailSection`), which no longer exists —
-  see `docs/design.md` §"Main window Chats tab".
-- Since storage is JSONL-based (written by the CLI, not Clance), the
-  session-list scan is still a JSONL reader, not a separate SQLite-driven
-  index.
-- Full details in `docs/superpowers/specs/2026-09-07-chat-history-design.md`
-  — note that spec's UI section describes the since-superseded
-  `ChatDetailSection`; its data-layer description (`chatHistory.ts`'s
-  session listing) is still accurate.
-- **Archiving, not deleting.** An "Active"/"Archived" toggle plus a
-  per-row archive/restore action lets a session be hidden from the default
-  list — see `docs/design.md` §"Session archiving". No permanent-delete
-  action exists: the listed sessions include real Claude Code CLI history
-  from any project on the machine, not just Clance's own, so deleting the
-  underlying transcript file is out of scope for a "clean up my Clance
-  sessions" feature.
+- Windows, Linux and Intel Macs.
+- Notarization and the Mac App Store.
+- Ambient or background screen watching.
+- Cloud sync and telemetry.
+- A custom chat UI, or reimplementing anything the CLI already does.
+- Clance writing or deleting session transcripts.
+- A plugin marketplace or installer.
+- Self-updating.
+- For dictation: speaking responses aloud, non-English-first transcription,
+  meeting recording, speaker diarization, transcribing audio files, and live
+  two-way voice conversation with the model.
 
-### Extensibility layer (plugins, skills, MCP, hooks)
+## Ideas (not committed)
 
-Goal, updated for the terminal pivot: the app stays minimal — a shell,
-screen capture, context injection, and session launching — while all
-*capability* comes from the Claude Code CLI's own extension points, since
-every session Clance opens is a real CLI process rather than an app-owned
-SDK query.
-
-- **Skills** — ✅ works, but not through anything Clance manages at
-  request-time. Every Clance-launched CLI session reads `~/.claude/skills/`
-  itself, exactly like any other `claude` invocation — no app-level plumbing
-  needed for this to work at all. The Skills & Plugins section's "Skills"
-  tab is a **read-only** list of what's installed there (2026-09-14 — see
-  "Config surface" below for why it's not a toggle).
-- **MCP servers (external)** — ✅ works, and (2026-09-14) Clance's own
-  enable/disable toggle for these now has a real effect on a launched
-  session, not just on-disk config with nothing reading it.
-- **Config surface — resolved for MCP servers and Custom Tools; Skills
-  stays read-only by design, not a gap.** This used to be a real bug for
-  both Skills and MCP servers: the Skills & Plugins section listed both
-  with enable/disable toggles (`src/main/skills.ts`, `src/main/mcpConfig.ts`,
-  writing to `~/.clance/mcp.json`'s per-entry `enabled` flag) that wrote
-  real config **nothing read when launching a terminal session** — the
-  `agent.ts` `query()` call that used to consume it was deleted along with
-  the Agent SDK, and nothing replaced it. Fixed 2026-09-14, differently for
-  each:
-  - **MCP servers:** `mcpConfig.ts`'s `getActiveMcpServers()` (already
-    written, previously unused) is now merged into the same `--mcp-config`
-    JSON every Clance-minted session already gets for its local tools (see
-    `docs/design.md` §"Local tools server") — toggling a server off in
-    Settings now genuinely keeps it out of a launched session, the same way
-    the Custom Tools toggles already worked.
-  - **Skills:** stays **read-only**, on purpose — `claude --help` confirms
-    there's no per-skill enable/disable flag, only `--disable-slash-commands`
-    (all skills at once). A toggle with no way to actually take effect is
-    the exact bug being fixed here, not something to keep in a different
-    form, so the per-skill `Toggle` was removed rather than left
-    non-functional; managing what's available is done the same way a bare
-    `claude` session does it — add/remove a folder under
-    `~/.claude/skills/`. `enabledSkills` (config.ts) and `setSkillEnabled`
-    (skills.ts) were removed along with it, not just hidden in the UI.
-  - **The "Custom Tools" tab's own toggles never had this gap** — each one
-    genuinely gated whether the CLI could call that tool at all, checked
-    fresh at every mint, since the day it shipped (see
-    `docs/design.md` §"Local tools server").
-- **Custom tools** — ✅ a first "computer use" tool set: `insert_text`,
-  `list_open_windows`, `look_at_screen` (on-demand screenshot, returned as
-  a real image), `read_selection`, `activate_app`, `click_at` (fractional
-  screen coordinates), and two destructive field-editing tools
-  (`clear_focused_field`/`replace_focused_field`) — see `docs/design.md`
-  §"Local tools server" for the full list and mechanism. Multi-step
-  computer-use (opening apps, clicking around, multi-app workflows) is
-  confirmed **not out of scope**, consistent with "Clance stays the
-  context provider + session launcher, never the execution engine itself"
-  in `docs/background.md` §"Why this exists" — these tools are exactly
-  that: Clance still isn't the one deciding *when* to act, only exposing
-  the primitive.
-  - **Approval tiering, not a Clance-built permission UI**: only read-only
-    tools plus `click_at` are pre-authorized via `--allowedTools` (no
-    per-call prompt) — `click_at` never redirects to an app the user
-    didn't already have on screen. `insert_text`, `activate_app`, and the
-    two destructive field-editing tools are deliberately left off that
-    list, so the CLI's own native "Allow / Deny / Always allow" prompt
-    still gates each of them. See `docs/design.md`'s "Local tools server"
-    for why this split, and `docs/sep10talks.md` for the approval-UX
-    question it resolves for this tool set specifically (a broader
-    multi-step computer-use agent may still need more than this).
-  - Precise, semantic targeting ("click *this* input box," not a
-    coordinate) still needs the accessibility-tree read this app has
-    deferred since the start — `click_at` is coordinate-based (the model
-    grounds it visually from a screenshot) as the pragmatic substitute,
-    not a replacement for that eventual capability.
-  - **Per-tool on/off toggle, in Skills & Plugins' "Custom Tools" tab** —
-    unlike approval tier (fixed per tool, not user-configurable), whether
-    a tool is offered *at all* is: off means `--disallowedTools` blocks
-    the CLI from calling it outright, not merely "requires approval."
-    Defaults to all on (opt-out) — these are Clance's own first-party
-    tools, not arbitrary third-party skill instructions, so there's no
-    "not vetted for this" concern to opt into. Checked fresh at mint time
-    (`localToolsServer.ts`'s `listLocalTools()`), same as everything else
-    about this tool set.
-  - **The server backing these tools is visible in the "MCP Servers" tab
-    too, with a live health check** — it's Clance's own infrastructure
-    (not something from `~/.clance/mcp.json`), so it's shown separately
-    from user-configured servers: running/not-yet-started status, and a
-    "Check Health" button that sends a real MCP `initialize` request
-    through the exact path a launched session uses, to tell a broken
-    server apart from a CLI-config problem when a tool call fails. See
-    `docs/design.md` §"Local tools server".
-  - **Not just the popup hotkey path** — every real `claude --bg` mint
-    gets these tools now (main window "New Chat", reviving a dormant
-    session from Chats/"Open in…"), not only a brand-new hotkey-opened
-    session. The one CLI-imposed exception: a session that's already
-    *live* as a background agent can't gain tools it wasn't minted with —
-    `attach` connects to an already-running process and accepts no other
-    flags, same limitation `--system-prompt-snapshot` already has (see
-    `docs/design.md` §"Local tools server").
-- **Hooks** — still not implemented. Deferred, unchanged.
-- **Subagents** — still not implemented. Deferred, unchanged.
-- **Compatibility goal** — met for Skills and MCP servers in the sense
-  that matters most now: a real `claude` session picks them up natively,
-  with zero Clance-specific format translation required.
-
-*Example scenario this should support:* a community member wants Clance
-sessions to be able to create Obsidian canvases. They write an MCP server
-(or a skill) that exposes that capability, drop its config into the
-appropriate `~/.claude/` folder, and any Clance-launched terminal session
-picks it up automatically — no PR to the core app required, and (unlike
-the toggle-managed path above) no Clance-specific wiring needed at all.
-
-### System presence
-
-- Dual presence: a menu-bar (tray) icon for the quick-access popup, plus a
-  permanent Dock icon for the full main application window (Chats, Skills
-  & Plugins, Settings) — reachable via the Dock icon or the tray's "Open
-  Dashboard" item. This replaces the originally-planned tray-only, no-Dock
-  behavior.
-- The main window uses a tab-based navigation model: a floating top-right
-  launcher cluster (not a sidebar — see `docs/design.md`'s "Main
-  application window") opens a section (Sessions/Skills & Plugins/
-  Settings) or a new plain terminal tab; a past conversation opens from
-  the Sessions section itself. Opening something adds a closable tab, and
-  each pane's own tab bar is the primary way to switch between what's
-  open — panes are independently resizable/splittable, up to four at
-  once. Reopening an already-open section activates its existing tab
-  rather than duplicating it; there is no longer a user-facing preference
-  for this. See `docs/design.md`.
-- Cmd+Q now quits the entire app (tray, popup, and main window together),
-  via the app menu's Quit role — previously there was no real "app" to
-  quit since it ran tray-only. Closing just the main window does not quit
-  anything; the tray and popup keep running until Cmd+Q (or Quit from the
-  tray menu) is used.
-- Launch on login (optional toggle) — implemented as a live-read/live-set
-  toggle in Settings using Electron's `app.getLoginItemSettings()` /
-  `setLoginItemSettings()`; not duplicated into Clance's own config since
-  the OS already persists it
-- Minimal resource footprint while idle
-- **Packaged as a signed `.app` (supersedes "no notarization, raw dev
-  binary" plan)** — `electron-builder` produces a stable-identity, signed
-  `Clance.app` (Developer ID or ad-hoc), installed to `/Applications`. Not
-  notarized yet (real distribution — `npm run dist` — would need that; dev
-  use doesn't). This wasn't optional polish: the raw dev Electron binary
-  shared TCC permission grants with every other Electron project on the
-  machine and lost them on every rebuild, which made Screen
-  Recording/Accessibility grants unusable in practice during development.
-  See `docs/design.md` §"Packaging & macOS permissions".
-
-### First-run setup
-
-- The app is gated behind a first-run setup wizard — no popup hotkey, no
-  popup functionality — until three required steps are satisfied:
-  connecting the user's Claude plan, granting macOS **Accessibility**, and
-  confirming the keyboard shortcuts. A fourth step, **dictation**, is
-  offered last and is skippable. The main window opens itself
-  automatically on launch whenever setup is incomplete, rather than
-  requiring the user find their way to the Dock icon or tray item first.
-- **Screen Recording is optional** (changed 2026-09-16; it used to be
-  required). Nothing is captured automatically, so declining it only means
-  a session can't look at the screen — `look_at_screen` says so plainly,
-  and ⌘⇧R degrades to window title and selection. Requiring it meant a
-  privacy-minded user who declined an optional capability couldn't use
-  Clance at all. Granting it needs an app restart, which the step offers.
-- The installed Claude CLI must be found when Clance is launched from
-  Finder, the Dock or Launchpad — not only from a terminal, where it
-  inherits the shell `PATH`. See `design.md` §"First-run setup, as a new
-  user sees it".
-- Connecting a Claude plan requires the `claude` CLI to be installed
-  separately (the wizard links to install instructions if it's missing)
-  — Clance does not bundle or reimplement Claude's OAuth login itself,
-  delegating entirely to `claude auth login`/`claude auth status`.
-- The wizard's chosen shortcut binding (and a `shortcutsConfigured` flag)
-  persist to `~/.clance/config.json`, a second local config file alongside
-  the existing session-id file. Auth and permission status are never
-  persisted as a "done" flag — both are re-checked live on every launch
-  and every visit to Settings, since either can change outside the app
-  (logging out of Claude, revoking a permission in System Settings).
-- The same three checks resurface permanently in the Settings section as
-  an ongoing status/reconnect panel, not just during first-run setup.
-
-## Non-functional requirements
-
-- Latency: a Clance-launched terminal should show the CLI's first output
-  within ~1-2s of the session starting — mechanism changed (terminal boot
-  + CLI startup, not an SDK stream-start), but the target is the same
-- Privacy: no screen content is captured automatically at all anymore — only
-  on an explicit `Cmd+Shift+R` refresh, or the model's own on-demand tool
-  call (`look_at_screen`/`read_selection`/`list_open_windows`), both
-  user/model-initiated rather than front-loaded on every open. A screenshot
-  is saved to disk (`~/.clance/screenshots/`, not held only in memory the
-  way the old in-memory base64 approach did) and read by the CLI only if it
-  chooses to; only the resulting session transcript (written by the CLI
-  itself) persists long-term
-- ~~Reliability: failed injection should never lose the model's output
-  (always recoverable via clipboard/chat history)~~ — **removed**, no
-  app-mediated injection exists to fail; the CLI's own output is always in
-  its own transcript/terminal scrollback regardless
-- No persistent screen recording or ambient capture of any kind — unchanged
-- macOS Apple Silicon only — no Intel Mac support required — unchanged
-
-## Success criteria for v1
-
-- Hotkey reliably opens the popup (an embedded terminal) from any app, any
-  time
-- Every popup session gets the same static, invisible system prompt at
-  mint time telling it about its on-demand screen/selection/window tools
-  (`--append-system-prompt`, baked into both fresh mints and pool spares —
-  see `docs/design.md` §"Context injection"). No window title, selection,
-  or screenshot is captured or described automatically anymore; a
-  screenshot rides in only via `Cmd+Shift+R` or the model's own
-  `look_at_screen` tool call, as a real image either way
-- ~~Text injection works in at least one real target app~~ — **removed**,
-  no longer an app-owned feature to validate
-- ✅ Dictation implemented 2026-09-16, and scoped wider than this
-  criterion assumed (system-wide, not Clance-only) — see
-  `docs/dictation.md`. Pending real-voice accuracy validation.
-- ✅ A session created via Clance is resumable in a bare `claude`
-  terminal, and vice versa — structurally guaranteed now (every session
-  is a real CLI process), not just "in a format that could support this"
-- ✅ Both new-session and resume/attach flows work reliably: `Option+Space`
-  opens a clean new session every time; the widget's "Open in…" dropdown
-  resumes or attaches to an existing one without surfacing the CLI's
-  "already running as background agent" error to the user (see
-  `docs/design.md` §"Attach vs. resume")
-- Chat history view accurately shows all past sessions (Clance's own and
-  any real CLI session on the machine), opening each as a resumed terminal
-  tab
-- ⚠️ At least one third-party capability (a skill or MCP server not built
-  by the core team) works in a Clance-launched session — **true almost by
-  construction now** (any real `claude` session reads `~/.claude/skills/`
-  and MCP config natively), but Clance's own Skills & Plugins toggle UI
-  does *not* currently gate this (see the Extensibility layer gap above) —
-  so this criterion is met at the CLI level, not yet at the
-  Clance-config level
-- Everything works fully offline except the actual Claude API call
-- ~~Graceful fallback (clipboard) when permissions aren't granted or
-  injection fails~~ — **removed**, no injection path exists; Screen
-  Recording permission being ungranted just means context injection is
-  missing the screenshot line (window title still comes through), not a
-  failure mode needing a fallback
+- **Quick Ask** — a separate fast path using the Agent SDK for read-only
+  questions and `insert_text`, escalating to a full session by starting a new
+  `claude --bg` session seeded with the exchange (never writing transcripts by
+  hand).
+- **Watch mode** — a pinned widget that stays attached to one session across
+  hotkey presses.
+- **More output destinations** — paste as a table or code block, or copy to
+  the clipboard instead of typing into the frontmost app.
+- **Richer screen reading** — accessibility-tree or OCR text for text-heavy
+  apps, and more than one window of context (e.g. "compare these two").
+- **Dictation** — hold-to-talk, an optional LLM clean-up pass (off by
+  default, since it sends the transcript to a model), live partial
+  transcripts, per-app insert modes.
+- **Live voice** — real-time two-way audio with the model. This would need
+  the API directly rather than the CLI, and API support is unconfirmed.

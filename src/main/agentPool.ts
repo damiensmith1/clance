@@ -24,7 +24,7 @@ const POOL_PATH = join(SESSION_CWD, "pool.json");
 // not just the id. A spare only ever helps a claim whose target directory
 // *and* mcp wiring match exactly (see claimPoolSpare/refillPool below).
 // cwd goes stale when the default directory changes (Settings, see
-// config.ts's getDefaultDirectory) — see docs/working-directory-design.md.
+// config.ts's getDefaultDirectory) — see docs/design.md's "Working directory".
 // mcpArgs goes stale whenever whatever produced it changes between the
 // moment a spare was warmed and the moment it's claimed — most notably
 // Accessibility permission not reading as granted yet at app-startup

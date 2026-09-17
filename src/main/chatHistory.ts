@@ -277,7 +277,7 @@ export async function hasRealUserMessage(sessionId: string): Promise<boolean> {
 // id anywhere in its launch args (`--append-system-prompt ...`), so the
 // only place it exists yet is the CLI's own transcript file, created
 // moments after the process starts. Now that a Clance session can mint in
-// any directory (see docs/working-directory-design.md), not just one fixed
+// any directory (see docs/design.md's "Working directory"), not just one fixed
 // bucket, this has to check every project's bucket for a birthtime match,
 // the same way titleForSessionId does for a known id — picks the file
 // (across every bucket) whose birthtime is closest to (and no more than
@@ -353,7 +353,7 @@ export async function listSessions(): Promise<SessionSummary[]> {
         // Clance's business to hide, and there's no cheap directory-based
         // signal for "is this actually Clance's" any more now that a
         // session can be minted in any directory (see
-        // docs/working-directory-design.md) — the Active-list equivalent
+        // docs/design.md's "Working directory") — the Active-list equivalent
         // of this check uses a name check instead (see popupWindow.ts's
         // isPopupSessionName) precisely because directory-scoping stopped
         // being reliable. This is only ever a

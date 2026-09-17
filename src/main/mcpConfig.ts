@@ -115,8 +115,8 @@ export function setMcpServerEnabled(name: string, enabled: boolean): McpServerLi
 }
 
 // Enabled entries only, with Clance's own "enabled" wrapper stripped back
-// off — see requirements.md's "Config surface" gap: nothing currently wires
-// this into a launched session's --mcp-config yet.
+// off — merged into every launched session's --mcp-config by popupWindow.ts's
+// sessionMcpArgs (see docs/design.md's "Extensibility").
 export function getActiveMcpServers(): Record<string, StoredMcpServerConfig> {
   const config = readMcpConfig();
   const active: Record<string, StoredMcpServerConfig> = {};
