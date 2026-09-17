@@ -51,9 +51,13 @@ function metaLine(model, installing, progress) {
  * PermissionsStep): with `onComplete` it renders as a wizard step, without
  * it as plain rows for the Settings page and the Dictation tab.
  */
-export function DictationStep({ onComplete, onBack } = {}) {
+export function DictationStep({ onComplete, onBack, onReady } = {}) {
   const [data, setData] = useState(null);
   const [settings, setSettings] = useState(null);
+
+  useEffect(() => {
+    if (data && settings) onReady?.();
+  }, [Boolean(data && settings)]);
   const [mic, setMic] = useState(null);
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState(null);

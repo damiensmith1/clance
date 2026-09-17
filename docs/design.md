@@ -723,6 +723,12 @@ word, an optional action) in one column of headed groups (access, general,
 shortcuts, dictation). Microphone access sits under Access with the other
 permissions; the speech model is one row that expands into the model list.
 
+Each section loads its own data at a different speed, so Settings stays hidden
+until every section reports ready (`onReady`, at most 1 s) and then appears
+whole instead of filling in row by row. The Claude row doesn't hold it up: it
+starts from the last status any window checked (`setup:get-last-status`, set
+at launch and on window focus) and re-checks in the background.
+
 In the wizard, Enter presses the step's primary button unless focus is in a
 text field, button or the shortcut recorder. Permissions are re-checked on
 window focus and every 2 s while any is missing, so the step advances without

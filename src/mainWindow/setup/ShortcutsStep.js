@@ -174,8 +174,12 @@ function glyphsFromMods(mods) {
 
 // ---- component ----
 
-export function ShortcutsStep({ onComplete, onBack } = {}) {
+export function ShortcutsStep({ onComplete, onBack, onReady } = {}) {
   const [actions, setActions] = useState(null);
+
+  useEffect(() => {
+    if (actions !== null) onReady?.();
+  }, [actions !== null]);
   const [values, setValues] = useState({});
   const [recordingId, setRecordingId] = useState(null);
   const [liveGlyphs, setLiveGlyphs] = useState([]);

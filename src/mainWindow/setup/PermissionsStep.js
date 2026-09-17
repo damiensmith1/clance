@@ -3,7 +3,7 @@ import { StatusCard } from "../components/StatusCard.js";
 
 const RECHECK_MS = 2000;
 
-export function PermissionsStep({ onComplete, onBack } = {}) {
+export function PermissionsStep({ onComplete, onBack, onReady } = {}) {
   const [status, setStatus] = useState(null);
   // The restart hint only appears once the user has actually been sent to
   // System Settings — before that it would just be noise.
@@ -20,6 +20,10 @@ export function PermissionsStep({ onComplete, onBack } = {}) {
   useEffect(() => {
     refresh();
   }, []);
+
+  useEffect(() => {
+    if (status !== null) onReady?.();
+  }, [status !== null]);
 
   // Permissions are granted in System Settings, outside Clance, so check
   // again whenever the window comes back to the front, and poll while one is

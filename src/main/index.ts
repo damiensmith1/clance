@@ -224,11 +224,19 @@ function updateTrayFromStatus(status: Awaited<ReturnType<typeof getSetupStatus>>
   });
 }
 
+// The last status any window checked (launch, window focus, the wizard).
+// Settings shows it straight away and re-checks in the background, rather than
+// holding the page on `claude auth status`.
+let lastSetupStatus: Awaited<ReturnType<typeof getSetupStatus>> | null = null;
+
 ipcMain.handle("setup:get-status", async () => {
   const status = await getSetupStatus();
+  lastSetupStatus = status;
   updateTrayFromStatus(status);
   return status;
 });
+
+ipcMain.handle("setup:get-last-status", () => lastSetupStatus);
 
 ipcMain.handle("setup:connect-claude", () => connectClaude());
 

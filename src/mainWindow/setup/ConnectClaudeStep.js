@@ -3,7 +3,7 @@ import { StatusCard } from "../components/StatusCard.js";
 
 const INSTALL_COMMAND = "curl -fsSL https://claude.ai/install.sh | bash";
 
-export function ConnectClaudeStep({ onComplete, onBack } = {}) {
+export function ConnectClaudeStep({ onComplete, onBack, onReady } = {}) {
   const [status, setStatus] = useState(null);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState(null);
@@ -17,8 +17,19 @@ export function ConnectClaudeStep({ onComplete, onBack } = {}) {
   }
 
   useEffect(() => {
+    // In Settings, start from the last status Clance checked so the row is
+    // ready at once; the fresh check replaces it if anything changed.
+    if (!onComplete) {
+      window.clanceApp.getLastSetupStatus().then((last) => {
+        if (last) setStatus((current) => current ?? last.claude);
+      });
+    }
     refresh();
   }, []);
+
+  useEffect(() => {
+    if (status !== null) onReady?.();
+  }, [status !== null]);
 
   function handleConnect() {
     setConnecting(true);

@@ -64,24 +64,41 @@ function UpdateCheck() {
   return html`<button class="btn-quiet btn-small" onClick=${runCheck}>Check for updates</button>`;
 }
 
+// Each section loads its own data, at different speeds. The page stays
+// hidden until all of them are ready, so it appears once instead of filling
+// in row by row; after REVEAL_WAIT_MS it shows regardless, with any section
+// still loading holding its shape.
+const SECTIONS = ["claude", "permissions", "shortcuts", "dictation"];
+const REVEAL_WAIT_MS = 1000;
+
 export function SettingsSection() {
   const [prefs, setPrefs] = usePreferences();
   const [version, setVersion] = useState(null);
+  const [readySections, setReadySections] = useState([]);
+  const [waitedLongEnough, setWaitedLongEnough] = useState(false);
 
   useEffect(() => {
     window.clanceApp.getAppVersion().then(setVersion);
+    const timer = setTimeout(() => setWaitedLongEnough(true), REVEAL_WAIT_MS);
+    return () => clearTimeout(timer);
   }, []);
 
+  function ready(id) {
+    return () => setReadySections((current) => (current.includes(id) ? current : [...current, id]));
+  }
+
+  const revealed = waitedLongEnough || (prefs && SECTIONS.every((id) => readySections.includes(id)));
+
   return html`
-    <div class="section-page">
+    <div class="section-page ${revealed ? "" : "settings-pending"}">
       <header class="page-header">
         <h1 class="page-title">Settings</h1>
       </header>
 
       <section class="extension-group">
         <h2 class="group-title">access</h2>
-        <${ConnectClaudeStep} />
-        <${PermissionsStep} />
+        <${ConnectClaudeStep} onReady=${ready("claude")} />
+        <${PermissionsStep} onReady=${ready("permissions")} />
       </section>
 
       <section class="extension-group">
@@ -92,12 +109,12 @@ export function SettingsSection() {
 
       <section class="extension-group">
         <h2 class="group-title">shortcuts</h2>
-        <${ShortcutsStep} />
+        <${ShortcutsStep} onReady=${ready("shortcuts")} />
       </section>
 
       <section class="extension-group">
         <h2 class="group-title">dictation</h2>
-        <${DictationStep} />
+        <${DictationStep} onReady=${ready("dictation")} />
       </section>
 
       <footer class="settings-footer">

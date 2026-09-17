@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("clanceApp", {
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   copyDroppedFile: (sourcePath: string) => ipcRenderer.invoke("files:copy-dropped", sourcePath),
   getSetupStatus: () => ipcRenderer.invoke("setup:get-status"),
+  getLastSetupStatus: () => ipcRenderer.invoke("setup:get-last-status"),
   connectClaude: () => ipcRenderer.invoke("setup:connect-claude"),
   disconnectClaude: () => ipcRenderer.invoke("setup:disconnect-claude"),
   openInstallDocs: () => ipcRenderer.invoke("setup:open-install-docs"),
