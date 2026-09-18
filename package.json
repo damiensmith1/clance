@@ -6,7 +6,7 @@
   "main": "dist/main/index.js",
   "private": true,
   "scripts": {
-    "build": "tsc -p tsconfig.json && mkdir -p dist/popup dist/mainWindow dist/shared dist/dictationHud && cp -r src/popup/. dist/popup/ && cp -r src/mainWindow/. dist/mainWindow/ && cp -r src/shared/. dist/shared/ && cp -r src/dictationHud/. dist/dictationHud/",
+    "build": "node scripts/build-native.mjs && tsc -p tsconfig.json && mkdir -p dist/popup dist/mainWindow dist/shared dist/dictationHud && cp -r src/popup/. dist/popup/ && cp -r src/mainWindow/. dist/mainWindow/ && cp -r src/shared/. dist/shared/ && cp -r src/dictationHud/. dist/dictationHud/",
     "start": "npm run build && electron .",
     "dev": "npm run build && npm start",
     "package": "npm run build && electron-builder --mac --dir",
@@ -21,6 +21,7 @@
     "files": [
       "dist/**/*",
       "package.json",
+      "native/ax/build/Release/ax.node",
       "!**/*.map"
     ],
     "directories": {
