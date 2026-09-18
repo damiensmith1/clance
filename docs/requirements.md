@@ -28,8 +28,9 @@ What Clance does. Why is in `background.md`; how is in `design.md`.
   is ready.
 - The widget is a terminal running a new Claude Code session in the default
   working directory. The user talks to the CLI directly.
-- The session is told, invisibly, that it was opened from the popup and which
-  local tools it has. Nothing about the screen is sent automatically.
+- The session is told, invisibly, that it was opened from the popup, which
+  local tools it has and when to use them. Nothing about the screen is sent
+  automatically.
 - The widget can be dragged and resized and stays where the user puts it. It
   never closes on losing focus.
 - Toolbar:
@@ -56,13 +57,14 @@ Sessions Clance starts get these tools when Accessibility is granted:
 | Tool | Does | Asks for approval |
 |---|---|---|
 | `look_at_screen` | Screenshot of the display under the cursor | No |
+| `read_window_text` | A window's text, read rather than screenshotted | No |
+| `read_focused_field` | The text of the field the user is typing in | No |
 | `read_selection` | The currently highlighted text | No |
-| `list_open_windows` | Titles of open windows | No |
+| `list_open_windows` | Open apps and their window titles | No |
+| `click_element` | Click a control by the name shown on it | No |
 | `click_at` | Click at a position on the current display | No |
-| `insert_text` | Type text into the app the popup was opened over, or a named app | Yes |
+| `write_field` | Write into a field — replace, insert at the cursor, or clear | Yes |
 | `activate_app` | Bring an app to the front | Yes |
-| `clear_focused_field` | Clear the focused field | Yes |
-| `replace_focused_field` | Replace the focused field's contents | Yes |
 
 - Approval is Claude Code's own Allow / Deny / Always allow prompt. Tools
   that can act on an app the user didn't point at, or that destroy content,
@@ -75,6 +77,18 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - A session can read the screen as text — the focused field, the selection,
   a window's contents — rather than only as a screenshot, and reads the app
   the user came from rather than Clance.
+- Sessions are told, invisibly, when to prefer these over the tools they
+  already have: a question about what's on the user's screen is answered by
+  reading it, not by opening or fetching a page, and these are the only
+  tools that can see an app that isn't a browser. Driving the web itself is
+  left to the session's own browser tools. Sessions opened in the main
+  window get this too, aimed at a named app rather than the one in front.
+- Reading the highlighted text finds a selection wherever it is — a passage
+  in a page or a document, not only text inside an editable field.
+- Some apps publish nothing but their window frame to macOS's accessibility
+  API, and Clance can ask them to do better but can't compel them. A read of
+  one says so, and points at the screenshot, rather than reporting an empty
+  window as fact.
 - Password fields are never readable, through any tool. Clance reports that
   one is focused and nothing about what it holds.
 - Screen Recording is optional. Without it, `look_at_screen` says how to
@@ -246,7 +260,7 @@ Sessions Clance starts get these tools when Accessibility is granted:
 ## Ideas (not committed)
 
 - **Quick Ask** — a separate fast path using the Agent SDK for read-only
-  questions and `insert_text`, escalating to a full session by starting a new
+  questions and `write_field`, escalating to a full session by starting a new
   `claude --bg` session seeded with the exchange (never writing transcripts by
   hand).
 - **Watch mode** — a pinned widget that stays attached to one session across

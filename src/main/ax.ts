@@ -169,6 +169,32 @@ export async function focusedField(
   };
 }
 
+/**
+ * Whatever text is selected in an app, wherever it lives. Not the same
+ * question as `focusedField`: text selected by *reading* — a passage in a
+ * page, a PDF, a mail message — sits on a web area or a static text node,
+ * which is neither a field nor necessarily focused, so looking only at the
+ * focused field finds nothing outside a text box.
+ *
+ * `visited` is how many elements the app actually published while being
+ * searched. A Chromium app that hasn't built its accessibility tree
+ * publishes only its window frame, and an empty selection there means
+ * "this app told us nothing", not "nothing is selected" — opposite advice,
+ * so callers need to tell them apart. `via` is "focus", "tree", or
+ * "secure" when the selection is inside a password field and withheld.
+ */
+export async function selection(
+  pid?: number
+): Promise<{ element: AxElement | null; via: string | null; visited: number }> {
+  const result = await call({ op: "selection", ...(pid ? { pid } : {}) });
+  if (!result.ok) return { element: null, via: null, visited: 0 };
+  return {
+    element: (result.element as AxElement | null) ?? null,
+    via: (result.via as string | undefined) ?? null,
+    visited: typeof result.visited === "number" ? result.visited : 0,
+  };
+}
+
 /** An app's focused window — the frontmost app's when no pid is given. */
 export async function focusedWindow(pid?: number): Promise<AxElement | null> {
   const result = await call({ op: "focusedWindow", ...(pid ? { pid } : {}) });
@@ -219,11 +245,18 @@ export async function tree(options: {
 /** The readable text of a window, de-duplicated, as text rather than pixels. */
 export async function windowText(
   options: { handle?: number; pid?: number; maxChars?: number; maxNodes?: number } = {}
-): Promise<{ text: string; truncated: boolean }> {
+): Promise<{ text: string; truncated: boolean; publishedNothing: boolean }> {
   const result = await call({ op: "windowText", ...options });
+  const text = result.ok ? ((result.text as string) ?? "") : "";
+  const lineCount = typeof result.lineCount === "number" ? result.lineCount : 0;
+  const rootTitle = typeof result.rootTitle === "string" ? result.rootTitle : "";
   return {
-    text: result.ok ? ((result.text as string) ?? "") : "",
+    text,
     truncated: result.truncated === true,
+    // The window offered its own title and nothing else, which is what a
+    // Chromium app with no accessibility tree looks like — distinct from a
+    // window that genuinely has no text in it.
+    publishedNothing: lineCount <= 1 && (text === "" || text === rootTitle),
   };
 }
 

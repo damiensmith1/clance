@@ -113,7 +113,7 @@ export function closeWidget(): void {
 // "activate" event a Dock click fires) and the main window came back right
 // alongside it. The actual fix is to stay entirely off Electron/macOS
 // app-activation machinery and target one specific external window
-// directly: focusTarget() (frontApp.ts, shared with insert_text/
+// directly: focusTarget() (frontApp.ts, shared with write_field/
 // activate_app's own app-targeting) re-focuses whatever was captured as
 // frontmost right before this widget last took focus — a plain OS-level
 // window activation with no notion of "Clance" as an app at all.
@@ -254,15 +254,12 @@ function sendToPopup(payload: PopupShownPayload): void {
 // exists, and (unlike every other action tool here) it's never told which
 // app to act on, only where on the *currently frontmost* display — it
 // can't reach somewhere the user didn't already have on screen. The
-// `tier: "approval"` tools (insert_text, activate_app,
-// clear_focused_field, replace_focused_field) always keep the CLI's native
-// "Allow / Deny / Always allow" prompt even when enabled — insert_text
-// predates this whole tool set and was always designed around that prompt
-// being the actual gate; activate_app/clear/replace can redirect to or
-// overwrite content in an app the user never referenced, so auto-allowing
-// them would let injected content the model reads via
-// look_at_screen/read_selection autonomously act on an unrelated app with
-// no human ever seeing it happen. See `docs/design.md`'s "Local tools
+// `tier: "approval"` tools (write_field, activate_app) always keep the
+// CLI's native "Allow / Deny / Always allow" prompt even when enabled:
+// both can redirect to, or overwrite content in, an app the user never
+// referenced, so auto-allowing them would let injected content the model
+// reads via look_at_screen/read_selection autonomously act on an unrelated
+// app with no human ever seeing it happen. See `docs/design.md`'s "Local tools
 // server" for the full reasoning.
 //
 // Wires Clance's own local "computer use" tools (see src/main/localToolsServer.ts
@@ -337,26 +334,54 @@ export function popupSessionName(): string {
   return `${POPUP_SESSION_NAME_PREFIX} ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 
-// The system prompt a fresh popup session gets, steering the model to
-// actually reach for Clance's local tools unprompted — each tool's own MCP
-// description (see localToolsServer.ts) is always visible to the model
-// regardless of this text, but discoverability alone doesn't mean the model
-// will *reach* for one without being told when that's appropriate, the same
-// reason insert_text always got a nudge like this. Used to also carry
-// whatever was on screen/selected at the moment the hotkey was pressed, but
-// that's gone now (2026-09-14 decision) — offloaded entirely to the model
-// calling look_at_screen/read_selection/list_open_windows itself when it
-// actually needs to know, rather than front-loading a snapshot that's often
-// irrelevant and immediately stale. That makes this text fully static
-// (doesn't depend on anything captured per-invocation), which is exactly
-// what makes popupMintArgs below safe to bake into a pool spare at warm
-// time, not just a fresh mint — see agentPool.ts.
-function localToolsSystemPrompt(): string {
+// What a Clance session is told about its local tools, beyond each tool's
+// own MCP description (localToolsServer.ts) — discoverability alone doesn't
+// make a model *reach* for one. Two things need saying that a per-tool
+// description can't: when these beat the model's own tools, and what they
+// aim at.
+//
+// The precedence line earns its place. A session typically also has a
+// browser-driving MCP server and a shell, and will reach for those by habit
+// — opening or fetching a URL to answer a question about a page the user
+// already has in front of them. Clance's tools are the only ones that can
+// see a *non-browser* app at all (Mail, Obsidian, Preview, a native
+// dialog), so the split to state is "what is on screen now" (here) versus
+// "navigate or automate the web" (the browser's own tools).
+//
+// Surface-dependent because the aiming rule genuinely differs: the popup
+// records the app it was opened over (frontApp.ts's capturedApp), so reads
+// land there with no `app` argument; a main-window tab has no such record
+// and Clance itself is frontmost, so the model has to name an app. Telling
+// a tab session otherwise would send every read at our own window.
+//
+// Static per surface — no per-invocation capture (the old screenshot/
+// selection preamble is gone, 2026-09-14) — which is what lets the popup's
+// copy be baked into a pool spare at warm time rather than only at mint
+// (see agentPool.ts).
+type ToolSurface = "popup" | "window";
+
+function localToolsSystemPrompt(surface: ToolSurface): string {
+  const opening =
+    surface === "popup"
+      ? "The user just invoked Clance via its global screen-overlay shortcut — a quick-access popup over whatever they were already doing, not a full coding session."
+      : "This session is running in a Clance tab on the user's Mac, with their own apps open around it.";
+
+  const aiming =
+    surface === "popup"
+      ? "These tools aim at the app the user came from — whatever was in front when the popup opened — not at Clance and not at whatever you looked at last. Pass `app` with a name from list_open_windows to aim somewhere else."
+      : "These tools aim at the frontmost app, which is Clance itself while the user is in this window. So name the app you mean with `app`, using list_open_windows to get it right.";
+
+  const delivering =
+    surface === "popup"
+      ? "If the request is naturally about producing content for the app they came from — drafting, replying, rewriting, filling something in — deliver it there with write_field instead of only printing it in this terminal, without waiting to be told to type or paste it. Read the field first so the edit is made against what is actually in it. write_field and activate_app ask the user to approve; the read tools, click_element and click_at don't."
+      : "write_field can write into one of those apps, and activate_app brings one forward; both ask the user to approve. The read tools, click_element and click_at don't.";
+
   return [
-    "The user just invoked Clance via its global screen-overlay shortcut — a quick-access popup, not a full coding session.",
-    "You have a look_at_screen tool that takes a fresh screenshot of the user's screen right now. If the user's request is actually about what's currently on their screen, call it before answering rather than guessing.",
-    "You also have an insert_text tool that types text directly into whatever app was frontmost when this popup opened. If the user's request is naturally about producing content for that app — writing, drafting, replying, filling in something — use insert_text to deliver it there instead of just printing it in this terminal, without waiting to be told explicitly to insert/type/paste it. Don't use it for requests that are really just questions or unrelated to that app.",
-    "Beyond typing, you can also act more directly on the screen: click_at clicks a position on the current display (as a fraction of its width/height, not pixels — eyeball it from a screenshot you've looked at), activate_app brings a different app to the front by name, and clear_focused_field/replace_focused_field clear or replace the entire contents of whatever field is currently focused. Use these when the user's request calls for actually doing something on screen, not just describing or typing text. activate_app and the two field-editing tools will ask the user to approve the first time each session; click_at and insert_text won't. read_selection reads whatever's currently highlighted, and list_open_windows shows what's running if you need an exact name for `app`.",
+    opening,
+    "You have tools that read the user's screen as text, from macOS's accessibility tree rather than from pixels, in any app: read_window_text for a window's contents, read_focused_field for the field they're typing in, read_selection for what they have highlighted, and list_open_windows for what is running. click_element presses a control by the name shown on it, click_at clicks a spot on the current display, and look_at_screen takes a screenshot.",
+    "Prefer these whenever the question is about what is in front of the user right now. Don't open a URL, fetch a page, or drive a browser to answer a question about something already on their screen — read it instead; and note that only these tools can see an app that isn't a browser at all. Use your browser tools for navigating or automating the web itself. Prefer read_window_text to look_at_screen unless the question is really about appearance or layout, and click_element to click_at.",
+    aiming,
+    delivering,
   ].join("\n");
 }
 
@@ -369,10 +394,20 @@ function localToolsSystemPrompt(): string {
 // against this directly. Returns just the mcp args with no system prompt at
 // all when local tools aren't available (Accessibility not granted) —
 // nothing to nudge the model toward using.
-async function popupMintArgs(): Promise<string[]> {
+export async function sessionMintArgs(surface: ToolSurface): Promise<string[]> {
   const { args, localToolsAvailable } = await sessionMcpArgs();
   if (!localToolsAvailable) return args;
-  return ["--append-system-prompt", localToolsSystemPrompt(), "--system-prompt-snapshot", "off", ...args];
+  return [
+    "--append-system-prompt",
+    localToolsSystemPrompt(surface),
+    "--system-prompt-snapshot",
+    "off",
+    ...args,
+  ];
+}
+
+async function popupMintArgs(): Promise<string[]> {
+  return sessionMintArgs("popup");
 }
 
 // Fills the pool spare(s) with the same args a fresh mint would get (see
@@ -433,8 +468,8 @@ async function toggleClancePopupInner(): Promise<void> {
   // selection prose — see popupMintArgs/localToolsSystemPrompt), but
   // captureFrontmostWindow() still has to run here, before the popup steals
   // focus: it's not just prompt content, it's also the *only* way
-  // frontApp.ts's `capturedWindow` ever gets set — what insert_text/
-  // click_at/clear_focused_field/replace_focused_field fall back to
+  // frontApp.ts's `capturedWindow` ever gets set — what write_field/
+  // click_at fall back to
   // targeting when the model doesn't pass an explicit `app`. Skipping it
   // entirely would silently break that default for every fresh widget open
   // (nothing to fall back to, or a stale target left over from wherever a

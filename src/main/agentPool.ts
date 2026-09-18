@@ -126,7 +126,7 @@ let filling: Promise<void> | null = null;
 // whichever fill is already in flight rather than racing two mints against
 // each other. `mcpArgs`/`nameFn` are injected by the caller (popupWindow.ts)
 // rather than imported here, so this module doesn't need to know anything
-// about insert_text wiring or naming.
+// about local-tools wiring or naming.
 export async function refillPool(
   mcpArgs: string[],
   nameFn: () => string,

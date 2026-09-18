@@ -328,7 +328,7 @@ sent before the renderer attaches its listener is silently dropped.
 
 1. `captureFrontmostWindow()` runs alongside window preparation, before the
    popup takes focus. Nothing captured is shown to the model; it only sets the
-   default target for `insert_text` and the field tools.
+   default target for the read tools, `write_field` and `click_element`.
 2. The window is revealed immediately in a loading state.
 3. The pool spare is claimed, or a session minted, and the popup receives
    `["attach", id]`.
@@ -337,11 +337,26 @@ An `opening` flag stops a second hotkey press from minting twice. If the
 popup is dismissed while a mint is in flight, it isn't re-shown and the
 minted session is cleaned up.
 
-Popup sessions are minted with a static system prompt
-(`localToolsSystemPrompt`) via `--append-system-prompt … --system-prompt-snapshot off`,
-telling the model it was invoked from the popup and when to reach for each
-local tool. Because it's the same text every time, a pool spare can carry it.
-It's omitted when local tools aren't available.
+Sessions are minted with a static system prompt (`localToolsSystemPrompt`)
+via `--append-system-prompt … --system-prompt-snapshot off`, naming the local
+tools and saying when to reach for them. Because it's the same text for a
+given surface, a pool spare can carry the popup's copy. It's omitted when
+local tools aren't available.
+
+It takes a surface — `popup` or `window` — because the aiming rule differs.
+The popup records the app it was opened over, so its reads need no `app`
+argument; a main-window tab has no such record and Clance is the frontmost
+app, so that copy tells the model to name an app from `list_open_windows`
+instead. Main-window sessions get the prompt too (`sessionMintArgs`), both
+on a new session and on a resume that respawns.
+
+The prompt also states precedence against the model's *own* tools, which is
+the part that decides whether these get used at all. A session usually also
+has a browser-driving MCP server and a shell, and defaults to them out of
+habit — fetching a URL to answer a question about a page the user already
+has open. The line drawn is "what is on screen now" (Clance's tools, which
+are also the only ones that can see a non-browser app) against "navigate or
+automate the web" (the browser's own).
 
 The screen is deliberately not captured on open. The model calls
 `look_at_screen`/`read_selection` when a request needs them; a snapshot on
@@ -434,9 +449,8 @@ to the CLI's own file and shell tools. Handlers are in `frontApp.ts`.
 `LOCAL_TOOLS` is the single list the server registration, the Clance tools
 UI and the CLI arguments all read from.
 
-Acting on an app went from four tools to two. `insert_text`,
-`clear_focused_field` and `replace_focused_field` were one capability split
-three ways — three approval prompts and three descriptions for "put text in
+Acting on an app went from four tools to two. The three former
+text-writing tools were one capability split three ways — three approval prompts and three descriptions for "put text in
 a field" — and are now `write_field`'s three modes: replace, insert at the
 cursor, clear. It tries the accessibility route first, since that needs no
 focus, no clipboard and no keystrokes and so can't disturb what the user is
@@ -446,6 +460,64 @@ can accept a write and ignore it — Chromium reports success on a text field
 it never changes — so the return code is not evidence. The tool reports
 which route worked, refuses a field that isn't editable rather than writing
 into a button, and refuses a password field outright.
+
+Reading a selection is its own search, not a special case of reading a
+field. Text selected by *reading* — a passage in a page, a PDF, a mail
+message — sits on a web area or a static-text node, which is neither a field
+role nor necessarily focused, so the original implementation (ask for the
+focused field, take its `AXSelectedText`) could only ever find a selection
+inside a text box. The `selection` op checks the focused element first and
+otherwise walks the window for any element carrying a non-empty
+`AXSelectedText`, refining into the first branch that matched rather than
+scanning the rest of the window: a selection exists in one place, so the
+tightest carrier is always a descendant of a broader one and never a
+sibling, and continuing would cost an accessibility round trip per node
+across thousands of them to learn nothing. A selection inside a password field is reported as present
+and withheld, like every other secure read.
+
+### Apps that publish nothing
+
+Chromium builds no accessibility tree for its web content until it believes
+an assistive technology is listening. This is not a niche case: it covers
+Chrome and every Electron app — Slack, VS Code, Obsidian, Notion — which is
+much of a modern desktop. Until then such an app answers a tree walk with
+its window frame and traffic lights and nothing else. Measured on a fresh
+Chrome showing a 1,200-element page: 37 nodes, no web area, no selection,
+and a `read_window_text` that returned the window title as though that were
+the page. This, not any preference of the model's, is why reading the screen
+as text looked useless and a screenshot always looked better.
+
+`EnableWebAccessibility` (native/ax/ax.mm) wakes the app once per app per
+run. It takes three things together, established by isolating them against
+fresh Chrome instances: setting `AXManualAccessibility` (Chromium's own
+opt-in — Electron honours it, Chrome reports it unsupported), setting
+`AXEnhancedUserInterface` (the older screen-reader signal — Chrome reports
+it not implemented and honours it anyway), and enumerating the application
+element's attributes, which is how a screen reader announces itself. Neither
+set's return value means anything, and dropping `AXEnhancedUserInterface`
+left Chrome asleep for a full measured run, so all three are load-bearing.
+Readiness is then polled for up to 4s, which is what a cold app costs on its
+first read; afterwards reads run in about 300ms.
+
+Two things about that are easy to get wrong and were:
+
+- The readiness check has to look deep enough to find what it is checking
+  for. Chrome nests its web area seven groups below the window, behind the
+  toolbar and tab strip; a six-deep search never matched, so every read —
+  including reads of an app that was ready the whole time — burned the full
+  timeout. Fixing the cap took a warm read from 4,951ms to 280ms.
+- `AXEnhancedUserInterface` is a real side effect, the flag some toolkits
+  watch to change their own behaviour. It is set only on an app a session
+  was actually asked to read, not broadcast to every app the way a screen
+  reader does.
+
+Because the wake can still fail, the reads distinguish "this window has no
+text" from "this app told us nothing" and say which. The signal is precise
+rather than a node-count threshold — an app that published nothing still
+yields one line, its window title, and a tree that *has* been built differs
+from an unbuilt one by only a handful of nodes. `windowText` therefore
+reports its line count and the window title, and publishing nothing means
+one line that is the title.
 
 `click_element` is the counterpart on the pointing side: a control found by
 the text on it, pressed through `AXPress`, which needs no focus and can't
@@ -519,10 +591,10 @@ unavailable rather than throwing.
   tool error for a disabled tool; a Settings change reaches existing
   sessions immediately.
 - **Why this split.** Reading the screen is non-destructive, and a click can
-  only land on something already on screen. `insert_text` and `activate_app`
+  only land on something already on screen. `write_field` and `activate_app`
   can reach an app the user never mentioned — auto-allowing them would let
   instructions the model read off the screen act on an unrelated app with no
-  human in the loop. The field tools destroy content.
+  human in the loop, and `write_field` destroys what was there.
 - **Accepted risk:** a pre-authorized `click_at` can still press a Send or
   Delete button that's already visible in the frontmost app. Per-call
   approval of every click was judged too much friction; multi-step

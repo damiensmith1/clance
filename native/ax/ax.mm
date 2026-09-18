@@ -348,10 +348,122 @@ static NSMutableDictionary *DescribeElement(AXUIElementRef element, BOOL full) {
 // Roots
 // ---------------------------------------------------------------------------
 
+// Whether a window has web content in its tree yet — the signal that a
+// Chromium app has actually built the tree we asked it for. Bounded, since
+// this runs on a timer and can't be an exhaustive walk, but deep enough to
+// actually reach the thing it is looking for: Chrome nests its web area
+// seven groups under the window, behind the toolbar and tab strip, and a
+// shallower cap silently never matches and burns the whole timeout on an
+// app that was ready immediately.
+static const int kWebContentSearchDepth = 12;
+
+static BOOL HasWebContent(AXUIElementRef element, int depth) {
+  if (element == NULL || depth > kWebContentSearchDepth) return NO;
+  NSString *role = CopyStringAttribute(element, kAXRoleAttribute);
+  if ([role isEqualToString:@"AXWebArea"]) return YES;
+  CFTypeRef children = CopyAttribute(element, kAXChildrenAttribute);
+  if (children == NULL) return NO;
+  BOOL found = NO;
+  if (CFGetTypeID(children) == CFArrayGetTypeID()) {
+    CFArrayRef array = (CFArrayRef)children;
+    CFIndex count = CFArrayGetCount(array);
+    if (count > 24) count = 24;
+    for (CFIndex i = 0; i < count && !found; i++) {
+      CFTypeRef child = CFArrayGetValueAtIndex(array, i);
+      if (child == NULL || CFGetTypeID(child) != AXUIElementGetTypeID()) continue;
+      found = HasWebContent((AXUIElementRef)child, depth + 1);
+    }
+  }
+  CFRelease(children);
+  return found;
+}
+
+// Chromium builds no accessibility tree for its web content until it
+// believes an assistive technology is listening. Until then a Chromium app
+// — Chrome, but equally Electron, Slack, VS Code, Notion, Discord, which is
+// most of a modern desktop — answers a tree walk with its window frame and
+// traffic lights and nothing else: no page text, no fields, no selection.
+// That is indistinguishable from "this app publishes nothing", and it is
+// why reading the screen as text looked useless on exactly the apps it
+// matters most for.
+//
+// Waking one up takes all three of the things below, established by
+// isolating them against fresh Chrome instances:
+//
+//   - AXManualAccessibility, Chromium's own opt-in. Electron accepts it;
+//     Chrome answers kAXErrorAttributeUnsupported and, on its own, does
+//     nothing.
+//   - AXEnhancedUserInterface, the older screen-reader signal. Chrome
+//     answers kAXErrorNotImplemented and then honours it anyway. Dropping
+//     it and keeping the other two left Chrome asleep for the full 5s of a
+//     measured run, so it is load-bearing, not belt-and-braces.
+//   - An attribute enumeration of the application element, which is how a
+//     screen reader announces itself. The sets alone did not wake Chrome.
+//
+// Neither set's return value means anything — both "fail" on Chrome and it
+// works — so the only honest readiness test is whether content appears.
+//
+// AXEnhancedUserInterface is a real side effect: it is the flag some
+// toolkits watch to change their own behaviour, and it has a history of
+// nudging window geometry in apps that mishandle it. It is set only on an
+// app a session was actually asked to read, once per run, rather than
+// broadcast to everything the way a screen reader does.
+//
+// Once per app per Clance run, with only a short wait afterwards. Chrome
+// itself needs neither — it publishes its web tree unprompted — and an
+// Electron app, measured, may accept the attribute and still never build
+// one (Chromium re-evaluates whether an assistive technology is really
+// listening and can decide it isn't). So this is an opportunistic nudge for
+// the apps that honour it promptly, never something a read waits on: tools
+// built on this report an app that published nothing as exactly that,
+// rather than stalling or claiming the window is empty.
+static const int kWebAccessibilityWaitMs = 4000;
+
+static void EnableWebAccessibility(AXUIElementRef app, pid_t pid) {
+  static NSMutableSet *enabled = nil;
+  static std::mutex enabledMutex;
+  if (app == NULL || pid <= 0) return;
+  {
+    std::lock_guard<std::mutex> guard(enabledMutex);
+    if (enabled == nil) enabled = [[NSMutableSet alloc] init];
+    if ([enabled containsObject:@(pid)]) return;
+    [enabled addObject:@(pid)];
+  }
+
+  ApplyTimeout(app);
+  // Both, and neither result is checked. Chrome answers "unsupported" to
+  // AXManualAccessibility and "not implemented" to AXEnhancedUserInterface
+  // and then builds its tree anyway; Electron accepts the first and ignores
+  // the second. An error here says nothing about whether it worked, so the
+  // only honest test is whether content shows up afterwards.
+  AXUIElementSetAttributeValue(app, CFSTR("AXManualAccessibility"), kCFBooleanTrue);
+  AXUIElementSetAttributeValue(app, CFSTR("AXEnhancedUserInterface"), kCFBooleanTrue);
+  // Chromium treats an attribute enumeration on the application element as
+  // a screen reader announcing itself; without it the sets above are not
+  // enough on Chrome.
+  CFArrayRef names = NULL;
+  if (AXUIElementCopyAttributeNames(app, &names) == kAXErrorSuccess && names != NULL) {
+    CFRelease(names);
+  }
+
+  for (int waited = 0; waited < kWebAccessibilityWaitMs; waited += 50) {
+    CFTypeRef window = CopyAttribute(app, kAXFocusedWindowAttribute);
+    if (window != NULL) {
+      BOOL ready = CFGetTypeID(window) == AXUIElementGetTypeID() &&
+                   HasWebContent((AXUIElementRef)window, 0);
+      CFRelease(window);
+      if (ready) return;
+    }
+    usleep(50 * 1000);
+  }
+}
+
 static AXUIElementRef CopyFrontmostApplicationElement(void) {
   NSRunningApplication *app = [[NSWorkspace sharedWorkspace] frontmostApplication];
   if (app == nil) return NULL;
-  return AXUIElementCreateApplication(app.processIdentifier);
+  AXUIElementRef element = AXUIElementCreateApplication(app.processIdentifier);
+  EnableWebAccessibility(element, app.processIdentifier);
+  return element;
 }
 
 // An app by pid, so a caller can read the app the user came *from* rather
@@ -359,7 +471,9 @@ static AXUIElementRef CopyFrontmostApplicationElement(void) {
 // typing to Claude in the widget.
 static AXUIElementRef CopyApplicationElement(pid_t pid) {
   if (pid <= 0) return CopyFrontmostApplicationElement();
-  return AXUIElementCreateApplication(pid);
+  AXUIElementRef element = AXUIElementCreateApplication(pid);
+  EnableWebAccessibility(element, pid);
+  return element;
 }
 
 static pid_t RequestedPid(NSDictionary *op) {
@@ -560,6 +674,59 @@ static BOOL IsElementFocused(AXUIElementRef element) {
   return result;
 }
 
+// Depth-first search for whatever element is carrying a selection. Distinct
+// from CopyFocusedDescendant, which looks for a *field*: text selected by
+// reading rather than typing — a passage in a web page, a PDF, a mail
+// message — lives on an AXWebArea, an AXStaticText or a group, none of them
+// field roles and none of them necessarily focused. Restricting the search
+// to fields is why "what have I got highlighted?" came back empty on
+// everything except a text box.
+//
+// Prefers the deepest/most specific match by taking the shortest non-empty
+// selection string, since a web area and the static text inside it both
+// report the same selection and the inner one is the tighter answer.
+static AXUIElementRef CopySelectionCarrier(AXUIElementRef element, int depth, int maxDepth,
+                                           int *budget) {
+  if (element == NULL || *budget <= 0) return NULL;
+  (*budget)--;
+  ApplyTimeout(element);
+
+  AXUIElementRef best = NULL;
+  if (!IsSecureElement(element)) {
+    NSString *selected = CopyStringAttribute(element, kAXSelectedTextAttribute);
+    if (selected.length > 0) {
+      CFRetain(element);
+      best = element;
+    }
+  }
+  if (depth >= maxDepth) return best;
+
+  CFTypeRef children = CopyAttribute(element, kAXChildrenAttribute);
+  if (children == NULL) return best;
+  if (CFGetTypeID(children) == CFArrayGetTypeID()) {
+    CFArrayRef array = (CFArrayRef)children;
+    CFIndex count = CFArrayGetCount(array);
+    for (CFIndex i = 0; i < count && *budget > 0; i++) {
+      CFTypeRef child = CFArrayGetValueAtIndex(array, i);
+      if (child == NULL || CFGetTypeID(child) != AXUIElementGetTypeID()) continue;
+      AXUIElementRef found =
+          CopySelectionCarrier((AXUIElementRef)child, depth + 1, maxDepth, budget);
+      if (found == NULL) continue;
+      if (best != NULL) CFRelease(best);
+      best = found;
+      break;  // See below: the refinement lives in this branch, so stop.
+    }
+  }
+  CFRelease(children);
+  // Stopping at the first branch that matched is what keeps this cheap. A
+  // selection exists in one place, so the tightest carrier is always a
+  // descendant of a broader one, never a sibling of it — once a branch has
+  // answered, no other branch can improve on it. Scanning the rest would
+  // mean an accessibility round trip per node across the whole window,
+  // thousands of them on a real web page, to learn nothing.
+  return best;
+}
+
 // Depth-first search for the element an app considers focused. This is the
 // fallback for reading an app that isn't frontmost: macOS gives an inactive
 // app no keyboard focus, so AXFocusedUIElement comes back nil, but the app
@@ -648,6 +815,43 @@ static NSDictionary *RunOperation(NSDictionary *op) {
     NSMutableDictionary *described = DescribeElement(element, YES);
     CFRelease(element);
     return @{@"ok" : @YES, @"element" : described};
+  }
+
+  if ([name isEqualToString:@"selection"]) {
+    pid_t pid = RequestedPid(op);
+    AXUIElementRef focused = CopyFocusedElement(pid);
+    if (focused != NULL) {
+      if (!IsSecureElement(focused)) {
+        NSString *selected = CopyStringAttribute(focused, kAXSelectedTextAttribute);
+        if (selected.length > 0) {
+          NSMutableDictionary *described = DescribeElement(focused, YES);
+          CFRelease(focused);
+          return @{@"ok" : @YES, @"element" : described, @"via" : @"focus"};
+        }
+      } else {
+        CFRelease(focused);
+        return @{@"ok" : @YES, @"element" : [NSNull null], @"via" : @"secure"};
+      }
+      CFRelease(focused);
+    }
+
+    AXUIElementRef window = CopyFocusedWindowElement(pid);
+    if (window == NULL) return @{@"ok" : @YES, @"element" : [NSNull null], @"visited" : @0};
+    int budget = ClampedInt(op[@"maxNodes"], 1500, kHardMaxNodes);
+    int before = budget;
+    AXUIElementRef carrier =
+        CopySelectionCarrier(window, 0, ClampedInt(op[@"maxDepth"], 25, 60), &budget);
+    // How much the app actually published, so a caller can tell "nothing is
+    // selected" apart from "this app told us nothing at all" — the two look
+    // identical from an empty string and want opposite advice.
+    int visited = before - budget;
+    CFRelease(window);
+    if (carrier == NULL) {
+      return @{@"ok" : @YES, @"element" : [NSNull null], @"visited" : @(visited)};
+    }
+    NSMutableDictionary *described = DescribeElement(carrier, YES);
+    CFRelease(carrier);
+    return @{@"ok" : @YES, @"element" : described, @"via" : @"tree", @"visited" : @(visited)};
   }
 
   if ([name isEqualToString:@"focusedField"]) {
@@ -830,7 +1034,6 @@ static NSDictionary *RunOperation(NSDictionary *op) {
     };
     NSMutableArray *nodes = [NSMutableArray array];
     WalkElement(root, 0, -1, nodes, &state);
-    if (needsRelease) CFRelease(root);
     return @{@"ok" : @YES, @"nodes" : nodes, @"truncated" : state.truncated ? @YES : @NO};
   }
 
@@ -881,7 +1084,6 @@ static NSDictionary *RunOperation(NSDictionary *op) {
     };
     NSMutableArray *nodes = [NSMutableArray array];
     WalkElement(root, 0, -1, nodes, &state);
-    if (needsRelease) CFRelease(root);
 
     // One line per element that actually carries text, de-duplicated:
     // container roles repeat their children's text, and a web page under
@@ -909,10 +1111,20 @@ static NSDictionary *RunOperation(NSDictionary *op) {
         break;
       }
     }
+    NSString *rootTitle = CopyStringAttribute(root, kAXTitleAttribute) ?: @"";
+    if (needsRelease) CFRelease(root);
     return @{
       @"ok" : @YES,
       @"text" : [lines componentsJoinedByString:@"\n"],
-      @"truncated" : state.truncated ? @YES : @NO
+      @"truncated" : state.truncated ? @YES : @NO,
+      // A window that published nothing but its frame still yields one line
+      // here — its title — which reads like content and isn't. Naming the
+      // title lets the caller recognise that exact case instead of guessing
+      // from a node count, which doesn't separate the two: a Chromium app
+      // with no tree and one that has just built a small one differ by only
+      // a handful of nodes.
+      @"lineCount" : @((int)lines.count),
+      @"rootTitle" : rootTitle
     };
   }
 

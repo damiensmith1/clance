@@ -55,12 +55,12 @@ function normalizeTitle(title: string): string {
 }
 
 // Lists every currently open window's title, so the CLI can see what's
-// running and ask to redirect insert_text there by name (e.g. "put this in
+// running and ask to redirect write_field there by name (e.g. "put this in
 // Slack" while the captured/frontmost window is something else entirely) —
-// otherwise insert_text can only ever type into whatever was frontmost the
+// otherwise write_field can only ever type into whatever was frontmost the
 // moment the hotkey was pressed. Best-effort/no permission check of its own:
 // it's read-only (no keystroke injection), but in practice only ever called
-// alongside insert_text, which is already gated on Accessibility.
+// alongside write_field, which is already gated on Accessibility.
 export async function listOpenWindows(): Promise<string[]> {
   try {
     const { getWindows } = await import("@nut-tree-fork/nut-js");
@@ -79,7 +79,7 @@ export async function listOpenWindows(): Promise<string[]> {
 // picking the first hit is a spoofing surface: a malicious or compromised
 // app could title itself to intercept a hint aimed at something else (e.g.
 // a fake window titled to match "Slack"), redirecting
-// insert_text/click_at/clear_focused_field/replace_focused_field to it
+// write_field/click_at to it
 // instead. Fails closed rather than guessing: an exact (normalized) title
 // match wins only if it's the *unique* one, and short of that, a substring
 // match only counts if it's unique too — two or more windows matching the
@@ -187,7 +187,7 @@ export async function warmFrontAppModule(): Promise<void> {
 // Dictation needs this and must not use captureFrontmostWindow(): that one
 // stores into the module-level `capturedWindow` slot the popup owns, so a
 // dictation triggered while a widget is open would silently redirect that
-// widget's insert_text/click_at at whatever app the user happened to be
+// widget's write_field/click_at at whatever app the user happened to be
 // dictating into. Two features, one global — so dictation reads the title
 // and keeps nothing.
 export async function readFrontmostTitle(): Promise<string | undefined> {

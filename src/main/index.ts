@@ -8,7 +8,7 @@ import {
   warmAgentPool,
   openNewSessionInDirectory,
   isPopupSessionName,
-  sessionMcpArgs,
+  sessionMintArgs,
 } from "./popupWindow";
 import { openMainWindow, openMainWindowSection, openSessionInMainWindow } from "./mainWindow";
 import { checkForUpdates, openReleasePage } from "./updates";
@@ -360,7 +360,7 @@ ipcMain.handle("chatHistory:peek-session", (_event, sessionId: string) =>
 );
 
 ipcMain.handle("chatHistory:resolve-open-args", async (_event, sessionId: string, name: string) =>
-  resolveOpenArgs(sessionId, name, (await sessionMcpArgs()).args)
+  resolveOpenArgs(sessionId, name, await sessionMintArgs("window"))
 );
 
 ipcMain.handle(
@@ -397,7 +397,7 @@ ipcMain.handle(
 // "Default" should never itself become a "recent" entry).
 ipcMain.handle("agents:spawn-new", async (_event, claudeArgs: string[], cwd?: string | null) => {
   if (cwd) addRecentDirectory(cwd);
-  const { args: mcpArgs } = await sessionMcpArgs();
+  const mcpArgs = await sessionMintArgs("window");
   // Named here rather than by the caller: the placeholder a session wears
   // until its conversation has a name belongs to one definition
   // (chatHistory.ts), and it's returned so the tab that opens onto this

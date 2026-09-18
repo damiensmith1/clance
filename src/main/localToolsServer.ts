@@ -257,7 +257,7 @@ function headersHelperCommand(headersPath: string): string {
   return `cat '${headersPath.replace(/'/g, `'\\''`)}'`;
 }
 
-// insert_text/replace_focused_field's `text` param is arbitrary user
+// write_field's `text` param is arbitrary user
 // content typed into another app — could be a password, a personal
 // message, anything — so it's never logged verbatim, only its length.
 // Every other arg (app, x, y) is low-sensitivity enough to log as-is: it's
@@ -434,6 +434,23 @@ function createMcpServer(): McpServer {
     };
   }
 
+  // Said whenever an app offered its window frame and nothing inside it.
+  // Chromium apps — Chrome, and equally Electron ones like Slack, VS Code
+  // or Obsidian — build no accessibility tree for their content until they
+  // decide something is listening, and until then a read of them is empty
+  // through no fault of the window's. Clance asks them to (see
+  // EnableWebAccessibility in native/ax/ax.mm) but can't make them, so the
+  // honest answer names the cause and points at the tool that does work,
+  // rather than reporting an empty window as fact.
+  function unpublishedMessage(name: string): string {
+    return (
+      `${name} isn't publishing its window contents to macOS's accessibility API, so there's ` +
+      "nothing to read as text — only its window frame came back. Chromium-based apps often do " +
+      "this until something has been reading them for a while; trying once more sometimes works. " +
+      "look_at_screen can see the window regardless."
+    );
+  }
+
   const appParameter = z
     .string()
     .optional()
@@ -516,19 +533,20 @@ function createMcpServer(): McpServer {
       if ("error" in target) {
         return { content: [{ type: "text" as const, text: target.error }], isError: true };
       }
-      const { text, truncated } = await ax.windowText({
+      const { text, truncated, publishedNothing } = await ax.windowText({
         pid: target.pid,
         maxChars: maxChars ?? 8000,
       });
+      // Not `!text`: an app that published nothing still answers with its
+      // window title, which reads like content and would be passed on as if
+      // the window really did say only that.
+      if (publishedNothing) {
+        return { content: [{ type: "text" as const, text: unpublishedMessage(target.label) }] };
+      }
       if (!text) {
         return {
           content: [
-            {
-              type: "text" as const,
-              text:
-                `No readable text came back from ${target.label}. Some apps publish little or nothing to ` +
-                "the accessibility tree — look_at_screen will still show it.",
-            },
+            { type: "text" as const, text: `${target.label}'s window has no readable text in it.` },
           ],
         };
       }
@@ -548,9 +566,11 @@ function createMcpServer(): McpServer {
     {
       description:
         "Reads whatever text the user has highlighted, from the app's accessibility tree — no clipboard " +
-        "involved and nothing typed into their app. Reads the app they came from rather than Clance, " +
-        "so it still works while they're typing here. A highlighted passage is usually the subject of " +
-        "the question, so this is worth reading when they say \"this\" without saying what.",
+        "involved and nothing typed into their app. Finds a selection wherever it is: a passage in a " +
+        "web page, a PDF or a message, not only text inside an editable field. Reads the app they came " +
+        "from rather than Clance, so it still works while they're typing here. A highlighted passage is " +
+        "usually the subject of the question, so this is worth reading when they say \"this\" without " +
+        "saying what.",
       inputSchema: { app: appParameter },
     },
     withLogging("read_selection", async ({ app }) => {
@@ -558,12 +578,31 @@ function createMcpServer(): McpServer {
       if ("error" in target) {
         return { content: [{ type: "text" as const, text: target.error }], isError: true };
       }
-      const { element } = await ax.focusedField(target.pid);
-      const selected = element?.selectedText ?? "";
-      if (!selected.trim()) {
+      const { element, via } = await ax.selection(target.pid);
+      const name = element?.app?.name ?? target.label;
+      if (via === "secure") {
         return {
           content: [
-            { type: "text" as const, text: `Nothing is selected in ${element?.app?.name ?? target.label}.` },
+            {
+              type: "text" as const,
+              text: `The selection in ${name} is inside a password field, so its contents aren't readable.`,
+            },
+          ],
+        };
+      }
+      const selected = element?.selectedText ?? "";
+      if (!selected.trim()) {
+        // Checked rather than assumed: an app that published nothing looks
+        // exactly like one with nothing selected, and saying "nothing is
+        // selected" when the truth is "this app told us nothing" sends the
+        // model off to answer a question it could still have answered.
+        const { publishedNothing } = await ax.windowText({ pid: target.pid, maxChars: 200 });
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: publishedNothing ? unpublishedMessage(name) : `Nothing is selected in ${name}.`,
+            },
           ],
         };
       }
