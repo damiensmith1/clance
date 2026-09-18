@@ -262,12 +262,34 @@ export async function activateApp(hint: string): Promise<boolean> {
 // avoids needing to communicate a scale factor back and forth. The model is
 // expected to eyeball fractional position directly off whatever screenshot
 // it just looked at (look_at_screen, or the original invocation capture).
-export async function clickAtNormalized(x: number, y: number): Promise<void> {
-  const { mouse, Point } = await import("@nut-tree-fork/nut-js");
+/**
+ * Where a 0–1 point lands on the display under the cursor. Shared with
+ * clickAtNormalized so "what is under this point" and "click this point"
+ * can never disagree about where the point is.
+ */
+export function screenPointForNormalized(x: number, y: number): { x: number; y: number } {
   const cursor = screen.getCursorScreenPoint();
   const display = screen.getDisplayNearestPoint(cursor);
-  const realX = Math.round(display.bounds.x + x * display.bounds.width);
-  const realY = Math.round(display.bounds.y + y * display.bounds.height);
-  await mouse.setPosition(new Point(realX, realY));
+  return {
+    x: Math.round(display.bounds.x + x * display.bounds.width),
+    y: Math.round(display.bounds.y + y * display.bounds.height),
+  };
+}
+
+/**
+ * Clicks an absolute screen point, for a target whose position came from the
+ * accessibility tree rather than from eyeballing a screenshot — AX frames
+ * are already in screen coordinates, so there is nothing to scale.
+ */
+export async function clickAtScreenPoint(x: number, y: number): Promise<void> {
+  const { mouse, Point } = await import("@nut-tree-fork/nut-js");
+  await mouse.setPosition(new Point(Math.round(x), Math.round(y)));
+  await mouse.leftClick();
+}
+
+export async function clickAtNormalized(x: number, y: number): Promise<void> {
+  const { mouse, Point } = await import("@nut-tree-fork/nut-js");
+  const point = screenPointForNormalized(x, y);
+  await mouse.setPosition(new Point(point.x, point.y));
   await mouse.leftClick();
 }

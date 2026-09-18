@@ -17,6 +17,8 @@ import {
   activateApp,
   clickAtNormalized,
   capturedAppInfo,
+  clickAtScreenPoint,
+  screenPointForNormalized,
 } from "./frontApp";
 import { captureActiveDisplay } from "./screenCapture";
 import * as ax from "./ax";
@@ -37,25 +39,41 @@ import { SESSION_CWD } from "./paths";
 export type LocalToolTier = "auto" | "approval";
 export type LocalToolInfo = { name: string; tier: LocalToolTier; description: string };
 export const LOCAL_TOOLS: LocalToolInfo[] = [
-  { name: "list_open_windows", tier: "auto", description: "List the user's open app windows." },
+  { name: "list_open_windows", tier: "auto", description: "List the user's open apps and windows." },
   { name: "look_at_screen", tier: "auto", description: "Take a fresh screenshot of the user's screen." },
   { name: "read_selection", tier: "auto", description: "Read whatever text is currently highlighted." },
   { name: "read_focused_field", tier: "auto", description: "Read the text of the field the user is typing in." },
   { name: "read_window_text", tier: "auto", description: "Read a window's text without a screenshot." },
+  { name: "click_element", tier: "auto", description: "Click a button or link by its name." },
   { name: "click_at", tier: "auto", description: "Click a position on the user's screen." },
-  { name: "insert_text", tier: "approval", description: "Type text into another app." },
+  { name: "write_field", tier: "approval", description: "Write text into a field in another app." },
   { name: "activate_app", tier: "approval", description: "Bring a different app to the front." },
-  {
-    name: "clear_focused_field",
-    tier: "approval",
-    description: "Clear the entire contents of the focused field.",
-  },
-  {
-    name: "replace_focused_field",
-    tier: "approval",
-    description: "Replace the entire contents of the focused field.",
-  },
 ];
+
+// Roles click_element will press. Deliberately a list rather than "anything
+// with an AXPress action": a web page marks whole groups and rows pressable,
+// and clicking a container because its text happened to match is exactly the
+// wrong-thing-clicked this tool exists to avoid.
+// "an AXWebArea", not "a AXWebArea" — these strings are read by a model and
+// then often repeated to the user.
+function article(word: string): string {
+  return /^[aeiou]/i.test(word) ? `an ${word}` : `a ${word}`;
+}
+
+const CLICKABLE_ROLES = new Set([
+  "AXButton",
+  "AXLink",
+  "AXMenuItem",
+  "AXMenuButton",
+  "AXCheckBox",
+  "AXRadioButton",
+  "AXPopUpButton",
+  "AXTabButton",
+  "AXToolbarButton",
+  "AXDisclosureTriangle",
+  "AXIncrementor",
+  "AXSwitch",
+]);
 
 export type LocalToolStatus = LocalToolInfo & { enabled: boolean };
 
@@ -309,59 +327,31 @@ function createMcpServer(): McpServer {
   const server = new McpServer({ name: "clance-tools", version: "1.0.0" });
 
   server.registerTool(
-    "insert_text",
-    {
-      description:
-        "Types text into an app running on the user's Mac. Delivers it at the OS level (a clipboard " +
-        "paste), so it lands wherever that app's cursor/focus currently is — it does not scroll to or " +
-        "click any particular field first. Use this when the user asks you to write, draft, or insert " +
-        "something into an app, rather than printing it in this terminal.\n\n" +
-        "By default this targets the app the user had focused right before they opened this Clance " +
-        "popup. To send it somewhere else instead (e.g. the user says 'put this in Slack' while looking " +
-        "at something else), pass `app` with a name/substring of the target window's title — call " +
-        "list_open_windows first if you need to see what's actually open and what its title looks like.",
-      inputSchema: {
-        text: z.string().describe("The exact text to type, verbatim."),
-        app: z
-          .string()
-          .optional()
-          .describe(
-            "Case-insensitive substring to match against open window titles, to redirect the text to a " +
-              "different app than the one focused when the popup opened. Omit to use that default app."
-          ),
-      },
-    },
-    withLogging("insert_text", async ({ text, app }) => {
-      try {
-        await typeIntoCapturedWindow(text, app);
-        return { content: [{ type: "text" as const, text: "Typed." }] };
-      } catch (error) {
-        return {
-          content: [{ type: "text" as const, text: `Failed to type text: ${(error as Error).message}` }],
-          isError: true,
-        };
-      }
-    })
-  );
-
-  server.registerTool(
     "list_open_windows",
     {
       description:
-        "Lists the titles of the user's currently open app windows. Use this to find the right value " +
-        "for the `app` parameter on insert_text, clear_focused_field, replace_focused_field, or " +
-        "activate_app, when you want to act on an app other than the one focused when this Clance " +
-        "popup opened.",
+        "Lists the user's open apps and the windows each one has, with the app in front marked. Use it " +
+        "to find the right value for the `app` parameter on the read_*, write_field, click_element and " +
+        "activate_app tools when you want one other than the app the user came from.",
       inputSchema: {},
     },
     withLogging("list_open_windows", async () => {
+      const apps = await ax.windows();
+      if (apps.length > 0) {
+        const lines = apps.map((entry) => {
+          const heading = `${entry.name}${entry.frontmost ? " (frontmost)" : ""}`;
+          return entry.windows.length > 0
+            ? `${heading}\n${entry.windows.map((title) => `  ${title}`).join("\n")}`
+            : `${heading}\n  (no open windows)`;
+        });
+        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      }
+      // Without the accessibility reader there are still window titles to be
+      // had from the window server, which is enough to name an app.
       const titles = await listOpenWindows();
       return {
         content: [
-          {
-            type: "text" as const,
-            text: titles.length > 0 ? titles.join("\n") : "No open windows found.",
-          },
+          { type: "text" as const, text: titles.length > 0 ? titles.join("\n") : "No open windows found." },
         ],
       };
     })
@@ -619,8 +609,26 @@ function createMcpServer(): McpServer {
     },
     withLogging("click_at", async ({ x, y }) => {
       try {
+        // What's actually there, read before the click lands: a coordinate
+        // guessed off a screenshot is the one action here with no way to
+        // tell afterwards whether it hit what was intended.
+        const point = await screenPointForNormalized(x, y);
+        const under = point ? await ax.elementAt(point.x, point.y) : null;
         await clickAtNormalized(x, y);
-        return { content: [{ type: "text" as const, text: `Clicked at (${x}, ${y}).` }] };
+        const what = under
+          ? `${under.role ?? "element"}${under.title ? ` "${under.title}"` : ""}` +
+            `${under.app?.name ? ` in ${under.app.name}` : ""}`
+          : null;
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: what
+                ? `Clicked at (${x}, ${y}) — on ${what}. click_element is surer when the target has a name.`
+                : `Clicked at (${x}, ${y}).`,
+            },
+          ],
+        };
       } catch (error) {
         return {
           content: [{ type: "text" as const, text: `Failed to click: ${(error as Error).message}` }],
@@ -631,61 +639,236 @@ function createMcpServer(): McpServer {
   );
 
   server.registerTool(
-    "clear_focused_field",
+    "write_field",
     {
       description:
-        "Selects everything in the currently focused field and deletes it (Cmd+A, then Delete). A blunt " +
-        "instrument — it clears the whole field, not a specific word or range — since there's no generic " +
-        "way to know a field's exact contents or cursor position across apps. Use replace_focused_field " +
-        "instead if you're about to type something back in.",
+        "Writes text into a field in another app — the one the user was last typing in, or one named " +
+        "with `app`. Sets the field's value through the accessibility API where the app allows it, and " +
+        "falls back to the clipboard-and-keystroke route where it doesn't; either way the field is read " +
+        "back afterwards and this reports what it actually contains, so a write that silently did " +
+        "nothing is never reported as success.\n\n" +
+        "`mode` chooses what happens to what's already there: \"replace\" swaps the whole field, " +
+        "\"insert\" puts the text at the cursor (replacing the selection, if any), \"clear\" empties " +
+        "it and ignores `text`. Read the field first (read_focused_field) if the edit depends on what's " +
+        "in it.",
       inputSchema: {
-        app: z
-          .string()
+        text: z.string().optional().describe("The exact text to write, verbatim. Omit for mode \"clear\"."),
+        mode: z
+          .enum(["replace", "insert", "clear"])
           .optional()
-          .describe(
-            "Case-insensitive substring to match against open window titles, to redirect this to a " +
-              "different app than the one focused when the popup opened. Omit to use that default app."
-          ),
+          .describe("replace (default), insert at the cursor, or clear the field."),
+        app: appParameter,
       },
     },
-    withLogging("clear_focused_field", async ({ app }) => {
-      try {
-        await clearFocusedField(app);
-        return { content: [{ type: "text" as const, text: "Cleared." }] };
-      } catch (error) {
+    withLogging("write_field", async ({ text, mode, app }) => {
+      const action = mode ?? "replace";
+      const value = action === "clear" ? "" : (text ?? "");
+      if (action !== "clear" && !text) {
         return {
-          content: [{ type: "text" as const, text: `Failed to clear field: ${(error as Error).message}` }],
+          content: [{ type: "text" as const, text: "Nothing to write — pass `text`, or use mode \"clear\"." }],
           isError: true,
         };
       }
+
+      const target = await resolveReadTarget(app);
+      if ("error" in target) {
+        return { content: [{ type: "text" as const, text: target.error }], isError: true };
+      }
+      const { element } = await ax.focusedField(target.pid);
+      if (!element) {
+        return {
+          content: [
+            { type: "text" as const, text: `No field is focused in ${target.label}, so there's nothing to write into.` },
+          ],
+          isError: true,
+        };
+      }
+      if (element.editable === false) {
+        // Reported rather than attempted: the write would "succeed" against
+        // something that can't hold text and only the read-back afterwards
+        // would notice, which reads like a mysterious failure.
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text:
+                `The focused element in ${target.label} is ${article(element.role ?? "control")}` +
+                `${element.title ? ` ("${element.title}")` : ""}, not an editable field. ` +
+                "Click into the field first, or name the app whose field you mean.",
+            },
+          ],
+          isError: true,
+        };
+      }
+      if (element.secure) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text:
+                "The focused field is a password field. Clance won't write into one — ask the user to " +
+                "type it themselves.",
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const before = typeof element.value === "string" ? element.value : "";
+      const expected = action === "insert" ? null : value;
+
+      // The accessibility route first: it needs no focus, no clipboard and
+      // no keystrokes, so it can't disturb what the user is doing.
+      let wrote =
+        action === "insert"
+          ? await ax.setSelectedText(element.handle, value)
+          : await ax.setValue(element.handle, value);
+
+      // Some apps accept the write and ignore it — Chromium reports success
+      // on a text field it never changes — so trust the field, not the
+      // return code.
+      const afterAx = await ax.describe(element.handle);
+      const axValue = typeof afterAx?.value === "string" ? afterAx.value : "";
+      const axWorked = wrote && (expected === null ? axValue !== before : axValue === expected);
+
+      if (!axWorked) {
+        // Fall back to driving the keyboard, which is what this tool used to
+        // do exclusively: focus the app, select all where the whole field is
+        // being replaced, and paste.
+        try {
+          if (action === "clear") await clearFocusedField(app);
+          else if (action === "replace") await replaceFocusedField(value, app);
+          else await typeIntoCapturedWindow(value, app);
+          wrote = true;
+        } catch (error) {
+          return {
+            content: [
+              { type: "text" as const, text: `Couldn't write to the field: ${(error as Error).message}` },
+            ],
+            isError: true,
+          };
+        }
+      }
+
+      const after = await ax.describe(element.handle);
+      const afterValue = typeof after?.value === "string" ? after.value : null;
+      const via = axWorked ? "accessibility" : "keystrokes";
+      if (afterValue === null) {
+        return {
+          content: [
+            { type: "text" as const, text: `Wrote to the field via ${via}, but couldn't read it back to confirm.` },
+          ],
+        };
+      }
+      const changed = afterValue !== before;
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: changed
+              ? `Field now contains (via ${via}):\n${afterValue || "(empty)"}`
+              : `The field still contains what it did before, so the write didn't take:\n${afterValue || "(empty)"}`,
+          },
+        ],
+        isError: !changed,
+      };
     })
   );
 
   server.registerTool(
-    "replace_focused_field",
+    "click_element",
     {
       description:
-        "Replaces the entire contents of the currently focused field with new text (Cmd+A, then pastes " +
-        "the given text) — one atomic action instead of separately clearing and typing. A blunt " +
-        "instrument — it replaces the whole field, not a specific word or range.",
+        "Clicks a button, link, menu item or other control by the name the user would see on it — " +
+        "found in the app's accessibility tree, so no screenshot or coordinates are involved and the " +
+        "app doesn't have to be in front. Reports what it clicked, and names the near matches when the " +
+        "target is ambiguous or absent rather than clicking the wrong thing. Prefer this over click_at.",
       inputSchema: {
-        text: z.string().describe("The exact text to replace the field's contents with, verbatim."),
-        app: z
+        target: z
           .string()
-          .optional()
-          .describe(
-            "Case-insensitive substring to match against open window titles, to redirect this to a " +
-              "different app than the one focused when the popup opened. Omit to use that default app."
-          ),
+          .describe("The control's visible text, e.g. \"Send\". Case-insensitive; an exact match wins."),
+        app: appParameter,
       },
     },
-    withLogging("replace_focused_field", async ({ text, app }) => {
+    withLogging("click_element", async ({ target, app }) => {
+      const resolved = await resolveReadTarget(app);
+      if ("error" in resolved) {
+        return { content: [{ type: "text" as const, text: resolved.error }], isError: true };
+      }
+      const { nodes } = await ax.tree({ pid: resolved.pid, maxNodes: 1200, maxDepth: 25 });
+      const labelOf = (node: ax.AxNode) =>
+        [node.title, node.label, typeof node.value === "string" ? node.value : ""]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+
+      const clickable = nodes.filter((node) => CLICKABLE_ROLES.has(node.role ?? "") && labelOf(node));
+      const needle = target.trim().toLowerCase();
+      const exact = clickable.filter((node) => labelOf(node).toLowerCase() === needle);
+      const partial = clickable.filter((node) => labelOf(node).toLowerCase().includes(needle));
+      const matches = exact.length > 0 ? exact : partial;
+
+      if (matches.length === 0) {
+        const nearby = clickable.slice(0, 12).map((node) => `"${labelOf(node)}"`).join(", ");
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text:
+                `Nothing clickable called "${target}" in ${resolved.label}.` +
+                (nearby ? ` What's there: ${nearby}.` : " Nothing clickable was found at all."),
+            },
+          ],
+          isError: true,
+        };
+      }
+      if (matches.length > 1) {
+        const options = matches
+          .slice(0, 8)
+          .map((node) => `"${labelOf(node)}" (${node.role})`)
+          .join(", ");
+        return {
+          content: [
+            { type: "text" as const, text: `"${target}" matches more than one control: ${options}. Be more specific.` },
+          ],
+          isError: true,
+        };
+      }
+
+      const node = matches[0];
+      const label = labelOf(node);
+      // AXPress where the control offers it — it needs no focus and can't
+      // land on whatever happens to be under a coordinate. Otherwise click
+      // the middle of the element's own frame, which is still better aimed
+      // than a guess off a screenshot.
+      const described = await ax.describe(node.handle);
+      if (described?.actions?.includes("AXPress")) {
+        const pressed = await ax.performAction(node.handle, "AXPress");
+        if (pressed) {
+          return {
+            content: [{ type: "text" as const, text: `Pressed "${label}" (${node.role}) in ${resolved.label}.` }],
+          };
+        }
+      }
+      const frame = described?.frame ?? node.frame;
+      if (!frame || frame.width <= 0 || frame.height <= 0) {
+        return {
+          content: [
+            { type: "text" as const, text: `Found "${label}" but it can't be pressed and has no position to click.` },
+          ],
+          isError: true,
+        };
+      }
       try {
-        await replaceFocusedField(text, app);
-        return { content: [{ type: "text" as const, text: "Replaced." }] };
+        await clickAtScreenPoint(frame.x + frame.width / 2, frame.y + frame.height / 2);
+        return {
+          content: [
+            { type: "text" as const, text: `Clicked "${label}" (${node.role}) in ${resolved.label} at its centre.` },
+          ],
+        };
       } catch (error) {
         return {
-          content: [{ type: "text" as const, text: `Failed to replace field: ${(error as Error).message}` }],
+          content: [{ type: "text" as const, text: `Failed to click "${label}": ${(error as Error).message}` }],
           isError: true,
         };
       }

@@ -123,6 +123,17 @@ export async function frontmostApp(): Promise<AxApp | null> {
   return result.ok ? ((result.app as AxApp | null) ?? null) : null;
 }
 
+export type AxWindowedApp = AxApp & { frontmost: boolean; windows: string[] };
+
+/**
+ * Every app with a user interface, and the titles of its open windows.
+ * Clance itself is left out — nothing here should be aimed at us.
+ */
+export async function windows(maxWindowsPerApp?: number): Promise<AxWindowedApp[]> {
+  const result = await call({ op: "windows", ...(maxWindowsPerApp ? { maxWindowsPerApp } : {}) });
+  return result.ok ? ((result.apps as AxWindowedApp[]) ?? []) : [];
+}
+
 /** Running apps whose name or bundle id contains `name`. */
 export async function appByName(name: string): Promise<AxApp[]> {
   const result = await call({ op: "appByName", name });

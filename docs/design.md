@@ -425,15 +425,35 @@ to the CLI's own file and shell tools. Handlers are in `frontApp.ts`.
 | `read_selection(app?)` | auto | `AXSelectedText` from the accessibility tree — no clipboard, no keystroke |
 | `read_focused_field(app?)` | auto | The focused field's text, selection and caret. Says so and stops when the field is a password one. |
 | `read_window_text(app?, maxChars?)` | auto | A window's text from the tree rather than a screenshot to interpret |
-| `list_open_windows` | auto | Window titles, so the model can pass an exact `app` |
-| `click_at(x, y)` | auto | Click at fractions (0–1) of the display under the cursor — independent of the screenshot's resize. No `app` parameter; the model composes it with `activate_app`. |
-| `insert_text(text, app?)` | approval | Clipboard paste (write, ⌘V, restore ~500 ms later) — per-character typing was too slow |
+| `list_open_windows` | auto | Apps and their window titles, from the accessibility tree, with the frontmost marked. Falls back to window-server titles without it. |
+| `click_element(target, app?)` | auto | Finds a control by its visible text in the tree and `AXPress`es it; clicks its frame's centre when it offers no press action. Names the near matches rather than clicking the wrong one. |
+| `click_at(x, y)` | auto | Click at fractions (0–1) of the display under the cursor. Reads what is under the point first and reports it, so a coordinate guess is checkable. |
+| `write_field(text?, mode?, app?)` | approval | `AXValue`/`AXSelectedText` where the app allows it, clipboard-and-keystrokes where it doesn't, then reads the field back either way |
 | `activate_app(app)` | approval | Focus a window by title |
-| `clear_focused_field(app?)` | approval | ⌘A, Delete |
-| `replace_focused_field(text, app?)` | approval | ⌘A, paste, as one call |
 
 `LOCAL_TOOLS` is the single list the server registration, the Clance tools
 UI and the CLI arguments all read from.
+
+Acting on an app went from four tools to two. `insert_text`,
+`clear_focused_field` and `replace_focused_field` were one capability split
+three ways — three approval prompts and three descriptions for "put text in
+a field" — and are now `write_field`'s three modes: replace, insert at the
+cursor, clear. It tries the accessibility route first, since that needs no
+focus, no clipboard and no keystrokes and so can't disturb what the user is
+doing; it falls back to the old clipboard-and-⌘A route when that doesn't
+take. **Both paths are verified by reading the field back**, because an app
+can accept a write and ignore it — Chromium reports success on a text field
+it never changes — so the return code is not evidence. The tool reports
+which route worked, refuses a field that isn't editable rather than writing
+into a button, and refuses a password field outright.
+
+`click_element` is the counterpart on the pointing side: a control found by
+the text on it, pressed through `AXPress`, which needs no focus and can't
+land on whatever happens to be under a coordinate. Ambiguity and absence are
+both reported with the labels that *are* there, rather than resolved by
+guessing. `click_at` stays for canvases, games and anything else with no
+usable tree, but now reads what is under the point before clicking and says
+what it hit.
 
 ### Reading the screen as text
 

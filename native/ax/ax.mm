@@ -730,6 +730,49 @@ static NSDictionary *RunOperation(NSDictionary *op) {
     return @{@"ok" : @YES, @"apps" : matches};
   }
 
+  if ([name isEqualToString:@"windows"]) {
+    // Apps with a user interface, each with the titles of its open windows.
+    // Replaces a bare list of window titles: the tools that read or act on
+    // an app want a pid, and a title alone can't give one.
+    NSMutableArray *apps = [NSMutableArray array];
+    int maxWindows = ClampedInt(op[@"maxWindowsPerApp"], 12, 200);
+    for (NSRunningApplication *running in [[NSWorkspace sharedWorkspace] runningApplications]) {
+      if (running.activationPolicy != NSApplicationActivationPolicyRegular) continue;
+      if (running.processIdentifier == getpid()) continue;
+
+      AXUIElementRef app = AXUIElementCreateApplication(running.processIdentifier);
+      if (app == NULL) continue;
+      ApplyTimeout(app);
+      NSMutableArray<NSString *> *titles = [NSMutableArray array];
+      CFTypeRef windows = CopyAttribute(app, kAXWindowsAttribute);
+      if (windows != NULL) {
+        if (CFGetTypeID(windows) == CFArrayGetTypeID()) {
+          CFArrayRef array = (CFArrayRef)windows;
+          CFIndex count = CFArrayGetCount(array);
+          for (CFIndex i = 0; i < count && titles.count < (NSUInteger)maxWindows; i++) {
+            CFTypeRef window = CFArrayGetValueAtIndex(array, i);
+            if (window == NULL || CFGetTypeID(window) != AXUIElementGetTypeID()) continue;
+            NSString *title = CopyStringAttribute((AXUIElementRef)window, kAXTitleAttribute);
+            if (title.length) [titles addObject:title];
+          }
+        }
+        CFRelease(windows);
+      }
+      CFRelease(app);
+
+      // Apps that publish no window (an agent, or one refusing accessibility)
+      // are still worth listing: they can be activated and read by name.
+      [apps addObject:@{
+        @"pid" : @(running.processIdentifier),
+        @"name" : running.localizedName ?: @"",
+        @"bundleId" : running.bundleIdentifier ?: @"",
+        @"frontmost" : running.isActive ? @YES : @NO,
+        @"windows" : titles
+      }];
+    }
+    return @{@"ok" : @YES, @"apps" : apps};
+  }
+
   if ([name isEqualToString:@"elementAt"]) {
     float x = [op[@"x"] floatValue];
     float y = [op[@"y"] floatValue];

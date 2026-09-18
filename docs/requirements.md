@@ -69,6 +69,9 @@ Sessions Clance starts get these tools when Accessibility is granted:
   always ask.
 - Each tool can be switched off (Settings → clance tools). A
   switched-off tool is refused, not just prompted.
+- Clicking prefers naming a control over aiming at coordinates, and writing
+  into a field is confirmed by reading it back — a write that quietly did
+  nothing is never reported as success.
 - A session can read the screen as text — the focused field, the selection,
   a window's contents — rather than only as a screenshot, and reads the app
   the user came from rather than Clance.
