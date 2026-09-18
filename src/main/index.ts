@@ -8,7 +8,6 @@ import {
   warmAgentPool,
   openNewSessionInDirectory,
   isPopupSessionName,
-  refreshContext,
   sessionMcpArgs,
 } from "./popupWindow";
 import { openMainWindow, openMainWindowSection, openSessionInMainWindow } from "./mainWindow";
@@ -55,7 +54,6 @@ import {
   reparentPty,
   getPtyBuffer,
   warmLoginShellPath,
-  pasteImageIntoPty,
 } from "./ptyManager";
 import { resolveOpenArgs, spawnBackgroundAgent, stopAgent, listAgents } from "./agentSessions";
 import { isPoolSpareId } from "./agentPool";
@@ -429,7 +427,6 @@ ipcMain.handle("agents:list", async (_event, opts: { all?: boolean }) => {
 
 ipcMain.handle("popup:open-with-args", (_event, args: string[]) => openPopupWithArgs(args));
 
-ipcMain.handle("popup:refresh-context", () => refreshContext());
 ipcMain.handle("popup:open-settings", () => openMainWindowSection("settings"));
 
 ipcMain.handle(
@@ -544,12 +541,6 @@ ipcMain.handle(
 ipcMain.on("terminal:input", (_event, payload: { terminalId: string; data: string }) => {
   writeToPty(payload.terminalId, payload.data);
 });
-
-ipcMain.handle(
-  "terminal:paste-image",
-  (_event, payload: { terminalId: string; imagePath: string }) =>
-    pasteImageIntoPty(payload.terminalId, payload.imagePath)
-);
 
 ipcMain.on(
   "terminal:resize",

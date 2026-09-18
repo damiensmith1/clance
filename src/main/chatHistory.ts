@@ -57,37 +57,24 @@ function truncate(text: string, maxLength: number): string {
   return trimmed.length > maxLength ? `${trimmed.slice(0, maxLength)}…` : trimmed;
 }
 
-// The fixed opening line of every Clance-injected screen-context block (see
-// popupWindow.ts's buildContextText, which imports this rather than
-// hardcoding it, so the two can't drift apart). A brand-new session gets
-// this invisibly via --append-system-prompt — never a "user" turn at all,
-// so it never reaches here. A resumed/claimed-spare session gets it typed
-// as *visible* unsubmitted input ahead of whatever the user adds
-// themselves (see popup.js's openTerminal), so the two end up glued into
-// one submitted "user" turn — without stripping this back out, every such
-// session's title was this preamble instead of the user's actual request.
-export const CLANCE_CONTEXT_PREFIX =
+// Clance used to type a block of screen context — a preamble, the frontmost
+// window's title, the selection — into the widget's input ahead of whatever
+// the user then wrote, so the two were submitted as one "user" turn. It
+// doesn't any more: a session reads the screen through the local tools when
+// it decides it needs to (see localToolsServer.ts). These two opening lines
+// are kept because transcripts recorded before that change still carry
+// them, and without stripping them back out those sessions' titles are the
+// preamble instead of what the user actually asked.
+const CLANCE_CONTEXT_PREFIX =
   "The user just invoked Clance via its global screen-overlay shortcut — a quick-access popup, not a full coding session.";
 
-// The opening line of a mid-conversation "refresh context" injection (see
-// popupWindow.ts's refreshContext) — always typed as *visible* input into
-// the already-live session, the same way a resumed session's initial
-// context is, so it can land as the start of any later "user" turn, not
-// just the first. Handled by the same stripping logic as
-// CLANCE_CONTEXT_PREFIX below so a refresh triggered before the user's
-// first real submitted message doesn't corrupt that session's title.
-export const REFRESH_CONTEXT_PREFIX =
+const REFRESH_CONTEXT_PREFIX =
   "The user asked Clance to refresh its view of their screen mid-conversation.";
 
-// The CLI represents a pasted image as a literal "[Image #<n>]" placeholder
-// inline in the typed input — every widget session, fresh-mint or resumed,
-// now gets the screenshot pasted this way ahead of whatever text follows
-// (see ptyManager.ts's pasteImageIntoPty), so this placeholder is the very
-// first thing in every widget session's first turn, even a fresh-mint one
-// whose context text otherwise rides in invisibly via --append-system-prompt
-// and never reaches here. Stripped before stripClanceContextPrefix below,
-// whose startsWith check would otherwise never match — the paste lands with
-// no separator ahead of whatever's typed after it.
+// Those same sessions also had a screenshot pasted in ahead of the text,
+// which the CLI records as a literal "[Image #<n>]" placeholder. Stripped
+// before the preamble below, whose startsWith check would otherwise never
+// match — the paste landed with no separator ahead of it.
 const LEADING_IMAGE_PLACEHOLDER = /^(?:\[Image #\d+\]\s*)+/;
 function stripLeadingImagePlaceholder(text: string): string {
   return text.replace(LEADING_IMAGE_PLACEHOLDER, "");
@@ -96,9 +83,9 @@ function stripLeadingImagePlaceholder(text: string): string {
 const CLANCE_INJECTED_PREFIXES = [CLANCE_CONTEXT_PREFIX, REFRESH_CONTEXT_PREFIX];
 
 // Strips a leading Clance-injected context block, if present. The
-// injection always appends "\n\n" after the block before the user's own
-// typed text begins (see popup.js) — that blank line is the boundary; if
-// it's never found, this is left untouched rather than guessing.
+// injection always appended "\n\n" after the block before the user's own
+// typed text began — that blank line is the boundary; if it's never found,
+// this is left untouched rather than guessing.
 function stripClanceContextPrefix(text: string): string {
   const prefix = CLANCE_INJECTED_PREFIXES.find((p) => text.startsWith(p));
   if (!prefix) return text;

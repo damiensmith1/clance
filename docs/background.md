@@ -46,8 +46,7 @@ servers; and settings.
 ## Principles
 
 - **On demand, never ambient.** Nothing on screen is captured unless the
-  model calls a screen tool or the user presses ⌘⇧R. The microphone is only
-  open while dictating.
+  model calls a screen tool. The microphone is only open while dictating.
 - **Local-first.** Config, history and transcripts stay on the Mac, and
   speech is transcribed on-device. The network is used for Claude itself (by
   the CLI), speech model downloads and a user-triggered update check. No

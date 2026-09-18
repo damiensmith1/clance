@@ -1,12 +1,12 @@
 import { BrowserWindow, ipcMain, screen } from "electron";
 import { join } from "path";
-import { captureFrontmostWindow, captureSelectedText, focusTarget } from "./frontApp";
-import { captureAndSaveActiveDisplay } from "./screenCapture";
+import { captureFrontmostWindow, focusTarget } from "./frontApp";
+import { registerCaptureConcealedWindow } from "./screenCapture";
 import { checkPermissions } from "./permissions";
 import { ensureLocalToolsServer, listLocalTools } from "./localToolsServer";
 import { spawnBackgroundAgent, resolveSessionId, stopAgent, rmAgent, listAgents } from "./agentSessions";
 import { claimPoolSpare, refillPool } from "./agentPool";
-import { hasRealUserMessage, listSessions, REFRESH_CONTEXT_PREFIX } from "./chatHistory";
+import { hasRealUserMessage, listSessions } from "./chatHistory";
 import { getDefaultDirectory, addRecentDirectory, readConfig } from "./config";
 
 const DEFAULT_WIDTH = 560;
@@ -14,28 +14,20 @@ const DEFAULT_HEIGHT = 480;
 const MIN_WIDTH = 360;
 const MIN_HEIGHT = 220;
 
-// Raw pieces behind the system-prompt/typed-context text, kept around
-// separately so the widget's "See context" hover card can show the actual
-// screenshot image and selection rather than re-parsing them back out of
-// buildContextText's prose.
-type ContextPreview = {
-  windowTitle?: string;
-  screenshotPath?: string;
-  selectedText?: string;
-  systemPrompt: string;
-};
-
 type PopupShownPayload =
   // Sent the instant the window appears, before any of the context-capture/
   // agent-spawn work below has even started — so the widget is never just a
   // blank frame while the user waits on that chain (see toggleClancePopup).
   | { mode: "loading" }
-  | { mode: "new"; args: string[]; contextPreview?: ContextPreview; visibleContext?: string }
+  | { mode: "new"; args: string[] }
   // Minting or claiming the session failed; the widget shows why, with a
   // retry that runs the same open again.
   | { mode: "error"; message: string };
 
 let popup: BrowserWindow | null = null;
+// Every screenshot Clance takes is taken with this window out of the frame
+// (see screenCapture.ts's withWidgetConcealed).
+registerCaptureConcealedWindow(() => popup);
 let popupReady: Promise<void> | null = null;
 let currentMode: PopupShownPayload["mode"] | null = null;
 
@@ -225,13 +217,10 @@ ipcMain.on("popup:hide", () => hideWidgetKeepAlive());
 ipcMain.handle("popup:retry", () => toggleClancePopup());
 ipcMain.handle("popup:session-info", (_event, args: unknown) => popupSessionInfo(args));
 
-// Creates/positions the window but never shows it — safe to run concurrently
-// with screen-context capture (captureContextText below), since it has no
-// visible effect. Showing/focusing is a separate step (revealPopupWindow)
-// callers must not do until capture has finished: a full-screen screenshot
-// would otherwise catch the widget itself sitting on screen, and stealing
-// focus mid-capture would break the simulated Cmd+C selectedText capture
-// needs from whatever app the user was actually in.
+// Creates/positions the window but never shows it — no visible effect, so
+// it's safe to run concurrently with capturing which window the user came
+// from (captureFrontmostWindow, which has to read that before the widget
+// takes focus). Showing/focusing is a separate step (revealPopupWindow).
 async function preparePopupWindow(): Promise<void> {
   if (!popup || popup.isDestroyed()) {
     popup = createPopup();
@@ -256,115 +245,6 @@ function revealPopupWindow(): void {
 function sendToPopup(payload: PopupShownPayload): void {
   popup?.webContents.send("popup-shown", payload);
   currentMode = payload.mode;
-}
-
-// windowTitle comes from whatever app happens to be frontmost — any app can
-// set its own window title to arbitrary text, including terminal escape
-// sequences, so this can't be trusted verbatim. Strips C0/C1 control chars
-// (this also destroys embedded bracketed-paste markers like \x1b[201~,
-// since ESC itself is stripped).
-function sanitizeForTerminal(text: string): string {
-  // eslint-disable-next-line no-control-regex
-  return text.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, "");
-}
-
-// A highlighted selection can be an entire document — cap what rides into
-// the system prompt so one huge selection can't blow out the context
-// window on every single invocation.
-const MAX_SELECTED_TEXT_CHARS = 4000;
-function truncateSelectedText(text: string): string {
-  return text.length > MAX_SELECTED_TEXT_CHARS
-    ? `${text.slice(0, MAX_SELECTED_TEXT_CHARS)}\n[...truncated]`
-    : text;
-}
-
-// Built fresh per refresh (never cached) so the re-captured context reflects
-// what's actually on screen right now. The only remaining caller is
-// refreshContext's explicit Cmd+Shift+R path — a plain hotkey-open no
-// longer captures or types any of this (see localToolsSystemPrompt below
-// for what a fresh/claimed session gets instead, baked in invisibly at
-// mint time), so this is always the "refresh" framing now.
-function buildContextText(
-  windowTitle: string | undefined,
-  screenshotPath: string | undefined,
-  selectedText: string | undefined
-): string {
-  const lines = [REFRESH_CONTEXT_PREFIX];
-  if (windowTitle) {
-    lines.push(`The frontmost window now is: "${sanitizeForTerminal(windowTitle)}".`);
-  }
-  if (screenshotPath) {
-    lines.push(
-      "An updated screenshot of their screen, just captured, is attached to this conversation as an " +
-        "image — look at it directly if it's relevant to what they ask, no need to read a file for it."
-    );
-  }
-  if (selectedText) {
-    lines.push(
-      `The user had this text highlighted/selected in that app:\n"""\n${truncateSelectedText(sanitizeForTerminal(selectedText))}\n"""\n` +
-        "Treat this selection as the primary subject of their request — focus on it unless they clearly ask about something unrelated to it."
-    );
-  }
-  return lines.join("\n");
-}
-
-// captureSelection gates on the same Accessibility permission insert_text
-// needs, since it's the same underlying mechanism (a simulated keystroke,
-// here Cmd+C instead of Cmd+V) — see captureSelectedText in frontApp.ts.
-// Only caller is refreshContext's explicit Cmd+Shift+R path (a plain
-// hotkey-open captures nothing at all anymore, see toggleClancePopupInner),
-// so this always captures a screenshot too — that's the explicit "look
-// again" action.
-async function captureContextText(
-  captureSelection: boolean
-): Promise<{ text: string; preview: ContextPreview }> {
-  const [windowTitle, screenshotPath, selectedText] = await Promise.all([
-    captureFrontmostWindow(),
-    captureAndSaveActiveDisplay().catch(() => undefined),
-    captureSelection ? captureSelectedText() : Promise.resolve(undefined),
-  ]);
-  const text = buildContextText(windowTitle, screenshotPath, selectedText);
-  return {
-    text,
-    preview: { windowTitle, screenshotPath, selectedText, systemPrompt: text },
-  };
-}
-
-// Re-captures screen context for the *live* session already showing in the
-// popup, instead of only ever photographing the moment the hotkey was
-// pressed (see docs/design.md's "⌘⇧R: hand over the current screen").
-// Triggered from the popup's own Cmd+Shift+R handler (popup.js) rather than
-// a hotkey, since Cmd+Space-style global shortcuts are already spoken for by
-// togglePopup. The result rides into the pty exactly like a resumed
-// session's initial context does (popup.js's injectContextIntoTerminal) —
-// there's no flag equivalent to --append-system-prompt for a process
-// that's already running.
-//
-// Deliberately doesn't reuse hidePopup() — that also nulls currentMode,
-// which every other check in this module treats as "no live conversation
-// showing." A refresh needs the popup invisible just long enough for an
-// accurate screenshot (the same reason preparePopupWindow/revealPopupWindow
-// are split at initial open), not a real close.
-export async function refreshContext(): Promise<{ text: string; preview: ContextPreview } | null> {
-  if (!popup || popup.isDestroyed() || currentMode !== "new") return null;
-  const accessibilityGranted = checkPermissions().accessibility;
-  // setOpacity(0), not hide(): hiding this window hands focus to whatever
-  // macOS considers "next" (its own main window, if one happens to be
-  // open), dragging in a pile of window-activation side effects. Opacity
-  // keeps the window fully present at the OS level — still focused, still
-  // "visible" — just fully transparent, which is enough to keep it out of
-  // desktopCapturer's screenshot without touching anything else.
-  popup.setOpacity(0);
-  try {
-    // The opacity change needs a beat to actually land before the
-    // screenshot reads the display back — same wait-for-the-window-server-
-    // to-catch-up value used elsewhere for this class of problem (see
-    // frontApp.ts's captureSelectedText).
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    return await captureContextText(accessibilityGranted);
-  } finally {
-    if (popup && !popup.isDestroyed()) popup.setOpacity(1);
-  }
 }
 
 // Which of localToolsServer.ts's LOCAL_TOOLS are pre-authorized (no
@@ -557,8 +437,8 @@ async function toggleClancePopupInner(): Promise<void> {
   // click_at/clear_focused_field/replace_focused_field fall back to
   // targeting when the model doesn't pass an explicit `app`. Skipping it
   // entirely would silently break that default for every fresh widget open
-  // (nothing to fall back to, or a stale target left over from wherever the
-  // last Cmd+Shift+R refresh happened). Its own return value (the title
+  // (nothing to fall back to, or a stale target left over from wherever a
+  // previous open happened). Its own return value (the title
   // text) is unused here now — only the side effect matters — but it's
   // still cheap enough (no screenshot, no simulated Cmd+C) that it's not
   // worth special-casing out of preparePopupWindow's concurrent run.

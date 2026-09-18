@@ -36,7 +36,6 @@ What Clance does. Why is in `background.md`; how is in `design.md`.
   - **Title** — shows the session's folder and title; clicking it, or ⌘K
     anywhere in the widget, resumes any past session in the widget, or starts
     a new session in a recent or chosen directory.
-  - **ctx** — hover card showing what the last ⌘⇧R captured.
   - **Open in App** — move the live terminal into a main-window tab without
     restarting it.
   - **Hide** (or ⌥Space while the widget is open) — tuck the widget away
@@ -47,9 +46,7 @@ What Clance does. Why is in `background.md`; how is in `design.md`.
 - A hint bar under the terminal shows the shortcuts and the session's folder.
 - If the session can't start, the widget says so, with Try again and Open
   Settings.
-- **⌘⇧R** pastes a fresh screenshot (as an image), the frontmost window's
-  title and the highlighted text into the input, unsent, for the user to ask
-  about.
+- No screenshot Clance takes includes the widget itself.
 - Dropping a file onto any Clance terminal pastes its path into the input.
 
 ## Local tools
@@ -73,7 +70,7 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - Each tool can be switched off (Settings → clance tools). A
   switched-off tool is refused, not just prompted.
 - Screen Recording is optional. Without it, `look_at_screen` says how to
-  enable it and ⌘⇧R omits the screenshot.
+  enable it rather than failing opaquely.
 - Tool, MCP and settings changes apply to sessions started afterwards. A
   session that's already running keeps what it started with.
 
@@ -214,7 +211,7 @@ Sessions Clance starts get these tools when Accessibility is granted:
   HUD appears in about 100 ms, and a 10-second utterance transcribes in under
   1.5 s on the recommended model.
 - **Private.** No screen content is captured unless a session calls a screen
-  tool or the user presses ⌘⇧R. No audio leaves the Mac. No telemetry.
+  tool. No audio leaves the Mac. No telemetry.
 - **Local.** Works offline apart from the Claude API, speech model downloads
   and the update check.
 - **Light when idle.** No background capture of any kind; one spare `claude`

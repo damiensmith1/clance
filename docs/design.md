@@ -62,7 +62,6 @@ which is also the working directory for sessions that have no project:
 | `dictation.db` | Transcript history | `dictationStore.ts` |
 | `models/` | Speech model weights | `whisperModels.ts` |
 | `dictation/` | Per-utterance WAVs (deleted after transcription unless `keepAudio`) | `dictation.ts` |
-| `screenshots/` | Screenshots taken by ⌘⇧R | `screenCapture.ts` |
 | `dropped-files/` | Copies of files dropped onto a terminal | `dropFiles.ts` |
 
 Session transcripts are never written by Clance — the CLI writes them to
@@ -155,8 +154,8 @@ session stops and removes it, so empty conversations don't accumulate.
 Code session on the machine, not just Clance's. Titles come from the first
 real user message, read line by line rather than parsing whole transcripts
 (they reach several MB). Messages the CLI injects for local slash commands
-(`<local-command-caveat>` etc.) and the ⌘⇧R context preamble
-(`REFRESH_CONTEXT_PREFIX`) are skipped so they never become a title.
+(`<local-command-caveat>` etc.) and the context preambles Clance used to
+type into the widget are skipped so they never become a title.
 
 The Sessions tab (`ChatsSection.js`) is one table: session (title over its
 folder), project, state, updated. It has no header row, since each column is
@@ -277,11 +276,6 @@ introducing any tag of its own; the user's own messages are shown as typed.
 - `reparentPty` retargets a pty's output to a different window — how "Open
   in App" moves a live popup terminal into the main window without
   restarting it.
-- `pasteImageIntoPty` delivers an image as a real attachment: write the PNG
-  to the clipboard, then write a single `Ctrl+V` byte (`0x16`) into the pty.
-  The CLI reads image data from the OS clipboard itself when it sees the
-  paste key; nothing image-sized crosses the pty. The previous clipboard is
-  restored shortly after.
 
 ### Renderer
 
@@ -377,32 +371,33 @@ every open would cost latency and be stale or irrelevant most of the time.
 If a session fails to start — a spawn error, or the CLI exiting non-zero
 within 8 s — the popup swaps the terminal for an error state with Try again
 (`popup:retry`) and Open Settings, rather than leaving a dead terminal. A
-hint bar under the terminal shows the hide, ⌘K and ⌘⇧R shortcuts and the
+hint bar under the terminal shows the hide and ⌘K shortcuts and the
 session's folder.
 
-### ⌘⇧R: hand over the current screen
+### Keeping the widget out of the frame
 
-Reserved from the CLI with xterm's `attachCustomKeyEventHandler` (plain ⌘R
-is Electron's reload). `refreshContext()`:
+The widget sits on top of whatever is being asked about, so no screenshot
+Clance takes may include it. `screenCapture.ts`'s `withWidgetConcealed` sets
+the window's opacity to 0 — not `hide()`, which hands focus to whatever
+macOS considers "next" and drags in a pile of window-activation side
+effects — waits 150 ms for the window server, and restores it afterwards,
+including when the capture throws. It wraps `captureActiveDisplay` itself,
+so every caller is covered, and nests if one conceal ends up inside
+another: only the outermost restores. An already-hidden widget costs
+nothing — no wait, no restore. The window registers itself with
+`screenCapture.ts` rather than being imported by it, since `popupWindow.ts`
+already imports `localToolsServer.ts`, a caller of the same capture.
 
-1. Sets the popup's opacity to 0 — not `hide()`, which would shift focus —
-   and waits 150 ms so the screenshot doesn't include it.
-2. Captures the frontmost window title, the selection (if Accessibility is
-   granted) and a screenshot, in parallel.
-3. The popup pastes the screenshot as an image (`pasteImageIntoPty`), then
-   bracketed-pastes a short text block with the title and selection. The user
-   adds their question and presses Enter.
-
-Window titles and selections are untrusted — any app can set its title to
-arbitrary bytes. Control characters, including ESC, are stripped before
-pasting (in main and again in the renderer), so a title can't end the
-bracketed paste early and inject input. Selections are capped at 4,000
-characters.
-
-The toolbar's `ctx` hover card shows what the last refresh captured:
-screenshot, window title, selection and the pasted text. The card is
-positioned against the widget itself, not the toolbar link, so it always stays
-inside the window.
+Clance used to hand the screen over by itself: ⌘⇧R captured the frontmost
+window's title, the selection and a screenshot, pasted the image into the
+terminal and typed a preamble describing it, unsubmitted, for the user to
+add their question to. That's gone. A session reads the screen through the
+local tools instead, when it decides it needs to — which costs an image
+only when one is wanted, gives the model the question before it looks, and
+works from any session rather than only the widget. The preamble was its
+own evidence: `chatHistory.ts` had to strip it back out so it wouldn't
+become the session's title, and still does for transcripts recorded before
+the change.
 
 ## Local tools server
 
@@ -413,7 +408,7 @@ to the CLI's own file and shell tools. Handlers are in `frontApp.ts`.
 
 | Tool | Tier | Mechanism |
 |---|---|---|
-| `look_at_screen` | auto | `desktopCapturer`, display under the cursor, longest edge resized to 1568 px, returned as an MCP image block. Reports that Screen Recording is off rather than failing opaquely. |
+| `look_at_screen` | auto | `desktopCapturer`, display under the cursor, longest edge resized to 1568 px, returned as an MCP image block. The widget is concealed for the capture. Reports that Screen Recording is off rather than failing opaquely. |
 | `read_selection` | auto | Clear the clipboard, simulate ⌘C, read it back, restore. Clearing first means "nothing selected" can't be confused with old clipboard contents. |
 | `list_open_windows` | auto | Window titles, so the model can pass an exact `app` |
 | `click_at(x, y)` | auto | Click at fractions (0–1) of the display under the cursor — independent of the screenshot's resize. No `app` parameter; the model composes it with `activate_app`. |
@@ -1047,8 +1042,6 @@ on errors.
   hasn't been verified, and the full set of `status`/`state` values from
   `claude agents --json` isn't known (seen: `busy`/`idle`,
   `working`/`blocked`/`done`).
-- **First-run CLI prompts.** A never-configured `claude` install may show
-  interstitial prompts that block the ⌘⇧R image paste. Unchecked.
 - **Semantic targeting.** `click_at` is coordinate-based; clicking a named
   control needs an accessibility-tree read, which hasn't been built.
 - **Approval for multi-step computer use** — chains of individually harmless

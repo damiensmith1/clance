@@ -45,7 +45,7 @@ export function PermissionsStep({ onComplete, onBack, onReady } = {}) {
       ? html`<p class="empty-note">Checking…</p>`
       : html`
           <${StatusCard} title="Accessibility" description="Type and click in other apps when you ask." status="checking…" />
-          <${StatusCard} title="Screen Recording" description="Hand Clance a screenshot with ⌘⇧R." status="checking…" />
+          <${StatusCard} title="Screen Recording" description="Lets a session look at your screen when you ask it to." status="checking…" />
           <${StatusCard} title="Microphone" description="Needed for dictation." status="checking…" />
         `;
   }
@@ -66,7 +66,7 @@ export function PermissionsStep({ onComplete, onBack, onReady } = {}) {
       />
       <${StatusCard}
         title="Screen Recording"
-        description="Hand Clance a screenshot with ⌘⇧R."
+        description="Lets a session look at your screen when you ask it to."
         status=${status.screenRecording ? "granted" : "off · optional"}
         tone=${status.screenRecording ? "ok" : "plain"}
         actionLabel=${status.screenRecording ? null : "Grant"}
@@ -116,7 +116,7 @@ export function PermissionsStep({ onComplete, onBack, onReady } = {}) {
         : null}
       <${StatusCard}
         title="Screen Recording"
-        description="Hand Clance a screenshot with ⌘⇧R."
+        description="Lets a session look at your screen when you ask it to."
         status=${status.screenRecording ? "granted" : "optional · off"}
         tone=${status.screenRecording ? "ok" : "plain"}
         actionLabel=${status.screenRecording ? null : "Grant"}

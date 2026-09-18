@@ -271,94 +271,6 @@
         text-overflow: ellipsis;
       }
 
-      /* Hovering reveals what was captured and handed to the CLI at
-         invocation. The card is positioned against #app (the link itself
-         isn't positioned), so it always stays inside the window. It starts
-         flush under the toolbar: a gap would be a dead zone that drops
-         :hover on the way from the link to the card. */
-      #context-link {
-        flex-shrink: 0;
-        display: inline-flex;
-        align-items: center;
-        height: 24px;
-        padding: 0 var(--space-2);
-        border-radius: 5px;
-        font-family: var(--font-mono);
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        background: var(--surface-bg);
-        cursor: default;
-        -webkit-app-region: no-drag;
-      }
-      #context-link:hover {
-        color: var(--accent-contrast);
-        background: var(--accent);
-      }
-      #context-dialog {
-        display: none;
-        position: absolute;
-        top: 32px;
-        left: var(--space-3);
-        right: var(--space-3);
-        max-height: calc(100% - 48px);
-        overflow-y: auto;
-        box-sizing: border-box;
-        padding: 14px;
-        background: var(--surface-card);
-        border-radius: var(--radius-lg);
-        box-shadow: var(--shadow-menu);
-        text-align: left;
-        font-family: var(--font-sans);
-        font-size: var(--text-md);
-        color: var(--text-primary);
-        cursor: default;
-        z-index: 10;
-      }
-      #context-link:hover #context-dialog {
-        display: block;
-      }
-      /* One scrollbar for the whole card rather than nested scroll areas. */
-      .context-dialog-label {
-        margin: 14px 0 5px;
-        font-family: var(--font-mono);
-        font-size: var(--text-xs);
-        text-transform: lowercase;
-        color: var(--text-tertiary);
-      }
-      .context-dialog-label:first-child {
-        margin-top: 0;
-      }
-      #context-dialog-image {
-        width: 100%;
-        display: block;
-        border-radius: var(--radius-md);
-        border: 1px solid var(--surface-border);
-      }
-      /* This ID selector's own `display: block` above outranks the browser
-         default `[hidden] { display: none }` rule, so without this the
-         broken-image icon rendered next to "No context was captured". */
-      #context-dialog-image[hidden] {
-        display: none;
-      }
-      #context-dialog-title {
-        font-weight: var(--weight-medium);
-        word-break: break-word;
-      }
-      #context-dialog-selection,
-      #context-dialog-system-prompt {
-        white-space: pre-wrap;
-        word-break: break-word;
-        padding: 10px;
-        border-radius: var(--radius-md);
-        background: var(--surface-bg);
-        font-family: var(--font-mono);
-        font-size: var(--text-sm);
-        color: var(--text-primary);
-      }
-      #context-dialog-empty {
-        color: var(--text-secondary);
-      }
-
       /* FitAddon sizes rows/cols off the mount element's *direct parent*
        * clientHeight/Width without ever subtracting that parent's own
        * padding (a known xterm.js limitation) — so the padding lives here,
@@ -466,21 +378,6 @@
           </div>
         </span>
         <div class="toolbar-spacer"></div>
-        <span id="context-link" title="Captured context">
-          ctx
-          <div id="context-dialog">
-            <div class="context-dialog-label">captured when you opened clance</div>
-            <div id="context-dialog-window-label" class="context-dialog-label" hidden>window</div>
-            <div id="context-dialog-title" hidden></div>
-            <div id="context-dialog-image-label" class="context-dialog-label" hidden>screenshot</div>
-            <img id="context-dialog-image" hidden alt="Screenshot at invocation" />
-            <div id="context-dialog-selection-label" class="context-dialog-label" hidden>selection</div>
-            <div id="context-dialog-selection" hidden></div>
-            <div id="context-dialog-system-prompt-label" class="context-dialog-label" hidden>system prompt</div>
-            <div id="context-dialog-system-prompt" hidden></div>
-            <div id="context-dialog-empty" hidden>No context was captured for this session.</div>
-          </div>
-        </span>
         <button id="open-in-app-btn" class="toolbar-btn" title="Open in Clance window" aria-label="Open in Clance window">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M19 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6" />
@@ -501,7 +398,7 @@
       <div id="session">
         <div id="term-mount"><div id="term-inner"></div></div>
         <div id="hint-bar">
-          <span id="hint-bar-toggle">⌥Space hide</span><span>⌘K sessions</span><span>⌘⇧R add screen</span><span class="hint-bar-spacer"></span><span id="hint-bar-folder"></span>
+          <span id="hint-bar-toggle">⌥Space hide</span><span>⌘K sessions</span><span class="hint-bar-spacer"></span><span id="hint-bar-folder"></span>
         </div>
       </div>
     </div>

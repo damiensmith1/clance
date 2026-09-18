@@ -12,17 +12,6 @@ const openInRecentDirsEl = document.getElementById("open-in-recent-dirs");
 const closeBtn = document.getElementById("close-btn");
 const hideBtn = document.getElementById("hide-btn");
 const openInAppBtn = document.getElementById("open-in-app-btn");
-const contextLinkEl = document.getElementById("context-link");
-const contextDialogEl = document.getElementById("context-dialog");
-const contextDialogTitleEl = document.getElementById("context-dialog-title");
-const contextDialogWindowLabelEl = document.getElementById("context-dialog-window-label");
-const contextDialogImageLabelEl = document.getElementById("context-dialog-image-label");
-const contextDialogImageEl = document.getElementById("context-dialog-image");
-const contextDialogSelectionLabelEl = document.getElementById("context-dialog-selection-label");
-const contextDialogSelectionEl = document.getElementById("context-dialog-selection");
-const contextDialogSystemPromptLabelEl = document.getElementById("context-dialog-system-prompt-label");
-const contextDialogSystemPromptEl = document.getElementById("context-dialog-system-prompt");
-const contextDialogEmptyEl = document.getElementById("context-dialog-empty");
 const toolbarLabelEl = document.getElementById("toolbar-label");
 const toolbarTitleEl = document.getElementById("toolbar-title");
 const hintBarFolderEl = document.getElementById("hint-bar-folder");
@@ -94,72 +83,9 @@ function detachTerminal() {
   termInnerEl.replaceChildren();
 }
 
-// Pastes `screenshotPath` (if given) into `terminalId` as a real image
-// (clipboard + Ctrl+V byte, see ptyManager.ts's pasteImageIntoPty) so the
-// model gets an actual image content block without needing to Read() a
-// path, then types `text` (if given) as *visible*, unsubmitted bracketed-
-// paste input shortly after — so it reads like a normal "paste screenshot,
-// type question" turn. `text` is wrapped in bracketed paste so the CLI's
-// multi-line input treats it as one pasted block (embedded newlines
-// included) instead of submitting partway through, and left unsubmitted so
-// the user can add to it before hitting Enter themselves. Shared by the
-// initial context injection (openTerminal, below) and a mid-conversation
-// refresh (triggerContextRefresh) — the delivery mechanism is identical
-// either way, only the trigger differs.
-function injectContextIntoTerminal(terminalId, text, screenshotPath) {
-  const sendText = () => {
-    if (!text || activeTerminalId !== terminalId) return;
-    // Defense in depth: the main process already strips control chars
-    // (including ESC) from window-title-derived text before it gets here,
-    // but sanitize again so this path is safe even if `text` ever carries
-    // untrusted text some other way — in particular, stripping ESC means
-    // it can't contain a fake `\x1b[201~` that would let content escape
-    // the paste block early. Trailing newlines stay inside the paste
-    // brackets (bracketed paste treats embedded \n as literal text, not
-    // Enter) so the input stays unsubmitted for the user to add to.
-    // eslint-disable-next-line no-control-regex
-    const sanitized = text.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, "");
-    window.clance.writeTerminal(terminalId, `\x1b[200~${sanitized}\n\n\x1b[201~`);
-  };
-  if (screenshotPath) {
-    window.clance.pasteImageToTerminal(terminalId, screenshotPath);
-    // Give the CLI a moment to register the pasted image as its own
-    // pending attachment before typing text after it, rather than racing
-    // the two into the input at once.
-    if (text) setTimeout(sendText, 400);
-  } else {
-    sendText();
-  }
-}
-
-// Cmd+Shift+R while the popup terminal has focus — re-captures screen
-// context for the *already-running* session instead of only ever
-// photographing the moment the hotkey was pressed (see docs/design.md's
-// "⌘⇧R: hand over the current screen"). Cmd+R alone is already
-// Electron's default "reload" accelerator (see appMenu.ts), which would
-// blow away this whole renderer, so this needs a different combo.
-let refreshingContext = false;
-async function triggerContextRefresh() {
-  if (refreshingContext || !activeTerminalId) return;
-  const terminalId = activeTerminalId;
-  refreshingContext = true;
-  try {
-    const result = await window.clance.refreshContext();
-    if (!result || activeTerminalId !== terminalId) return;
-    renderContextPreview(result.preview);
-    injectContextIntoTerminal(terminalId, result.text, result.preview.screenshotPath);
-  } finally {
-    refreshingContext = false;
-  }
-}
-
-// Opens a fresh Claude CLI terminal in the popup. `visibleContext`, if
-// given, is typed into the input once the session is ready — used for
-// resumed sessions, which can't reliably take context injected invisibly
-// via a system-prompt flag (see popupWindow.ts). `screenshotPath`, if
-// given, is pasted in first as a real image — see injectContextIntoTerminal
+// Opens a fresh Claude CLI terminal in the popup.
 // above for how both are delivered.
-function openTerminal(args, visibleContext, screenshotPath) {
+function openTerminal(args) {
   teardownTerminal();
   // teardownTerminal() only clears term-inner as a side effect of tearing
   // down a *previous* terminal (it early-returns with none active) — but
@@ -209,19 +135,6 @@ function openTerminal(args, visibleContext, screenshotPath) {
   fitAddon.fit();
   term.focus();
 
-  // Reserves Cmd+Shift+R for triggerContextRefresh instead of letting it
-  // reach the CLI as ordinary input — xterm's documented mechanism for
-  // carving out app-level shortcuts (returning false skips xterm's own
-  // handling of the event entirely).
-  term.attachCustomKeyEventHandler((event) => {
-    if (event.type === "keydown" && event.metaKey && event.shiftKey && event.key.toLowerCase() === "r") {
-      event.preventDefault();
-      triggerContextRefresh();
-      return false;
-    }
-    return true;
-  });
-
   const terminalId = (activeTerminalId = `popup-${Date.now()}`);
   window.clance
     .createTerminal(activeTerminalId, "claude", args, term.cols, term.rows)
@@ -259,16 +172,6 @@ function openTerminal(args, visibleContext, screenshotPath) {
   term.onData((data) => {
     window.clance.writeTerminal(activeTerminalId, data);
   });
-
-  if (screenshotPath || visibleContext) {
-    const terminalId = activeTerminalId;
-    // Resuming replays the session's prior history first, so this needs
-    // longer to land than a fresh session's near-instant prompt.
-    setTimeout(() => {
-      if (activeTerminalId !== terminalId) return;
-      injectContextIntoTerminal(terminalId, visibleContext, screenshotPath);
-    }, 1200);
-  }
 }
 
 function renderOpenInList(sessions) {
@@ -446,83 +349,6 @@ termInnerEl.addEventListener("drop", async (event) => {
   term?.focus();
 });
 
-// Populates the "See context" hover card with what was actually captured —
-// the same pieces buildContextText() (popupWindow.ts) wove into prose for
-// the CLI, shown here as-is instead of re-parsed back out of that prose.
-// Only ever populated by a Cmd+Shift+R refresh now — a plain hotkey-open no
-// longer captures anything (its system prompt is static, baked in
-// invisibly at mint time), and `openPopupWithArgs` (pop-out-to-widget)
-// never captured fresh context at all — so `preview` is undefined in both
-// of those cases, and the empty state below covers them the same way.
-function renderContextPreview(preview) {
-  // preview is undefined for flows with nothing captured to show —
-  // genuinely nothing, unlike a captured-but-empty field below.
-  // systemPrompt itself is never empty when preview exists (buildContextText
-  // always returns at least its boilerplate first line), so it's shown
-  // whenever preview is.
-  if (!preview) {
-    contextDialogTitleEl.hidden = true;
-    contextDialogWindowLabelEl.hidden = true;
-    contextDialogImageLabelEl.hidden = true;
-    contextDialogImageEl.hidden = true;
-    contextDialogImageEl.removeAttribute("src");
-    contextDialogSelectionLabelEl.hidden = true;
-    contextDialogSelectionEl.hidden = true;
-    contextDialogSystemPromptLabelEl.hidden = true;
-    contextDialogSystemPromptEl.hidden = true;
-    contextDialogEmptyEl.hidden = false;
-    return;
-  }
-
-  const { windowTitle, screenshotPath, selectedText, systemPrompt } = preview;
-  contextDialogEmptyEl.hidden = true;
-
-  contextDialogTitleEl.hidden = !windowTitle;
-  contextDialogWindowLabelEl.hidden = !windowTitle;
-  contextDialogTitleEl.textContent = windowTitle ?? "";
-
-  if (screenshotPath) {
-    // encodeURI (not encodeURIComponent, which would also escape "/")
-    // guards against a home directory path containing spaces or other
-    // characters that aren't valid unescaped in a URL.
-    contextDialogImageEl.src = `file://${encodeURI(screenshotPath)}`;
-    contextDialogImageEl.hidden = false;
-    contextDialogImageLabelEl.hidden = false;
-  } else {
-    contextDialogImageEl.hidden = true;
-    contextDialogImageEl.removeAttribute("src");
-    contextDialogImageLabelEl.hidden = true;
-  }
-
-  contextDialogSelectionEl.hidden = !selectedText;
-  contextDialogSelectionEl.textContent = selectedText ?? "";
-  contextDialogSelectionLabelEl.hidden = !selectedText;
-
-  contextDialogSystemPromptEl.hidden = !systemPrompt;
-  contextDialogSystemPromptEl.textContent = systemPrompt ?? "";
-  contextDialogSystemPromptLabelEl.hidden = !systemPrompt;
-}
-
-// #context-dialog's CSS max-height (560px) is just an upper cap — it
-// doesn't know how much room is actually left below the toolbar in the
-// current (user-resizable) window. Left alone, a dialog taller than that
-// remaining space gets clipped by #app's own overflow: hidden (needed for
-// the widget's rounded corners), and since #app's edge *is* the window's
-// edge, that clip is absolute — no amount of scrolling the dialog's own
-// content can bring the clipped-off tail into view, because it's a fixed
-// geometry problem (that content always lands in the same dead zone at the
-// bottom of the dialog's box), not a scroll-position one. Recomputing the
-// real ceiling on every hover and writing it as an inline style (which
-// wins over the CSS rule) keeps the dialog's own scrolling honest — it
-// never renders taller than what's actually visible, so scrolling all the
-// way down always works.
-const CONTEXT_DIALOG_MAX_HEIGHT = 560;
-const CONTEXT_DIALOG_BOTTOM_MARGIN = 10;
-contextLinkEl.addEventListener("mouseenter", () => {
-  const available =
-    window.innerHeight - contextLinkEl.getBoundingClientRect().bottom - CONTEXT_DIALOG_BOTTOM_MARGIN;
-  contextDialogEl.style.maxHeight = `${Math.min(Math.max(available, 120), CONTEXT_DIALOG_MAX_HEIGHT)}px`;
-});
 
 closeBtn.addEventListener("click", () => window.clance.closeWidget());
 
@@ -544,7 +370,7 @@ openInAppBtn.addEventListener("click", () => {
 // ready — see toggleClancePopup in popupWindow.ts, which sends this first
 // so the window is never just a blank frame while that work is still in
 // flight.
-function showLoading(contextPreview) {
+function showLoading() {
   teardownTerminal();
   appEl.classList.add("has-messages");
   appEl.classList.remove("has-error");
@@ -554,17 +380,6 @@ function showLoading(contextPreview) {
   label.className = "note";
   label.textContent = "starting claude…";
   state.append(label);
-  const captured = [
-    contextPreview?.windowTitle && "window",
-    contextPreview?.selectedText && "selection",
-    contextPreview?.screenshotPath && "screenshot",
-  ].filter(Boolean);
-  if (captured.length > 0) {
-    const detail = document.createElement("div");
-    detail.className = "note";
-    detail.textContent = `captured: ${captured.join(" · ")}`;
-    state.append(detail);
-  }
   termInnerEl.replaceChildren(state);
 }
 
@@ -641,14 +456,12 @@ window.addEventListener("focus", () => {
 window.clance.onShown((payload) => {
   appEl.classList.remove("has-messages");
   closeOpenInDropdown();
-  renderContextPreview(payload.contextPreview);
-
   appEl.classList.remove("has-error");
   if (payload.mode === "loading") {
-    showLoading(payload.contextPreview);
+    showLoading();
   } else if (payload.mode === "error") {
     showError(payload.message, () => window.clance.retry());
   } else {
-    openTerminal(payload.args, payload.visibleContext, payload.contextPreview?.screenshotPath);
+    openTerminal(payload.args);
   }
 });

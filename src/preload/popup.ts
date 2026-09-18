@@ -20,9 +20,6 @@ contextBridge.exposeInMainWorld("clance", {
     ipcRenderer.invoke("terminal:create", { terminalId, command, args, cols, rows }),
   writeTerminal: (terminalId: string, data: string) =>
     ipcRenderer.send("terminal:input", { terminalId, data }),
-  pasteImageToTerminal: (terminalId: string, imagePath: string) =>
-    ipcRenderer.invoke("terminal:paste-image", { terminalId, imagePath }),
-  refreshContext: () => ipcRenderer.invoke("popup:refresh-context"),
   resizeTerminal: (terminalId: string, cols: number, rows: number) =>
     ipcRenderer.send("terminal:resize", { terminalId, cols, rows }),
   killTerminal: (terminalId: string) =>
@@ -45,14 +42,8 @@ contextBridge.exposeInMainWorld("clance", {
     ipcRenderer.on("popup-shown", (_event, payload: PopupShownPayload) => callback(payload)),
 });
 
-type ContextPreview = {
-  windowTitle?: string;
-  screenshotPath?: string;
-  selectedText?: string;
-  systemPrompt: string;
-};
 
 type PopupShownPayload =
   | { mode: "loading" }
-  | { mode: "new"; args: string[]; contextPreview?: ContextPreview; visibleContext?: string }
+  | { mode: "new"; args: string[] }
   | { mode: "error"; message: string };
