@@ -28,7 +28,7 @@ export function LaunchAtLoginRow({ prefs, setPrefs }) {
 }
 
 // Where a brand-new Clance-created session opens — the popup hotkey, the
-// pre-warmed pool spare, and the main window's "New Chat" all read this
+// pre-warmed pool spare, and the main window's new sessions all read this
 // (see config.ts's getDefaultDirectory). Doesn't affect resuming an
 // existing session, which always reopens in whatever directory it already
 // belongs to. See docs/design.md's "Working directory".

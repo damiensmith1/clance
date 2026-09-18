@@ -130,9 +130,9 @@ export async function hideWidgetKeepAlive(): Promise<void> {
 // If the session that's about to close was minted/claimed by this popup
 // and never got a single real user turn, there's no reason to keep it
 // running — or even keep it around as a stopped-but-resumable session,
-// which would just be silent clutter in the Closed list forever (its
-// transcript title would fall back to "New conversation" indefinitely,
-// since it never had any real content to derive one from). Deliberately
+// which would just be silent clutter in the Closed list forever (it never
+// had any real content to derive a title from, so it would sit there under
+// the placeholder indefinitely). Deliberately
 // NOT wired into hidePopup() itself — "Open in App" also calls hidePopup()
 // but is the opposite of abandonment (the conversation is being kept, just
 // moved to a tab), so this is only called from the two truly-explicit-close

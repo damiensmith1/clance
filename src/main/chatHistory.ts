@@ -17,6 +17,14 @@ const CLANCE_PROJECT_DIR = SESSION_CWD.replace(/[/.]/g, "-");
 
 const TITLE_MAX_LENGTH = 70;
 
+// What a session is called before its conversation has a name. The one
+// placeholder the user ever sees for that state: it stands in for a
+// transcript with no real user message, and it's the name a main-window
+// mint is given, so the Sessions list, a tab and `claude agents --json`
+// all agree. Emptiness itself is never this string — see readSessionHead,
+// which reports it as null — so nothing can be faked by typing it.
+export const SESSION_PLACEHOLDER_TITLE = "Clance Chat";
+
 export type SessionSummary = {
   id: string;
   filePath: string;
@@ -116,11 +124,11 @@ function isAutomatedEntrypoint(entrypoint: unknown): boolean {
   return typeof entrypoint === "string" && entrypoint.startsWith("sdk-");
 }
 
-async function firstUserTitle(filePath: string): Promise<string> {
+async function firstUserTitle(filePath: string): Promise<string | null> {
   return (await readSessionHead(filePath)).title;
 }
 
-async function readSessionHead(filePath: string): Promise<{ title: string; automated: boolean }> {
+async function readSessionHead(filePath: string): Promise<{ title: string | null; automated: boolean }> {
   let automated = false;
   const rl = createInterface({
     input: createReadStream(filePath, "utf8"),
@@ -154,14 +162,12 @@ async function readSessionHead(filePath: string): Promise<{ title: string; autom
   } finally {
     rl.close();
   }
-  return { title: EMPTY_CONVERSATION_TITLE, automated };
+  // No real user turn in the file: null, not a placeholder sentence. The
+  // callers below decide what to show, and "does this session have
+  // anything in it" stays a question about the data rather than a string
+  // comparison a first message could answer wrongly by quoting it.
+  return { title: null, automated };
 }
-
-// firstUserTitle's fallback when a transcript has no real (non-synthetic)
-// user turn yet — named as a constant rather than repeating the literal, so
-// hasRealUserMessage below can share the exact same definition of "empty"
-// instead of re-scanning the file with separate logic that could disagree.
-const EMPTY_CONVERSATION_TITLE = "New conversation";
 
 // Shared by titleForSessionId and cwdForSessionId below — a session can be
 // resumed from any project (the terminal actually running it is always in
@@ -256,8 +262,7 @@ export async function cwdForSessionId(sessionId: string): Promise<string | null>
 // real pre-existing conversation (opened via "Open in…", say) always comes
 // back true even if this particular viewing added nothing new to it.
 export async function hasRealUserMessage(sessionId: string): Promise<boolean> {
-  const title = await titleForSessionId(sessionId);
-  return title !== null && title !== EMPTY_CONVERSATION_TITLE;
+  return (await titleForSessionId(sessionId)) !== null;
 }
 
 // Finds the session id for a brand-new (never `--resume`'d) Clance popup
@@ -353,12 +358,12 @@ export async function listSessions(): Promise<SessionSummary[]> {
         // just covers that best-effort cleanup itself failing, for
         // whichever fraction of sessions still happen to be minted at the
         // default directory.
-        if (dirName === CLANCE_PROJECT_DIR && title === EMPTY_CONVERSATION_TITLE) continue;
+        if (dirName === CLANCE_PROJECT_DIR && title === null) continue;
         summaries.push({
           id,
           filePath,
           projectLabel: projectLabelFor(dirName),
-          title,
+          title: title ?? SESSION_PLACEHOLDER_TITLE,
           lastModified: fileStat.mtime.toISOString(),
           archived: archivedIds.has(id),
           pinned: pinnedIds.has(id),
@@ -686,7 +691,7 @@ export async function peekSession(sessionId: string): Promise<SessionPeek | null
 
   return {
     id: sessionId,
-    title: aiTitle || title || EMPTY_CONVERSATION_TITLE,
+    title: aiTitle || title || SESSION_PLACEHOLDER_TITLE,
     projectLabel: projectLabelFor(basename(dirname(filePath))),
     cwd,
     gitBranch,

@@ -65,6 +65,14 @@ function findTabAnywhere(node, tabId) {
   return null;
 }
 
+// Every tab in the tree, with the pane holding it — for the few things that
+// act on tabs wherever they are rather than on one pane (Shell.js renames a
+// session tab once its conversation has a name).
+export function listTabs(node) {
+  if (node.type === "leaf") return node.tabs.map((tab) => ({ paneId: node.id, tab }));
+  return node.children.flatMap((child) => listTabs(child));
+}
+
 function findFirstLeaf(node) {
   if (node.type === "leaf") return node;
   return findFirstLeaf(node.children[0]);
@@ -257,6 +265,20 @@ function reduce(state, action) {
       return { ...state, activePaneId: action.paneId };
     }
 
+    // Label only — a tab's id is what everything else keys off (dedup on
+    // open, the pane tree, the persisted layout), so renaming never touches
+    // it, and the selection doesn't move. `named` records that the tab has
+    // taken its conversation's name, so it stops asking (Shell.js).
+    case "RENAME_TAB": {
+      const root = updateLeaf(state.root, action.paneId, (leaf) => ({
+        ...leaf,
+        tabs: leaf.tabs.map((tab) =>
+          tab.id === action.tabId ? { ...tab, label: action.label, named: true } : tab
+        ),
+      }));
+      return { ...state, root };
+    }
+
     case "CLOSE_TAB": {
       const pane = findPane(state.root, action.paneId);
       if (!pane) return state;
@@ -441,6 +463,10 @@ export function activatePane(paneId) {
 
 export function closeTab(paneId, tabId) {
   dispatch({ type: "CLOSE_TAB", paneId, tabId });
+}
+
+export function renameTab(paneId, tabId, label) {
+  dispatch({ type: "RENAME_TAB", paneId, tabId, label });
 }
 
 export function moveTab(tabId, fromPaneId, toPaneId, toIndex) {

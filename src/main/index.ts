@@ -33,7 +33,7 @@ import {
   openMicrophoneSettings,
 } from "./permissions";
 import { SHORTCUT_ACTIONS } from "./shortcuts";
-import { peekSession, listSessions, hasRealUserMessage } from "./chatHistory";
+import { peekSession, listSessions, hasRealUserMessage, titleForSessionId, SESSION_PLACEHOLDER_TITLE } from "./chatHistory";
 import { setSessionArchived } from "./archivedSessions";
 import { setSessionPinned } from "./pinnedSessions";
 import { sessionFolder, revealFolder, resumeInTerminal } from "./sessionActions";
@@ -55,7 +55,7 @@ import {
   getPtyBuffer,
   warmLoginShellPath,
 } from "./ptyManager";
-import { resolveOpenArgs, spawnBackgroundAgent, stopAgent, listAgents } from "./agentSessions";
+import { resolveOpenArgs, resolveSessionId, spawnBackgroundAgent, stopAgent, listAgents } from "./agentSessions";
 import { isPoolSpareId } from "./agentPool";
 import { copyDroppedFile } from "./dropFiles";
 import { readWindowLayout, writeWindowLayout } from "./windowLayout";
@@ -373,6 +373,16 @@ ipcMain.handle(
   (_event, sessionId: string, pinned: boolean) => setSessionPinned(sessionId, pinned)
 );
 
+// A session tab's label, once its conversation has a name. The tab knows
+// only its launch args (["attach", <agent id>] or ["--resume", <session
+// id>]), so the agent → session hop happens here rather than costing the
+// renderer a full `claude agents --json` listing per poll.
+ipcMain.handle("sessions:title-for-args", async (_event, args: unknown) => {
+  if (!Array.isArray(args) || !args.every((arg) => typeof arg === "string")) return null;
+  const sessionId = await resolveSessionId(args);
+  return sessionId ? titleForSessionId(sessionId) : null;
+});
+
 ipcMain.handle("sessions:folder", (_event, sessionId: unknown) => sessionFolder(sessionId));
 ipcMain.handle("sessions:reveal-folder", (_event, dir: unknown) => revealFolder(dir));
 ipcMain.handle(
@@ -385,10 +395,19 @@ ipcMain.handle(
 // directory in exactly that case, same invariant popupWindow.ts's
 // openNewSessionInDirectory keeps for the popup's equivalent flow (picking
 // "Default" should never itself become a "recent" entry).
-ipcMain.handle("agents:spawn-new", async (_event, name: string, claudeArgs: string[], cwd?: string | null) => {
+ipcMain.handle("agents:spawn-new", async (_event, claudeArgs: string[], cwd?: string | null) => {
   if (cwd) addRecentDirectory(cwd);
   const { args: mcpArgs } = await sessionMcpArgs();
-  return spawnBackgroundAgent(name, [...claudeArgs, ...mcpArgs], cwd || getDefaultDirectory());
+  // Named here rather than by the caller: the placeholder a session wears
+  // until its conversation has a name belongs to one definition
+  // (chatHistory.ts), and it's returned so the tab that opens onto this
+  // agent can show the same thing without repeating the string.
+  const id = await spawnBackgroundAgent(
+    SESSION_PLACEHOLDER_TITLE,
+    [...claudeArgs, ...mcpArgs],
+    cwd || getDefaultDirectory()
+  );
+  return { id, name: SESSION_PLACEHOLDER_TITLE };
 });
 
 // Guards against shelling out `claude stop` with no real id (seen live:

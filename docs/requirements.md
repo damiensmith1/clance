@@ -124,6 +124,9 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - Tabs can be split into up to four panes by dragging to an edge (at most a
   2×2 grid), resized by dragging dividers, and reordered. The layout is
   restored on launch.
+- A session with nothing in it yet is shown as "Clance Chat" — one name for
+  that state, wherever it appears. A tab takes the conversation's real title
+  as soon as it has one.
 - Terminal tabs survive tab switches and window reloads. A session tab shows
   a live dot and a status line with its folder and start time, and can be
   popped out into the widget.

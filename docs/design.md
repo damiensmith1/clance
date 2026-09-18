@@ -150,6 +150,19 @@ session stops and removes it, so empty conversations don't accumulate.
 
 ### Session list
 
+A session with nothing in it yet is called `SESSION_PLACEHOLDER_TITLE`
+("Clance Chat"), defined once in `chatHistory.ts` and used everywhere that
+state is shown: a Sessions row, a tab, a peek header, and the name a
+main-window mint is given, so `claude agents --json` agrees too. The
+renderer never holds the string — `agents:spawn-new` names the agent and
+returns the name for the tab to wear. Emptiness itself is never that
+string: `readSessionHead` reports a transcript with no real user message as
+`title: null`, and `hasRealUserMessage` and the empty-session filter test
+for null. They used to compare the title against the placeholder's text,
+which meant a first message of exactly "New conversation" read as an empty
+session — and the widget's close path deletes sessions it believes are
+empty.
+
 `chatHistory.ts` scans `~/.claude/projects/*/*.jsonl` directly — every Claude
 Code session on the machine, not just Clance's. Titles come from the first
 real user message, read line by line rather than parsing whole transcripts
@@ -581,6 +594,15 @@ button opens `$SHELL -il` in the default directory.
 - Other windows open a section through `openMainWindowSection`, which waits for
   the renderer before sending `open-section` (the HUD's "open settings", the
   popup's error state).
+- A session tab opens before its conversation has a name — "New Chat" — and
+  takes the transcript's title once the first message lands. Nothing pushes
+  that: the CLI writes the file, so an unnamed tab asks
+  (`sessions:title-for-args`) every 3 s until it has a name, and the poll
+  stops once every tab has one. The lookup resolves the tab's launch args to
+  a session id in the main process, since a tab knows only its agent id.
+  Which tabs are still unnamed is a `named` flag the rename sets, not a
+  check against the placeholder's wording — matching label text is how a
+  second, differently-worded placeholder once slipped through unrenamed.
 
 Tab keys live in the app menu's Window items (`appMenu.ts`) rather than in a
 renderer key listener: a menu accelerator is handled before the window sees

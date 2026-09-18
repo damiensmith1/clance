@@ -107,7 +107,7 @@ export function writeConfig(config: ClanceConfig): void {
 // Single source of truth for "what directory should a brand-new
 // Clance-created session open in" — used everywhere a session gets minted
 // (the popup hotkey path, the background-agent pool, the main window's
-// "New Chat") so they can never drift out of sync with each other or with
+// a main-window session) so they can never drift out of sync with each other or with
 // what Settings actually shows the user.
 export function getDefaultDirectory(): string {
   const configured = readConfig().defaultDirectory;

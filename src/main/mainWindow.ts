@@ -2,7 +2,7 @@ import { BrowserWindow } from "electron";
 import { join } from "path";
 import { hidePopup } from "./popupWindow";
 import { resolveSessionId } from "./agentSessions";
-import { titleForSessionId, findRecentClanceSessionId } from "./chatHistory";
+import { titleForSessionId, findRecentClanceSessionId, SESSION_PLACEHOLDER_TITLE } from "./chatHistory";
 
 let mainWindow: BrowserWindow | null = null;
 let mainWindowReady: Promise<void> | null = null;
@@ -92,7 +92,7 @@ export async function openSessionInMainWindow(terminalId: string, args: string[]
   // it: since this ran un-guarded before openMainWindow()/hidePopup(), any
   // throw meant the button did nothing at all — popup stays open, no tab
   // appears, no error surfaced anywhere a user would see it. The actual
-  // handoff (open a tab, even a plain "New Chat" one, and close the widget)
+  // handoff (open a tab, even an unnamed one, and close the widget)
   // should never be held hostage by a nice-to-have label.
   let title: string | null = null;
   try {
@@ -106,11 +106,18 @@ export async function openSessionInMainWindow(terminalId: string, args: string[]
     }
     title = sessionId ? await titleForSessionId(sessionId) : null;
   } catch (err) {
-    console.error("openSessionInMainWindow: title resolution failed, opening as New Chat", err);
+    console.error("openSessionInMainWindow: title resolution failed, opening unnamed", err);
   }
 
   openMainWindow();
   await mainWindowReady;
-  mainWindow!.webContents.send("open-session-tab", { terminalId, args, title });
+  // A session nobody has typed into yet has no title, so the tab opens
+  // under the same placeholder everything else uses and renames itself once
+  // the conversation has a name (Shell.js).
+  mainWindow!.webContents.send("open-session-tab", {
+    terminalId,
+    args,
+    title: title ?? SESSION_PLACEHOLDER_TITLE,
+  });
   hidePopup();
 }

@@ -40,12 +40,13 @@ contextBridge.exposeInMainWorld("clanceApp", {
     ipcRenderer.invoke("chatHistory:set-archived", sessionId, archived),
   setSessionPinned: (sessionId: string, pinned: boolean) =>
     ipcRenderer.invoke("chatHistory:set-pinned", sessionId, pinned),
+  sessionTitleForArgs: (args: string[]) => ipcRenderer.invoke("sessions:title-for-args", args),
   sessionFolder: (sessionId: string) => ipcRenderer.invoke("sessions:folder", sessionId),
   revealFolder: (dir: string) => ipcRenderer.invoke("sessions:reveal-folder", dir),
   resumeInTerminal: (target: { sessionId?: string; agentId?: string; cwd?: string }) =>
     ipcRenderer.invoke("sessions:resume-in-terminal", target),
-  spawnNewAgent: (name: string, claudeArgs: string[] = [], cwd: string | null = null) =>
-    ipcRenderer.invoke("agents:spawn-new", name, claudeArgs, cwd),
+  spawnNewAgent: (claudeArgs: string[] = [], cwd: string | null = null) =>
+    ipcRenderer.invoke("agents:spawn-new", claudeArgs, cwd),
   getRecentDirectories: () => ipcRenderer.invoke("config:get-recent-directories"),
   stopAgent: (id: string) => ipcRenderer.invoke("agents:stop", id),
   listAgents: (opts: { all?: boolean } = {}) => ipcRenderer.invoke("agents:list", opts),

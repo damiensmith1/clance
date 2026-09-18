@@ -12,6 +12,8 @@ import {
   activateTab,
   activatePane,
   closeTab,
+  renameTab,
+  listTabs,
   moveTab,
   splitPane,
   resizeSplit,
@@ -24,6 +26,10 @@ const LAUNCHER_ITEMS = [
   { id: "dictation", label: "Dictation", icon: "mic" },
   { id: "settings", label: "Settings", icon: "gear" },
 ];
+
+// How often an unnamed session tab asks whether its conversation has a name
+// yet. Only runs while at least one tab is still unnamed.
+const TAB_TITLE_POLL_MS = 3000;
 
 const EDGES = ["top", "right", "bottom", "left"];
 const MIN_PANE_PCT = 15;
@@ -82,6 +88,16 @@ function usePaneState() {
   const [state, setState] = useState(getState());
   useEffect(() => subscribe(setState), []);
   return state;
+}
+
+// A session tab that hasn't yet taken its conversation's name. Structural,
+// not a check against the placeholder's text: the placeholder is main's to
+// choose (chatHistory.ts's SESSION_PLACEHOLDER_TITLE), and matching a label
+// string here is exactly how a second, differently-worded placeholder used
+// to slip through unrenamed. `named` is set by the rename itself, so each
+// tab asks until it has a real title and then stops.
+function isUnnamedSessionTab(tab) {
+  return tab.type === "terminal" && Boolean(tab.args?.length) && !tab.named;
 }
 
 // Section tabs take their label from LAUNCHER_ITEMS rather than the saved
@@ -520,7 +536,7 @@ export function Shell() {
     return window.clanceApp.onOpenSessionTab(async ({ terminalId, args, title }) => {
       await window.clanceApp.reparentTerminal(terminalId);
       openTab(
-        { id: terminalId, type: "terminal", label: title ?? "New Chat", icon: "terminal", terminalId, args },
+        { id: terminalId, type: "terminal", label: title, icon: "terminal", terminalId, args },
         { paneId: getState().activePaneId }
       );
     });
@@ -540,6 +556,43 @@ export function Shell() {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
+
+  // A session tab opens before its conversation has a name: minted as "New
+  // Chat", or handed over from the widget with whatever title existed then
+  // (none, for a session that hadn't been used). The name arrives when the
+  // first message lands in the transcript, which nothing pushes — the CLI
+  // writes that file — so an unnamed tab asks until it has one. The effect
+  // keys off which tabs are unnamed rather than the whole tree, so merely
+  // switching tabs doesn't restart the timer, and it stops entirely once
+  // every tab has a name.
+  const unnamedTabIds = state.root
+    ? listTabs(state.root)
+        .filter(({ tab }) => isUnnamedSessionTab(tab))
+        .map(({ tab }) => tab.id)
+        .join(",")
+    : "";
+
+  useEffect(() => {
+    if (!unnamedTabIds) return;
+    let cancelled = false;
+    async function check() {
+      for (const { paneId, tab } of listTabs(getState().root).filter(({ tab }) => isUnnamedSessionTab(tab))) {
+        const title = await window.clanceApp.sessionTitleForArgs(tab.args);
+        // Re-checked against the store rather than the list this loop
+        // started from: a tab can be closed or moved between panes while
+        // its own lookup is in flight.
+        if (cancelled || !title) continue;
+        const current = listTabs(getState().root).find((entry) => entry.tab.id === tab.id);
+        if (current && isUnnamedSessionTab(current.tab)) renameTab(current.paneId, tab.id, title);
+      }
+    }
+    check();
+    const interval = setInterval(check, TAB_TITLE_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [unnamedTabIds]);
 
   // ⌘K from anywhere in the window, terminals included: switch to Sessions
   // (opening it if needed) with the cursor in its search. Capture phase, so a
@@ -631,7 +684,7 @@ export function Shell() {
   // not the old instant local pty spawn — long enough for an impatient
   // double-click to fire a second open before the first tab has appeared.
   // resolveOpenArgs itself now dedupes concurrent opens of the *same*
-  // session on the main-process side, but "New Chat" has no session id to
+  // session on the main-process side, but a brand-new one has no session id to
   // key that on (each open is legitimately a distinct new chat) — guarded
   // here instead, keyed per in-flight open so unrelated rows/new-chat
   // clicks aren't blocked by each other, just literal re-clicks of the
@@ -652,9 +705,11 @@ export function Shell() {
       // (see docs/design.md's "Sessions") — mint one first, then
       // this tab is purely an `attach` viewport onto it, so tab-switch/
       // close can never kill the underlying process.
-      const id = await window.clanceApp.spawnNewAgent("New Chat", [], dir);
+      // The agent is named in the main process, which hands the name back so
+      // the tab can wear it without the renderer knowing the string.
+      const { id, name } = await window.clanceApp.spawnNewAgent([], dir);
       openTab(
-        { id: terminalId, type: "terminal", label: "New Chat", icon: "terminal", terminalId, args: ["attach", id] },
+        { id: terminalId, type: "terminal", label: name, icon: "terminal", terminalId, args: ["attach", id] },
         { paneId: state.activePaneId }
       );
     } finally {
