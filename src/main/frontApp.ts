@@ -1,6 +1,7 @@
 import type { Window } from "@nut-tree-fork/nut-js";
 import { clipboard, screen } from "electron";
 import { sanitizeWindowTitle } from "./windowTitle";
+import { frontmostApp, type AxApp } from "./ax";
 
 // Captured right before the popup window steals focus, so a proposed
 // text edit can be typed back into whatever the user was actually working
@@ -11,9 +12,21 @@ import { sanitizeWindowTitle } from "./windowTitle";
 // actually used.
 let capturedWindow: Window | null = null;
 
+// The app that was in front at that same moment, kept separately because
+// nut-js's window handle carries no pid and the accessibility tools need
+// one: once the widget has focus, "the frontmost app" is Clance, and the
+// app worth reading is this one (see ax.ts and the read_* tools).
+let capturedApp: AxApp | null = null;
+
 // Returns the captured window's title (e.g. "Design.md — Obsidian"), used
 // to tell the popup's Claude CLI session which app it was invoked over.
 export async function captureFrontmostWindow(): Promise<string | undefined> {
+  // Recorded before the window read below, so the pid is captured even if
+  // nut-js fails — and never recorded as Clance, which would point every
+  // later read at our own windows.
+  const app = await frontmostApp();
+  if (app && !app.ours) capturedApp = app;
+
   try {
     const { getActiveWindow } = await import("@nut-tree-fork/nut-js");
     capturedWindow = await getActiveWindow();
@@ -24,36 +37,9 @@ export async function captureFrontmostWindow(): Promise<string | undefined> {
   }
 }
 
-// Grabs whatever text was highlighted in the frontmost app at invocation
-// time, so the popup can hand it to the CLI as focused context — must run
-// before the popup steals focus, same as captureFrontmostWindow. There's no
-// OS API to just ask "what's selected" generically across apps (that's the
-// accessibility-tree read docs/design.md still defers), so this simulates
-// Cmd+C and reads back the clipboard instead — the same trick
-// typeIntoCapturedWindow uses in reverse, and the same trade-off (briefly
-// overwrites the user's real clipboard, restored right after). The
-// clipboard is cleared to an empty sentinel *before* the copy, rather than
-// diffed against its previous contents, so "nothing selected" (copy is a
-// no-op) is distinguishable from "selection happens to match whatever was
-// already on the clipboard."
-export async function captureSelectedText(): Promise<string | undefined> {
-  try {
-    const { keyboard, Key } = await import("@nut-tree-fork/nut-js");
-
-    const previousClipboardText = await clipboard.readText();
-    await clipboard.writeText("");
-    await keyboard.pressKey(Key.LeftCmd, Key.C);
-    await keyboard.releaseKey(Key.LeftCmd, Key.C);
-    // Give the frontmost app a moment to actually write the selection to
-    // the pasteboard before reading it back.
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    const copied = await clipboard.readText();
-    await clipboard.writeText(previousClipboardText);
-
-    return copied.trim().length > 0 ? copied : undefined;
-  } catch {
-    return undefined;
-  }
+/** The app the user was in when Clance took focus, if it's still running. */
+export function capturedAppInfo(): AxApp | null {
+  return capturedApp;
 }
 
 // The one normalization used everywhere a window title is compared or
@@ -232,7 +218,7 @@ export async function pasteAtCursor(text: string): Promise<void> {
 // this field" primitive (Cmd+A, then Delete) rather than anything that tries
 // to target a specific range of text, since there's no generic cross-app way
 // to know a field's current content/cursor position short of the
-// accessibility-tree read this app still defers (see captureSelectedText).
+// accessibility tree, which ax.ts now reads directly.
 export async function clearFocusedField(appHint?: string): Promise<void> {
   await focusTarget(appHint);
   const { keyboard, Key } = await import("@nut-tree-fork/nut-js");

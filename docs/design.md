@@ -422,7 +422,9 @@ to the CLI's own file and shell tools. Handlers are in `frontApp.ts`.
 | Tool | Tier | Mechanism |
 |---|---|---|
 | `look_at_screen` | auto | `desktopCapturer`, display under the cursor, longest edge resized to 1568 px, returned as an MCP image block. The widget is concealed for the capture. Reports that Screen Recording is off rather than failing opaquely. |
-| `read_selection` | auto | Clear the clipboard, simulate ⌘C, read it back, restore. Clearing first means "nothing selected" can't be confused with old clipboard contents. |
+| `read_selection(app?)` | auto | `AXSelectedText` from the accessibility tree — no clipboard, no keystroke |
+| `read_focused_field(app?)` | auto | The focused field's text, selection and caret. Says so and stops when the field is a password one. |
+| `read_window_text(app?, maxChars?)` | auto | A window's text from the tree rather than a screenshot to interpret |
 | `list_open_windows` | auto | Window titles, so the model can pass an exact `app` |
 | `click_at(x, y)` | auto | Click at fractions (0–1) of the display under the cursor — independent of the screenshot's resize. No `app` parameter; the model composes it with `activate_app`. |
 | `insert_text(text, app?)` | approval | Clipboard paste (write, ⌘V, restore ~500 ms later) — per-character typing was too slow |
@@ -432,6 +434,59 @@ to the CLI's own file and shell tools. Handlers are in `frontApp.ts`.
 
 `LOCAL_TOOLS` is the single list the server registration, the Clance tools
 UI and the CLI arguments all read from.
+
+### Reading the screen as text
+
+`native/ax` is an ObjC++ N-API addon over `AXUIElement` — the API behind
+VoiceOver — and `ax.ts` is its typed face. It exports two functions, `call`
+(async) and `callSync`, each taking one JSON request naming an operation and
+returning one JSON response, so a new tool costs a branch in the addon and
+no N-API boilerplate. Operations: `isTrusted`, `frontmostApp`, `appByName`,
+`focusedElement`, `focusedField`, `focusedWindow`, `elementAt`, `describe`,
+`attributes`, `tree`, `windowText`, `setValue`, `setSelectedText`,
+`performAction`, `release`.
+
+In-process rather than a helper binary: accessibility trust is granted per
+binary, so a separate process would need its own entry in System Settings.
+An AX read is synchronous IPC to the target app, so `call` runs on a libuv
+worker — Electron's main thread never waits on a wedged app — and every
+element gets a 0.4 s messaging timeout against macOS's 6 s default. Elements
+can't cross into JavaScript, so ones a caller may act on later are retained
+in a bounded handle table that evicts oldest-first.
+
+Three things this had to get right:
+
+- **Password fields are never read.** A secure field is recognised by role
+  *and* subrole — AppKit uses the role, a web password input under Chromium
+  carries it as a subrole — and its value, selection and range are withheld
+  from every path: element reads, tree walks, window text, and the generic
+  `attributes` read that could otherwise ask for `AXValue` by name. The
+  element is still reported, marked `secure`, so a tool can say a password
+  field is there without saying what is in it. The guard is in the addon, not
+  the tools, so nothing built on it later can reach around it.
+- **The app to read is not the frontmost one.** Clance is frontmost whenever
+  someone is typing to Claude, so the read tools target the app recorded when
+  the widget took focus (`capturedAppInfo`, alongside the window capture that
+  already happened at that moment), and take an `app` override. Reading our
+  own process is useless; *writing* to it deadlocks — a `setValue` against
+  Clance's own field hung for tens of seconds past the messaging timeout — so
+  the addon refuses writes to its own pid outright.
+- **An inactive app has no keyboard focus**, so `AXFocusedUIElement` comes
+  back nil for exactly the app worth reading. `focusedField` falls back to a
+  bounded search for the element the app still marks `AXFocused`, preferring
+  editable roles so a marked container can't shadow the real field. `via`
+  reports which answer it is.
+
+Coverage is uneven by nature: native apps publish rich trees, some apps
+publish almost nothing. `read_window_text` says so and points at
+`look_at_screen` rather than returning an empty result that reads like "the
+window is empty".
+
+The addon is built by `npm run build` (`scripts/build-native.mjs`), which
+skips the build when the binary is newer than its sources and the installed
+Electron hasn't changed. A failed build is a warning, not a build failure:
+without the toolchain the app still runs and `ax.ts` reports the tools
+unavailable rather than throwing.
 
 ### Approval and targeting
 

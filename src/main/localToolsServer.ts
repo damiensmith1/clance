@@ -16,9 +16,10 @@ import {
   replaceFocusedField,
   activateApp,
   clickAtNormalized,
-  captureSelectedText,
+  capturedAppInfo,
 } from "./frontApp";
 import { captureActiveDisplay } from "./screenCapture";
+import * as ax from "./ax";
 import { readConfig, writeConfig } from "./config";
 import { SESSION_CWD } from "./paths";
 
@@ -39,6 +40,8 @@ export const LOCAL_TOOLS: LocalToolInfo[] = [
   { name: "list_open_windows", tier: "auto", description: "List the user's open app windows." },
   { name: "look_at_screen", tier: "auto", description: "Take a fresh screenshot of the user's screen." },
   { name: "read_selection", tier: "auto", description: "Read whatever text is currently highlighted." },
+  { name: "read_focused_field", tier: "auto", description: "Read the text of the field the user is typing in." },
+  { name: "read_window_text", tier: "auto", description: "Read a window's text without a screenshot." },
   { name: "click_at", tier: "auto", description: "Click a position on the user's screen." },
   { name: "insert_text", tier: "approval", description: "Type text into another app." },
   { name: "activate_app", tier: "approval", description: "Bring a different app to the front." },
@@ -403,20 +406,178 @@ function createMcpServer(): McpServer {
     })
   );
 
+  // Which app a read should be about. Almost always "the one the user was in
+  // when they asked", which is *not* the frontmost app: Clance is frontmost
+  // while they type to Claude. So an explicit hint wins, then the app
+  // recorded when the widget took focus, then whatever is in front.
+  async function resolveReadTarget(
+    appHint?: string
+  ): Promise<{ pid?: number; label: string } | { error: string }> {
+    if (!ax.isAvailable()) {
+      return {
+        error:
+          "Clance's accessibility reader isn't available in this build, so the screen can't be read as text. " +
+          "look_at_screen still works.",
+      };
+    }
+    if (!ax.isTrusted()) {
+      return {
+        error:
+          "Accessibility isn't enabled for Clance, so other apps' text can't be read. " +
+          "The user can turn it on in System Settings → Privacy & Security → Accessibility.",
+      };
+    }
+    if (appHint) {
+      const matches = await ax.appByName(appHint);
+      if (matches.length === 0) return { error: `No running app matches "${appHint}".` };
+      const match = matches[0];
+      return { pid: match.pid, label: match.name ?? appHint };
+    }
+    const front = await ax.frontmostApp();
+    if (front && !front.ours) return { pid: front.pid, label: front.name ?? "the frontmost app" };
+    const captured = capturedAppInfo();
+    if (captured) return { pid: captured.pid, label: captured.name ?? "the app you came from" };
+    return {
+      error:
+        "Clance is the frontmost app and there's no record of which app the user came from, " +
+        "so there's nothing to read. Pass `app` to name one.",
+    };
+  }
+
+  const appParameter = z
+    .string()
+    .optional()
+    .describe(
+      "Case-insensitive app name to read, e.g. \"Obsidian\". Omit to read the app the user was in " +
+        "when they opened Clance — which is what they almost always mean."
+    );
+
+  server.registerTool(
+    "read_focused_field",
+    {
+      description:
+        "Reads the text of the field the user is typing in — its contents, what is selected inside it, " +
+        "and where the cursor is — straight from the app's accessibility tree, with no screenshot and " +
+        "without touching their clipboard. Use this before editing text in another app, so an edit is " +
+        "made against what is actually there. Reads the app the user came from, not Clance.",
+      inputSchema: { app: appParameter },
+    },
+    withLogging("read_focused_field", async ({ app }) => {
+      const target = await resolveReadTarget(app);
+      if ("error" in target) {
+        return { content: [{ type: "text" as const, text: target.error }], isError: true };
+      }
+      const { element, via } = await ax.focusedField(target.pid);
+      if (!element) {
+        return {
+          content: [
+            { type: "text" as const, text: `Nothing is focused in ${target.label} that can be read as text.` },
+          ],
+        };
+      }
+      if (element.secure) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text:
+                `A password field is focused in ${element.app?.name ?? target.label}. Its contents are ` +
+                "never readable through Clance, deliberately — ask the user if you need what's in it.",
+            },
+          ],
+        };
+      }
+      const value = typeof element.value === "string" ? element.value : "";
+      const lines = [
+        `Field in ${element.app?.name ?? target.label}: ${element.role ?? "unknown role"}` +
+          (element.editable === false ? " (read-only)" : ""),
+      ];
+      if (element.placeholder) lines.push(`Placeholder: ${element.placeholder}`);
+      if (element.selectedRange) {
+        const { location, length } = element.selectedRange;
+        lines.push(length > 0 ? `Selected: characters ${location}–${location + length}` : `Cursor at character ${location}`);
+      }
+      // "marked" means the app wasn't active and this is the field it would
+      // return to — worth saying, since it's a claim about a moment ago.
+      if (via === "marked-container") lines.push("(no text field was focused; this is the focused element)");
+      lines.push("", value.length > 0 ? value : "(the field is empty)");
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    })
+  );
+
+  server.registerTool(
+    "read_window_text",
+    {
+      description:
+        "Reads a window's visible text from the app's accessibility tree, as text rather than as a " +
+        "screenshot to interpret: labels, headings, fields, buttons, and a browser's page content. " +
+        "Cheaper and more exact than look_at_screen when the question is about what something says " +
+        "rather than how it looks. Reads the app the user came from unless told otherwise.",
+      inputSchema: {
+        app: appParameter,
+        maxChars: z
+          .number()
+          .optional()
+          .describe("Stop after roughly this many characters (default 8000)."),
+      },
+    },
+    withLogging("read_window_text", async ({ app, maxChars }) => {
+      const target = await resolveReadTarget(app);
+      if ("error" in target) {
+        return { content: [{ type: "text" as const, text: target.error }], isError: true };
+      }
+      const { text, truncated } = await ax.windowText({
+        pid: target.pid,
+        maxChars: maxChars ?? 8000,
+      });
+      if (!text) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text:
+                `No readable text came back from ${target.label}. Some apps publish little or nothing to ` +
+                "the accessibility tree — look_at_screen will still show it.",
+            },
+          ],
+        };
+      }
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: truncated ? `${text}\n\n(truncated)` : text,
+          },
+        ],
+      };
+    })
+  );
+
   server.registerTool(
     "read_selection",
     {
       description:
-        "Reads whatever text is currently highlighted/selected in the frontmost app, right now — not " +
-        "just whatever was selected when this popup first opened. Returns nothing selected as an empty " +
-        "result rather than an error.",
-      inputSchema: {},
+        "Reads whatever text the user has highlighted, from the app's accessibility tree — no clipboard " +
+        "involved and nothing typed into their app. Reads the app they came from rather than Clance, " +
+        "so it still works while they're typing here. A highlighted passage is usually the subject of " +
+        "the question, so this is worth reading when they say \"this\" without saying what.",
+      inputSchema: { app: appParameter },
     },
-    withLogging("read_selection", async () => {
-      const text = await captureSelectedText();
-      return {
-        content: [{ type: "text" as const, text: text ?? "(nothing is currently selected)" }],
-      };
+    withLogging("read_selection", async ({ app }) => {
+      const target = await resolveReadTarget(app);
+      if ("error" in target) {
+        return { content: [{ type: "text" as const, text: target.error }], isError: true };
+      }
+      const { element } = await ax.focusedField(target.pid);
+      const selected = element?.selectedText ?? "";
+      if (!selected.trim()) {
+        return {
+          content: [
+            { type: "text" as const, text: `Nothing is selected in ${element?.app?.name ?? target.label}.` },
+          ],
+        };
+      }
+      return { content: [{ type: "text" as const, text: selected }] };
     })
   );
 

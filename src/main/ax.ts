@@ -56,6 +56,10 @@ export type AxElement = {
   selectedRange?: AxRange;
   frame?: AxFrame;
   editable?: boolean;
+  // A password field. Its contents are never returned by any read here —
+  // the element is reported so a caller can say one is there, and say
+  // nothing about what's in it (see ax.mm's IsSecureElement).
+  secure?: boolean;
   attributes?: string[];
   actions?: string[];
   windowTitle?: string;
@@ -107,15 +111,56 @@ export function isTrusted(): boolean {
   return result.ok === true && result.trusted === true;
 }
 
-/** The element with keyboard focus, anywhere on the system. */
-export async function focusedElement(): Promise<AxElement | null> {
-  const result = await call({ op: "focusedElement" });
+export type AxApp = { pid: number; name: string | null; bundleId: string | null; ours?: boolean };
+
+/**
+ * The app in front right now. `ours` marks Clance itself, which is the
+ * normal case while someone types to Claude in the widget — a caller that
+ * wants the app they came *from* should target it by pid instead.
+ */
+export async function frontmostApp(): Promise<AxApp | null> {
+  const result = await call({ op: "frontmostApp" });
+  return result.ok ? ((result.app as AxApp | null) ?? null) : null;
+}
+
+/** Running apps whose name or bundle id contains `name`. */
+export async function appByName(name: string): Promise<AxApp[]> {
+  const result = await call({ op: "appByName", name });
+  return result.ok ? ((result.apps as AxApp[]) ?? []) : [];
+}
+
+/**
+ * The element with keyboard focus — of one app when `pid` is given, or
+ * wherever focus is on the system otherwise.
+ */
+export async function focusedElement(pid?: number): Promise<AxElement | null> {
+  const result = await call({ op: "focusedElement", ...(pid ? { pid } : {}) });
   return result.ok ? ((result.element as AxElement | null) ?? null) : null;
 }
 
-/** The frontmost app's focused window. */
-export async function focusedWindow(): Promise<AxElement | null> {
-  const result = await call({ op: "focusedWindow" });
+/**
+ * The field someone was typing in, which is not the same question as "what
+ * has keyboard focus". An app that isn't frontmost has no keyboard focus at
+ * all — the usual case, since Clance is in front while they type to Claude —
+ * so this falls back to the element the app still marks as focused. `via`
+ * says which answer it is: "focus" for live keyboard focus, "marked" for an
+ * inactive app's remembered field, "marked-container" when only a
+ * non-editable element was marked.
+ */
+export async function focusedField(
+  pid?: number
+): Promise<{ element: AxElement | null; via: string | null }> {
+  const result = await call({ op: "focusedField", ...(pid ? { pid } : {}) });
+  if (!result.ok) return { element: null, via: null };
+  return {
+    element: (result.element as AxElement | null) ?? null,
+    via: (result.via as string | undefined) ?? null,
+  };
+}
+
+/** An app's focused window — the frontmost app's when no pid is given. */
+export async function focusedWindow(pid?: number): Promise<AxElement | null> {
+  const result = await call({ op: "focusedWindow", ...(pid ? { pid } : {}) });
   return result.ok ? ((result.element as AxElement | null) ?? null) : null;
 }
 
@@ -147,6 +192,7 @@ export type AxTree = { nodes: AxNode[]; truncated: boolean };
  */
 export async function tree(options: {
   handle?: number;
+  pid?: number;
   root?: "focusedWindow" | "focusedElement";
   maxDepth?: number;
   maxNodes?: number;
@@ -161,7 +207,7 @@ export async function tree(options: {
 
 /** The readable text of a window, de-duplicated, as text rather than pixels. */
 export async function windowText(
-  options: { handle?: number; maxChars?: number; maxNodes?: number } = {}
+  options: { handle?: number; pid?: number; maxChars?: number; maxNodes?: number } = {}
 ): Promise<{ text: string; truncated: boolean }> {
   const result = await call({ op: "windowText", ...options });
   return {

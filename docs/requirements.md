@@ -69,8 +69,14 @@ Sessions Clance starts get these tools when Accessibility is granted:
   always ask.
 - Each tool can be switched off (Settings → clance tools). A
   switched-off tool is refused, not just prompted.
+- A session can read the screen as text — the focused field, the selection,
+  a window's contents — rather than only as a screenshot, and reads the app
+  the user came from rather than Clance.
+- Password fields are never readable, through any tool. Clance reports that
+  one is focused and nothing about what it holds.
 - Screen Recording is optional. Without it, `look_at_screen` says how to
-  enable it rather than failing opaquely.
+  enable it rather than failing opaquely. Reading text needs Accessibility,
+  and says so when it's off.
 - Tool, MCP and settings changes apply to sessions started afterwards. A
   session that's already running keeps what it started with.
 

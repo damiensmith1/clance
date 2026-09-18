@@ -24,6 +24,8 @@
 
 #include <node_api.h>
 
+#include <unistd.h>
+
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -214,6 +216,23 @@ static NSString *CopyStringAttribute(AXUIElementRef element, CFStringRef name) {
   return result;
 }
 
+// A password field. Checked as both role and subrole: AppKit gives one the
+// AXSecureTextField role, while a web password input under Chromium or
+// WebKit is an AXTextField carrying that as its subrole.
+//
+// Nothing below ever returns a secure field's text — not its value, not its
+// selection, not as part of a window's text. The guard lives here rather
+// than in the tools so that no future caller can reach around it, and the
+// element is still reported (marked `secure`), so a reader can say "there
+// is a password field here" without saying what is in it.
+static BOOL IsSecureElement(AXUIElementRef element) {
+  if (element == NULL) return NO;
+  NSString *role = CopyStringAttribute(element, kAXRoleAttribute);
+  if ([role isEqualToString:@"AXSecureTextField"]) return YES;
+  NSString *subrole = CopyStringAttribute(element, kAXSubroleAttribute);
+  return [subrole isEqualToString:@"AXSecureTextField"];
+}
+
 static id AttributeObject(AXUIElementRef element, CFStringRef name) {
   CFTypeRef value = CopyAttribute(element, name);
   if (value == NULL) return nil;
@@ -281,13 +300,18 @@ static NSMutableDictionary *DescribeElement(AXUIElementRef element, BOOL full) {
   NSString *placeholder = CopyStringAttribute(element, kAXPlaceholderValueAttribute);
   if (placeholder.length) node[@"placeholder"] = placeholder;
 
-  id value = AttributeObject(element, kAXValueAttribute);
-  if (value && value != [NSNull null]) node[@"value"] = value;
+  BOOL secure = IsSecureElement(element);
+  if (secure) node[@"secure"] = @YES;
 
-  NSString *selectedText = CopyStringAttribute(element, kAXSelectedTextAttribute);
-  if (selectedText.length) node[@"selectedText"] = selectedText;
-  id selectedRange = AttributeObject(element, kAXSelectedTextRangeAttribute);
-  if (selectedRange) node[@"selectedRange"] = selectedRange;
+  if (!secure) {
+    id value = AttributeObject(element, kAXValueAttribute);
+    if (value && value != [NSNull null]) node[@"value"] = value;
+
+    NSString *selectedText = CopyStringAttribute(element, kAXSelectedTextAttribute);
+    if (selectedText.length) node[@"selectedText"] = selectedText;
+    id selectedRange = AttributeObject(element, kAXSelectedTextRangeAttribute);
+    if (selectedRange) node[@"selectedRange"] = selectedRange;
+  }
 
   id position = AttributeObject(element, kAXPositionAttribute);
   id size = AttributeObject(element, kAXSizeAttribute);
@@ -330,10 +354,36 @@ static AXUIElementRef CopyFrontmostApplicationElement(void) {
   return AXUIElementCreateApplication(app.processIdentifier);
 }
 
+// An app by pid, so a caller can read the app the user came *from* rather
+// than whatever is frontmost — which is Clance itself whenever someone is
+// typing to Claude in the widget.
+static AXUIElementRef CopyApplicationElement(pid_t pid) {
+  if (pid <= 0) return CopyFrontmostApplicationElement();
+  return AXUIElementCreateApplication(pid);
+}
+
+static pid_t RequestedPid(NSDictionary *op) {
+  id pid = op[@"pid"];
+  return [pid isKindOfClass:[NSNumber class]] ? (pid_t)[pid intValue] : 0;
+}
+
 // The focused element, preferring the system-wide route (which follows
 // keyboard focus wherever it is) and falling back to asking the frontmost
 // app directly, since some apps answer one and not the other.
-static AXUIElementRef CopyFocusedElement(void) {
+static AXUIElementRef CopyFocusedElement(pid_t pid) {
+  if (pid > 0) {
+    AXUIElementRef app = CopyApplicationElement(pid);
+    if (app == NULL) return NULL;
+    ApplyTimeout(app);
+    CFTypeRef focused = CopyAttribute(app, kAXFocusedUIElementAttribute);
+    CFRelease(app);
+    if (focused != NULL && CFGetTypeID(focused) == AXUIElementGetTypeID()) {
+      return (AXUIElementRef)focused;
+    }
+    if (focused != NULL) CFRelease(focused);
+    return NULL;
+  }
+
   AXUIElementRef systemWide = AXUIElementCreateSystemWide();
   ApplyTimeout(systemWide);
   CFTypeRef focused = CopyAttribute(systemWide, kAXFocusedUIElementAttribute);
@@ -355,8 +405,8 @@ static AXUIElementRef CopyFocusedElement(void) {
   return NULL;
 }
 
-static AXUIElementRef CopyFocusedWindowElement(void) {
-  AXUIElementRef app = CopyFrontmostApplicationElement();
+static AXUIElementRef CopyFocusedWindowElement(pid_t pid) {
+  AXUIElementRef app = CopyApplicationElement(pid);
   if (app == NULL) return NULL;
   ApplyTimeout(app);
   CFTypeRef window = CopyAttribute(app, kAXFocusedWindowAttribute);
@@ -378,8 +428,9 @@ static AXUIElementRef CopyRootForRequest(NSDictionary *op, BOOL *needsRelease) {
     return element;  // borrowed
   }
   NSString *root = op[@"root"];
-  AXUIElementRef element =
-      [root isEqualToString:@"focusedElement"] ? CopyFocusedElement() : CopyFocusedWindowElement();
+  pid_t pid = RequestedPid(op);
+  AXUIElementRef element = [root isEqualToString:@"focusedElement"] ? CopyFocusedElement(pid)
+                                                                   : CopyFocusedWindowElement(pid);
   *needsRelease = element != NULL;
   return element;
 }
@@ -432,8 +483,12 @@ static void WalkElement(AXUIElementRef element, int depth, int parentIndex,
   if (label.length) node[@"label"] = label;
   NSString *placeholder = CopyStringAttribute(element, kAXPlaceholderValueAttribute);
   if (placeholder.length) node[@"placeholder"] = placeholder;
-  NSString *value = CopyStringAttribute(element, kAXValueAttribute);
-  if (value.length) node[@"value"] = value;
+  if (IsSecureElement(element)) {
+    node[@"secure"] = @YES;
+  } else {
+    NSString *value = CopyStringAttribute(element, kAXValueAttribute);
+    if (value.length) node[@"value"] = value;
+  }
 
   if (state->includeFrames) {
     id position = AttributeObject(element, kAXPositionAttribute);
@@ -483,9 +538,85 @@ static void WalkElement(AXUIElementRef element, int depth, int parentIndex,
   CFRelease(children);
 }
 
+// The editable roles a "focused field" can be. Used when falling back to a
+// tree search, so a marked-but-uninteresting element (a group, a web area)
+// doesn't win over the field someone was actually typing in.
+static BOOL IsFieldRole(NSString *role) {
+  static NSSet *fieldRoles = nil;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    fieldRoles = [NSSet setWithArray:@[
+      @"AXTextField", @"AXTextArea", @"AXComboBox", @"AXSearchField", @"AXSecureTextField"
+    ]];
+  });
+  return [fieldRoles containsObject:role];
+}
+
+static BOOL IsElementFocused(AXUIElementRef element) {
+  CFTypeRef focused = CopyAttribute(element, kAXFocusedAttribute);
+  if (focused == NULL) return NO;
+  BOOL result = CFGetTypeID(focused) == CFBooleanGetTypeID() && CFBooleanGetValue((CFBooleanRef)focused);
+  CFRelease(focused);
+  return result;
+}
+
+// Depth-first search for the element an app considers focused. This is the
+// fallback for reading an app that isn't frontmost: macOS gives an inactive
+// app no keyboard focus, so AXFocusedUIElement comes back nil, but the app
+// still marks AXFocused on the element it would return to — which is how
+// Clance can read the field someone was typing in before they switched to
+// the widget to ask about it. A field beats a non-field, so a marked
+// container can't shadow the real answer.
+static AXUIElementRef CopyFocusedDescendant(AXUIElementRef element, int depth, int maxDepth,
+                                            int *budget, AXUIElementRef *fallback) {
+  if (element == NULL || *budget <= 0) return NULL;
+  (*budget)--;
+  ApplyTimeout(element);
+
+  if (IsElementFocused(element)) {
+    NSString *role = CopyStringAttribute(element, kAXRoleAttribute);
+    if (IsFieldRole(role)) {
+      CFRetain(element);
+      return element;
+    }
+    if (*fallback == NULL) {
+      CFRetain(element);
+      *fallback = element;
+    }
+  }
+  if (depth >= maxDepth) return NULL;
+
+  CFTypeRef children = CopyAttribute(element, kAXChildrenAttribute);
+  if (children == NULL) return NULL;
+  AXUIElementRef found = NULL;
+  if (CFGetTypeID(children) == CFArrayGetTypeID()) {
+    CFArrayRef array = (CFArrayRef)children;
+    CFIndex count = CFArrayGetCount(array);
+    for (CFIndex i = 0; i < count && found == NULL; i++) {
+      CFTypeRef child = CFArrayGetValueAtIndex(array, i);
+      if (child == NULL || CFGetTypeID(child) != AXUIElementGetTypeID()) continue;
+      found = CopyFocusedDescendant((AXUIElementRef)child, depth + 1, maxDepth, budget, fallback);
+    }
+  }
+  CFRelease(children);
+  return found;
+}
+
 // ---------------------------------------------------------------------------
 // Operations
 // ---------------------------------------------------------------------------
+
+// Whether an element belongs to Clance itself. Writing into our own UI over
+// AX deadlocks — the call waits on a reply from the very process making it,
+// and the messaging timeout doesn't rescue it (observed: a setValue against
+// this process's own text field hung for tens of seconds). It is never a
+// thing a caller wants either: the widget is frontmost while the user types
+// to Claude, so "the focused field" would be Clance's own terminal.
+static BOOL IsOwnProcess(AXUIElementRef element) {
+  pid_t pid = 0;
+  if (element == NULL || AXUIElementGetPid(element, &pid) != kAXErrorSuccess) return NO;
+  return pid == getpid();
+}
 
 static int ClampedInt(id value, int fallback, int max) {
   if (![value isKindOfClass:[NSNumber class]]) return fallback;
@@ -512,19 +643,91 @@ static NSDictionary *RunOperation(NSDictionary *op) {
   }
 
   if ([name isEqualToString:@"focusedElement"]) {
-    AXUIElementRef element = CopyFocusedElement();
+    AXUIElementRef element = CopyFocusedElement(RequestedPid(op));
     if (element == NULL) return @{@"ok" : @YES, @"element" : [NSNull null]};
     NSMutableDictionary *described = DescribeElement(element, YES);
     CFRelease(element);
     return @{@"ok" : @YES, @"element" : described};
   }
 
+  if ([name isEqualToString:@"focusedField"]) {
+    pid_t pid = RequestedPid(op);
+    AXUIElementRef element = CopyFocusedElement(pid);
+    if (element != NULL) {
+      NSString *role = CopyStringAttribute(element, kAXRoleAttribute);
+      if (IsFieldRole(role)) {
+        NSMutableDictionary *described = DescribeElement(element, YES);
+        CFRelease(element);
+        return @{@"ok" : @YES, @"element" : described, @"via" : @"focus"};
+      }
+      CFRelease(element);
+    }
+
+    AXUIElementRef window = CopyFocusedWindowElement(pid);
+    if (window == NULL) return @{@"ok" : @YES, @"element" : [NSNull null]};
+    int budget = ClampedInt(op[@"maxNodes"], 800, kHardMaxNodes);
+    AXUIElementRef fallback = NULL;
+    AXUIElementRef found =
+        CopyFocusedDescendant(window, 0, ClampedInt(op[@"maxDepth"], 20, 60), &budget, &fallback);
+    CFRelease(window);
+
+    AXUIElementRef result = found ? found : fallback;
+    if (result == NULL) {
+      if (fallback != NULL) CFRelease(fallback);
+      return @{@"ok" : @YES, @"element" : [NSNull null]};
+    }
+    NSMutableDictionary *described = DescribeElement(result, YES);
+    if (found != NULL) CFRelease(found);
+    if (fallback != NULL) CFRelease(fallback);
+    return @{@"ok" : @YES, @"element" : described, @"via" : found ? @"marked" : @"marked-container"};
+  }
+
   if ([name isEqualToString:@"focusedWindow"]) {
-    AXUIElementRef window = CopyFocusedWindowElement();
+    AXUIElementRef window = CopyFocusedWindowElement(RequestedPid(op));
     if (window == NULL) return @{@"ok" : @YES, @"element" : [NSNull null]};
     NSMutableDictionary *described = DescribeElement(window, YES);
     CFRelease(window);
     return @{@"ok" : @YES, @"element" : described};
+  }
+
+  if ([name isEqualToString:@"frontmostApp"]) {
+    NSRunningApplication *app = [[NSWorkspace sharedWorkspace] frontmostApplication];
+    if (app == nil) return @{@"ok" : @YES, @"app" : [NSNull null]};
+    return @{
+      @"ok" : @YES,
+      @"app" : @{
+        @"pid" : @(app.processIdentifier),
+        @"name" : app.localizedName ?: [NSNull null],
+        @"bundleId" : app.bundleIdentifier ?: [NSNull null],
+        // Whether the frontmost app is Clance — the caller then knows to
+        // read the app the user came from instead of our own windows.
+        @"ours" : app.processIdentifier == getpid() ? @YES : @NO
+      }
+    };
+  }
+
+  if ([name isEqualToString:@"appByName"]) {
+    NSString *needle = op[@"name"];
+    if (![needle isKindOfClass:[NSString class]] || needle.length == 0) {
+      return @{@"ok" : @NO, @"error" : @"name is required"};
+    }
+    NSMutableArray *matches = [NSMutableArray array];
+    for (NSRunningApplication *app in [[NSWorkspace sharedWorkspace] runningApplications]) {
+      if (app.activationPolicy != NSApplicationActivationPolicyRegular) continue;
+      NSString *appName = app.localizedName ?: @"";
+      NSString *bundleId = app.bundleIdentifier ?: @"";
+      if ([appName rangeOfString:needle options:NSCaseInsensitiveSearch].location == NSNotFound &&
+          [bundleId rangeOfString:needle options:NSCaseInsensitiveSearch].location == NSNotFound) {
+        continue;
+      }
+      [matches addObject:@{
+        @"pid" : @(app.processIdentifier),
+        @"name" : appName,
+        @"bundleId" : bundleId,
+        @"frontmost" : app.isActive ? @YES : @NO
+      }];
+    }
+    return @{@"ok" : @YES, @"apps" : matches};
   }
 
   if ([name isEqualToString:@"elementAt"]) {
@@ -555,12 +758,19 @@ static NSDictionary *RunOperation(NSDictionary *op) {
     ApplyTimeout(element);
     NSArray<NSString *> *names = [op[@"names"] isKindOfClass:[NSArray class]] ? op[@"names"]
                                                                              : AttributeNames(element);
+    // The one generic read, and so the one that could hand back a password
+    // by asking for AXValue by name. Secure fields answer everything except
+    // what they hold.
+    BOOL secure = IsSecureElement(element);
+    NSSet *withheld = [NSSet setWithArray:@[ @"AXValue", @"AXSelectedText", @"AXSelectedTextRange" ]];
     NSMutableDictionary *values = [NSMutableDictionary dictionary];
     for (NSString *attribute in names) {
       if (![attribute isKindOfClass:[NSString class]]) continue;
+      if (secure && [withheld containsObject:attribute]) continue;
       id value = AttributeObject(element, (__bridge CFStringRef)attribute);
       if (value) values[attribute] = value;
     }
+    if (secure) values[@"secure"] = @YES;
     return @{@"ok" : @YES, @"values" : values};
   }
 
@@ -584,6 +794,7 @@ static NSDictionary *RunOperation(NSDictionary *op) {
   if ([name isEqualToString:@"setValue"]) {
     AXUIElementRef element = ElementForHandle([op[@"handle"] unsignedLongLongValue]);
     if (element == NULL) return @{@"ok" : @NO, @"error" : @"unknown handle"};
+    if (IsOwnProcess(element)) return @{@"ok" : @NO, @"error" : @"self-target"};
     NSString *value = op[@"value"];
     if (![value isKindOfClass:[NSString class]]) return @{@"ok" : @NO, @"error" : @"value must be a string"};
     ApplyTimeout(element);
@@ -594,6 +805,7 @@ static NSDictionary *RunOperation(NSDictionary *op) {
   if ([name isEqualToString:@"setSelectedText"]) {
     AXUIElementRef element = ElementForHandle([op[@"handle"] unsignedLongLongValue]);
     if (element == NULL) return @{@"ok" : @NO, @"error" : @"unknown handle"};
+    if (IsOwnProcess(element)) return @{@"ok" : @NO, @"error" : @"self-target"};
     NSString *value = op[@"value"];
     if (![value isKindOfClass:[NSString class]]) return @{@"ok" : @NO, @"error" : @"value must be a string"};
     ApplyTimeout(element);
@@ -605,6 +817,7 @@ static NSDictionary *RunOperation(NSDictionary *op) {
   if ([name isEqualToString:@"performAction"]) {
     AXUIElementRef element = ElementForHandle([op[@"handle"] unsignedLongLongValue]);
     if (element == NULL) return @{@"ok" : @NO, @"error" : @"unknown handle"};
+    if (IsOwnProcess(element)) return @{@"ok" : @NO, @"error" : @"self-target"};
     NSString *action = op[@"action"];
     if (![action isKindOfClass:[NSString class]]) return @{@"ok" : @NO, @"error" : @"action must be a string"};
     ApplyTimeout(element);
