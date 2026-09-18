@@ -783,6 +783,290 @@
         bottom: var(--space-5);
         z-index: 40;
       }
+
+      /* ---- Session peek (docs/design.md, "Peeking at a session") ---- */
+      /* Modal over the table rather than beside it: a peek is a glance you
+         dismiss, so nothing behind it needs to stay reachable. */
+      .peek-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: var(--space-6);
+        background: var(--scrim);
+      }
+      .peek-panel {
+        display: flex;
+        flex-direction: column;
+        width: min(660px, 100%);
+        /* Shorter than the window on a big screen: a peek should read as a
+           panel in front of the table, not a sheet that replaces it. */
+        max-height: min(100%, 720px);
+        background: var(--surface-elevated);
+        border-radius: var(--radius-xl);
+        box-shadow: var(--shadow-window);
+        outline: none;
+        overflow: hidden;
+      }
+      .peek-header {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--space-3);
+        padding: var(--space-4) var(--space-4) var(--space-3);
+        border-bottom: 1px solid var(--surface-border);
+      }
+      .peek-header-text {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
+        flex: 1;
+      }
+      .peek-title {
+        font-size: var(--text-lg);
+        font-weight: var(--weight-medium);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .peek-meta {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .peek-body {
+        flex: 1;
+        overflow-y: auto;
+        outline: none;
+        padding: var(--space-4) var(--space-5) var(--space-5);
+        display: flex;
+        flex-direction: column;
+        /* Turns are the unit the eye counts here, so they get the widest
+           gap in the panel; everything inside one is tighter than this. */
+        gap: var(--space-5);
+      }
+      /* The body holds focus so the scroll keys reach it (see
+         SessionPeek.js), which otherwise opts it into the shared focus ring
+         — a ring meant for controls someone tabbed to, not for a region
+         focused on open. It's a box-shadow, so `outline: none` above
+         doesn't cover it, and with the panel clipping its sides it showed
+         as a bar above and below the conversation. The lit panel is where
+         focus is; nothing here is a control. */
+      .peek-body:focus-visible {
+        box-shadow: none;
+      }
+      .peek-loading {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+      }
+      /* Speaker on its own line above the words, not a bubble: the reply is
+         the content, and a column of labels is what makes a long peek
+         skimmable. */
+      .peek-turn {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .peek-role {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-tertiary);
+      }
+      .peek-blocks {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        min-width: 0;
+      }
+      .peek-text {
+        font-size: var(--text-md);
+        line-height: 1.6;
+        overflow-wrap: anywhere;
+      }
+      /* The user's own words, shown as typed — their line breaks are the
+         only formatting a prompt has. */
+      .peek-text-plain {
+        white-space: pre-wrap;
+      }
+      /* The person's own words sit on paper of their own — the one thing in
+         a peek that wasn't written by the model. */
+      .peek-turn-user .peek-text-plain {
+        padding: var(--space-2) var(--space-3);
+        background: var(--accent-soft);
+        border-radius: var(--radius-lg);
+      }
+      /* A run of tool calls is one stretch of work, so it's drawn as a
+         single indented cluster between the sentences around it — tight
+         rows behind one rule, rather than lines spaced like prose. */
+      .peek-tools {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        padding-left: var(--space-3);
+        border-left: 1px solid var(--surface-border);
+        min-width: 0;
+      }
+      .peek-tool {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-2);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        line-height: 1.7;
+        color: var(--text-tertiary);
+        min-width: 0;
+      }
+      /* One column for the verbs: with the names aligned, a run of calls
+         scans as "Read, Read, Edit" down the left edge. */
+      .peek-tool-name {
+        flex-shrink: 0;
+        min-width: 4.5em;
+        color: var(--text-secondary);
+      }
+      .peek-tool-target {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .peek-tool-failed .peek-tool-name {
+        color: var(--danger);
+      }
+      /* Inside the cluster already, so it indents under its own call rather
+         than carrying a second rule beside the one around them both. */
+      .peek-tool-result {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        line-height: 1.5;
+        color: var(--text-tertiary);
+        opacity: 0.85;
+        margin: 2px 0 var(--space-2) var(--space-3);
+        overflow-wrap: anywhere;
+      }
+      /* A slash command the user ran: the CLI's expansion of it is machinery,
+         so only the name they typed is worth showing. */
+      .peek-command {
+        align-self: flex-start;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        padding: 2px var(--space-2);
+        border-radius: var(--radius-sm);
+        background: var(--surface-bg);
+        color: var(--text-secondary);
+      }
+      /* Above the turns, where the messages it stands for would have been. */
+      .peek-truncated {
+        margin: 0;
+        font-size: var(--text-sm);
+        color: var(--text-tertiary);
+      }
+      .peek-footer {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-3) var(--space-4);
+        border-top: 1px solid var(--surface-border);
+      }
+      .peek-footer .icon-button {
+        color: var(--text-secondary);
+      }
+      .peek-footer-spacer {
+        flex: 1;
+      }
+
+      /* Markdown inside a peek (see shared/markdown.js). Tight vertical
+         rhythm — this is a preview, not a document. */
+      .peek-md > :first-child {
+        margin-top: 0;
+      }
+      .peek-md > :last-child {
+        margin-bottom: 0;
+      }
+      .peek-md p {
+        margin: 0 0 var(--space-2);
+      }
+      .peek-md h1,
+      .peek-md h2,
+      .peek-md h3 {
+        margin: var(--space-3) 0 var(--space-2);
+        font-size: var(--text-md);
+        font-weight: var(--weight-semibold);
+      }
+      .peek-md ul,
+      .peek-md ol {
+        margin: 0 0 var(--space-2);
+        padding-left: var(--space-5);
+      }
+      .peek-md li {
+        margin-bottom: 2px;
+      }
+      .peek-md code {
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        padding: 1px 4px;
+        border-radius: var(--radius-sm);
+        background: var(--surface-bg);
+      }
+      .peek-md .code-block {
+        margin: 0 0 var(--space-2);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+      }
+      .peek-md .code-block-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-2);
+        background: var(--surface-bg);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .peek-md .code-copy-btn {
+        border: none;
+        background: none;
+        padding: 0;
+        cursor: pointer;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .peek-md .code-copy-btn:hover {
+        color: var(--text-primary);
+      }
+      .peek-md .code-block pre {
+        margin: 0;
+        padding: var(--space-2);
+        overflow-x: auto;
+      }
+      .peek-md .code-block code {
+        padding: 0;
+        background: none;
+        font-size: var(--text-sm);
+        line-height: 1.5;
+      }
+      .peek-md .tok-comment {
+        color: var(--text-tertiary);
+      }
+      .peek-md .tok-string {
+        color: var(--success);
+      }
+      .peek-md .tok-keyword {
+        color: var(--accent);
+        font-weight: var(--weight-medium);
+      }
+      .peek-md .tok-number {
+        color: var(--warning);
+      }
       /* Above the table, not below it: with a long history nobody scrolls to
          the end. It stands in for column headers, which the table doesn't
          need: each column is plain from its content. */

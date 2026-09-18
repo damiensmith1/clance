@@ -95,10 +95,16 @@ Sessions Clance starts get these tools when Accessibility is granted:
   the keyboard: ⌘K (from anywhere in the main window) to search, which also
   offers a new session in the default,
   a recent or a chosen folder; arrows to select; ↩ to open; ⌥↩ to open in the
-  widget; ⌘⌫ to archive or stop; ⌘N for a new session.
-- Right-clicking a session offers opening it in a tab or the widget, resuming
-  it in Terminal, copying its folder path, revealing the folder in Finder, and
-  archive, stop or restore.
+  widget; Space to peek; ⌘⌫ to archive or stop; ⌘N for a new session.
+- Right-clicking a session offers peeking at it, opening it in a tab or the
+  widget, resuming it in Terminal, copying its folder path, revealing the
+  folder in Finder, and archive, stop or restore.
+- A session can be peeked at without opening it — Space or the row menu shows
+  what was said, read straight from the transcript: messages in full, tool
+  calls as one line each, their output behind a toggle. It opens at the end
+  of the conversation, is scrollable from the keyboard, and on a session too
+  long to show whole it keeps the most recent messages. A peek never changes a session, and stays responsive
+  on transcripts of any size.
 - Sessions can be archived (with Undo) and restored. Clance never deletes a transcript
   that has user messages — the list includes other projects' Claude Code
   history.

@@ -195,6 +195,55 @@ through the login shell, and opens it; scripting Terminal with AppleScript
 would need the Automation permission. Loading shows skeleton rows; an empty
 history shows a New session and Choose folder… prompt.
 
+### Peeking at a session
+
+Space, or Peek in a row's menu, opens the session's transcript over the table
+— what was said and where it got to, without attaching a terminal to it.
+Read-only: everything that changes a session stays in the row's menu. Space
+again, Escape or a click outside closes it, and Open / the pop-out button
+carry on into the session itself.
+
+It opens scrolled to the end of the conversation, since where a session got
+to is what a peek is read for; scrolling up walks back in time. ↑/↓ read it
+from the keyboard — handled rather than left to the browser, so they work
+wherever focus sits and can't reach the table underneath — while the
+scrolling region itself holds focus, so Page Up/Down, Home and End scroll it
+natively. Showing tool
+output grows every turn at once, so the view sticks to the end only for a
+reader who was already there, and otherwise keeps their place.
+
+`peekSession()` in `chatHistory.ts` does the reading, keyed by session id
+because a live row only knows its id. It streams the JSONL rather than
+holding it whole — the largest transcript on the author's machine is ~115 MB,
+almost all of it tool output — and bounds what it returns: 4 000 characters
+per message, 220 per tool result, and 500 blocks, trimmed from the *front* as
+it reads so what survives is the end of the conversation, with a line above
+them saying the earlier messages aren't shown. The whole file is still read
+(451 ms for that 115 MB one, a few ms for a normal session), which is what
+lets the header count every message and date the session from its real
+start.
+
+What it keeps is what a person said and what Claude replied. A tool call
+collapses to its name and its one identifying argument — the path for
+`Read`/`Edit`, the command for `Bash`, the pattern for `Grep` — with the
+result attached from the matching `tool_result` entry (by `tool_use_id`,
+which arrives in a later entry) and shown only behind the footer's toggle.
+Paths are printed relative to the session's own `cwd`. Consecutive calls are
+drawn as one indented cluster rather than as separate lines, so a stretch of
+work reads as a stretch of work. A slash command
+collapses to its name, since the CLI records its expansion as an ordinary
+user message. Skipped entirely: `isSidechain` entries (a subagent's own
+conversation, which belongs to the `Task` chip that spawned it), `isMeta`
+ones (context the CLI injected as if the user had typed it), and `thinking`
+blocks — the CLI writes those with their text empty, so there is nothing in
+a log to show.
+
+The header prefers the CLI's own `ai-title` over the first message's opening
+words, and carries the project, git branch (unless it is a detached `HEAD`),
+model, message count, how long the conversation ran and when it last moved.
+Claude's replies render through `markdown.js`, which escapes its input before
+introducing any tag of its own; the user's own messages are shown as typed.
+
 ## Terminals
 
 ### Main process

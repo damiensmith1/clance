@@ -1,5 +1,6 @@
 import { html, useEffect, useMemo, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
 import { Icon, Logo } from "../../shared/icons.js";
+import { SessionPeek } from "../components/SessionPeek.js";
 
 // No Node `path` module in the renderer (contextIsolation) — a directory
 // picked via the native folder dialog is always a plain forward-slash
@@ -202,6 +203,8 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
   const [recentDirs, setRecentDirs] = useState([]);
   const [defaultDirectory, setDefaultDirectory] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
+  // The session id the Peek overlay is showing, or null when closed.
+  const [peekId, setPeekId] = useState(null);
   const [toast, setToast] = useState(null);
   const rootRef = useRef(null);
   const searchRef = useRef(null);
@@ -375,6 +378,29 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
     }
   }
 
+  // Live and closed rows both come down to a session id — the one thing a
+  // transcript can be found by (chatHistory.ts's peekSession).
+  function sessionIdFor(row) {
+    return row.kind === "live" ? row.agent.sessionId : row.session.id;
+  }
+
+  function peek(row) {
+    const id = sessionIdFor(row);
+    if (!id) {
+      // A background agent so new the CLI hasn't written its transcript
+      // yet has nothing to show; saying so beats an empty overlay.
+      showToast("This session has no transcript yet");
+      return;
+    }
+    setPeekId(id);
+  }
+
+  // The overlay's own Open / Floating window buttons, which act on whichever
+  // row it was opened from rather than on the current selection.
+  function peekRow() {
+    return rows.find((row) => sessionIdFor(row) === peekId);
+  }
+
   async function popOut(row) {
     if (row.kind === "live") {
       window.clanceApp.openInWidget(["attach", row.agent.id]);
@@ -465,6 +491,10 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
 
       if (typingElsewhere(e.target)) return;
 
+      // The Peek overlay is modal: it handles its own Escape, and the table
+      // underneath shouldn't move its selection out from under it.
+      if (peekId) return;
+
       if (e.key === "Escape") {
         setContextMenu(null);
         setFilterMenuOpen(false);
@@ -494,6 +524,11 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
       } else if (e.key === "Enter" && index !== -1) {
         e.preventDefault();
         openRow(rows[index]);
+      } else if (e.key === " " && index !== -1) {
+        // Space is Quick Look's key in the Finder, and the same gesture
+        // here: glance at the selected session without opening it.
+        e.preventDefault();
+        peek(rows[index]);
       } else if (e.key === "Backspace" && e.metaKey && index !== -1) {
         e.preventDefault();
         archiveOrStop(rows[index]);
@@ -501,7 +536,7 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [rows, selectedKey]);
+  }, [rows, selectedKey, peekId]);
 
   // While the arrow keys drive the selection, the row under a resting mouse
   // pointer mustn't look selected too: hover styling is off until the mouse
@@ -533,7 +568,7 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
     e.preventDefault();
     setSelectedKey(row.key);
     const x = Math.min(e.clientX, window.innerWidth - 250);
-    const y = Math.min(e.clientY, window.innerHeight - 300);
+    const y = Math.min(e.clientY, window.innerHeight - 330);
     setContextMenu({ x, y, row });
   }
 
@@ -552,7 +587,7 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
   // rows will.
   const keyboardHints = html`
     <div class="keyboard-hints">
-      <span>↑↓ select</span><span>↩ open</span><span>⌥↩ widget</span><span>⌘⌫ archive</span><span>⌘N new session</span>
+      <span>↑↓ select</span><span>↩ open</span><span>space peek</span><span>⌥↩ widget</span><span>⌘⌫ archive</span><span>⌘N new session</span>
     </div>
   `;
 
@@ -689,6 +724,7 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
       ${contextMenu &&
       html`
         <div class="menu context-menu" role="menu" style=${{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}>
+          <${MenuItem} title="Peek" shortcut="Space" onSelect=${menuAction(peek)} />
           <${MenuItem} title="Open" shortcut="↩" onSelect=${menuAction(openRow)} />
           <${MenuItem} title="Open in floating window" shortcut="⌥↩" onSelect=${menuAction(popOut)} />
           <${MenuItem} title="Resume in Terminal" onSelect=${menuAction(resumeInTerminal)} />
@@ -702,6 +738,24 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
               ? html`<${MenuItem} title="Restore" onSelect=${menuAction(archiveOrStop)} />`
               : html`<${MenuItem} title="Archive" shortcut="⌘⌫" onSelect=${menuAction(archiveOrStop)} />`}
         </div>
+      `}
+
+      ${peekId &&
+      html`
+        <${SessionPeek}
+          sessionId=${peekId}
+          onClose=${() => setPeekId(null)}
+          onOpen=${() => {
+            const row = peekRow();
+            setPeekId(null);
+            if (row) openRow(row);
+          }}
+          onPopOut=${() => {
+            const row = peekRow();
+            setPeekId(null);
+            if (row) popOut(row);
+          }}
+        />
       `}
 
       ${toast &&

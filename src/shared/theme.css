@@ -33,6 +33,9 @@
   --surface-hover: rgba(23, 22, 20, 0.05);
   --surface-active: rgba(23, 22, 20, 0.09);
   --surface-border: #e9e8e3;
+  /* Dims the window behind a modal overlay (the Sessions peek), so the
+     panel reads as being in front of the app rather than part of it. */
+  --scrim: rgba(23, 22, 20, 0.28);
 
   /* Text */
   --text-primary: #171614;

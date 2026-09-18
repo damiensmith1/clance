@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld("clanceApp", {
   launchUpdateCheck: () => ipcRenderer.invoke("app:launch-update-check"),
   openReleasePage: (url: string) => ipcRenderer.invoke("app:open-release-page", url),
   listChatSessions: () => ipcRenderer.invoke("chatHistory:list-sessions"),
+  peekSession: (sessionId: string) => ipcRenderer.invoke("chatHistory:peek-session", sessionId),
   resolveOpenArgs: (sessionId: string, name: string) =>
     ipcRenderer.invoke("chatHistory:resolve-open-args", sessionId, name),
   setSessionArchived: (sessionId: string, archived: boolean) =>

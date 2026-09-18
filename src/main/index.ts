@@ -34,7 +34,7 @@ import {
   openMicrophoneSettings,
 } from "./permissions";
 import { SHORTCUT_ACTIONS } from "./shortcuts";
-import { getSession, listSessions, hasRealUserMessage } from "./chatHistory";
+import { peekSession, listSessions, hasRealUserMessage } from "./chatHistory";
 import { setSessionArchived } from "./archivedSessions";
 import { sessionFolder, revealFolder, resumeInTerminal } from "./sessionActions";
 import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
@@ -354,8 +354,10 @@ ipcMain.handle("app:open-release-page", (_event, url: string) => openReleasePage
 
 ipcMain.handle("chatHistory:list-sessions", () => listSessions());
 
-ipcMain.handle("chatHistory:get-session", (_event, filePath: string) =>
-  getSession(filePath)
+// The Sessions list's Peek overlay: a parsed, bounded read of a session's
+// raw transcript, keyed by id because a live row only knows its session id.
+ipcMain.handle("chatHistory:peek-session", (_event, sessionId: string) =>
+  peekSession(sessionId)
 );
 
 ipcMain.handle("chatHistory:resolve-open-args", async (_event, sessionId: string, name: string) =>

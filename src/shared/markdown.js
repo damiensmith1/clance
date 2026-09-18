@@ -44,6 +44,12 @@ const KEYWORDS = new Set([
   "impl", "struct", "pub", "use", "mod", "match", "in", "of",
 ]);
 
+// Placeholder for one already-highlighted comment or string, and the same
+// pattern as a splitter, so the pass below can step over those rather than
+// reach inside them.
+const HIGHLIGHT_TOKEN_RE = new RegExp("^" + TOKEN_MARK + "\\d+" + TOKEN_MARK + "$");
+const HIGHLIGHT_SPLIT_RE = new RegExp("(" + TOKEN_MARK + "\\d+" + TOKEN_MARK + ")");
+
 function highlightCode(raw) {
   const parts = [];
   let text = raw.replace(
@@ -57,10 +63,24 @@ function highlightCode(raw) {
   );
 
   text = escapeHtml(text);
-  text = text.replace(/\b\d+(\.\d+)?\b/g, '<span class="tok-number">$&</span>');
-  text = text.replace(/\b[A-Za-z_$][A-Za-z0-9_$]*\b/g, (word) =>
-    KEYWORDS.has(word) ? `<span class="tok-keyword">${word}</span>` : word
-  );
+
+  // Numbers and keywords in one pass over the segments between
+  // placeholders, never two passes over everything. Two passes would have
+  // the second reading the markup the first just wrote — `class` is itself
+  // a keyword, so a highlighted number came back out as broken HTML the
+  // page then showed as literal text — and a pass that included the
+  // placeholders would highlight *their* digits, losing the comment or
+  // string each one stands for.
+  text = text
+    .split(HIGHLIGHT_SPLIT_RE)
+    .map((segment) => {
+      if (HIGHLIGHT_TOKEN_RE.test(segment)) return segment;
+      return segment.replace(/\b\d+(?:\.\d+)?\b|\b[A-Za-z_$][A-Za-z0-9_$]*\b/g, (match) => {
+        if (/^\d/.test(match)) return `<span class="tok-number">${match}</span>`;
+        return KEYWORDS.has(match) ? `<span class="tok-keyword">${match}</span>` : match;
+      });
+    })
+    .join("");
 
   const tokenRe = new RegExp(TOKEN_MARK + "(\\d+)" + TOKEN_MARK, "g");
   return text.replace(tokenRe, (_, i) => parts[Number(i)]);

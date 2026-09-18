@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from "fs/promises";
+import { readdir, stat } from "fs/promises";
 import { createReadStream } from "fs";
 import { createInterface } from "readline";
 import { homedir } from "os";
@@ -15,7 +15,6 @@ const CLAUDE_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 const CLANCE_PROJECT_DIR = SESSION_CWD.replace(/[/.]/g, "-");
 
 const TITLE_MAX_LENGTH = 70;
-const RESULT_PREVIEW_LENGTH = 200;
 
 export type SessionSummary = {
   id: string;
@@ -30,23 +29,6 @@ export type SessionSummary = {
   // a person — e.g. the security-guidance plugin reviews every commit this
   // way. Hidden from the Sessions list unless its Automated filter is on.
   automated: boolean;
-};
-
-export type ChatBlock =
-  | { type: "text"; text: string }
-  | { type: "tool"; label: string }
-  | { type: "thinking" };
-
-export type ChatTurn = {
-  role: "user" | "assistant";
-  blocks: ChatBlock[];
-};
-
-export type SessionDetail = {
-  id: string;
-  projectLabel: string;
-  title: string;
-  turns: ChatTurn[];
 };
 
 function projectLabelFor(dirName: string): string {
@@ -400,99 +382,327 @@ export async function listSessions(): Promise<SessionSummary[]> {
   return summaries;
 }
 
-function toolUseLabel(block: Record<string, unknown>): string {
-  const name = typeof block.name === "string" ? block.name : "tool";
-  const input = block.input as Record<string, unknown> | undefined;
-  const arg =
-    input &&
-    (input.command ?? input.file_path ?? input.path ?? input.pattern ?? input.query);
-  return arg ? `${name}: ${truncate(String(arg), 80)}` : name;
+// ---- Peek (see docs/design.md, "Peeking at a session") ----
+//
+// A read-only pass over a session's raw JSONL for the Sessions list's Peek
+// overlay: enough of the conversation to tell what a session was about
+// without attaching a terminal to it. Deliberately not a transcript
+// viewer — tool calls collapse to one chip each, their output to a short
+// preview — so the reader sees the shape of the conversation, not a wall
+// of file contents.
+
+// Transcripts are streamed, never held whole: the largest on this machine
+// is ~115 MB, almost all of it tool output, and the IPC serialisation of
+// that would stall the window. Every bound below exists to keep a peek's
+// payload small no matter how long the session ran. The whole file is still
+// read — 451 ms for that 115 MB one, a few ms for a normal session — which
+// is what lets the header count every message and the blocks kept be the
+// last ones rather than the first.
+const PEEK_MAX_BLOCKS = 500;
+const PEEK_TEXT_LENGTH = 4000;
+const PEEK_RESULT_LENGTH = 220;
+const PEEK_TARGET_LENGTH = 120;
+
+export type PeekBlock =
+  | { type: "text"; text: string }
+  // A slash command the user ran (/commit-message, /insights…). The CLI
+  // writes the expansion of one as an ordinary user message; showing that
+  // raw would drown the real conversation, so it collapses to its name.
+  | { type: "command"; name: string }
+  | {
+      type: "tool";
+      name: string;
+      // The one argument worth seeing at a glance — a path for Read/Edit,
+      // the command line for Bash, the pattern for Grep. "" when the tool
+      // has no such argument.
+      target: string;
+      // Filled in from the matching tool_result entry later in the file;
+      // null while a call is still unanswered (the session is mid-tool, or
+      // the result was dropped by a compaction).
+      result: string | null;
+      failed: boolean;
+    };
+
+export type PeekTurn = {
+  role: "user" | "assistant";
+  // ISO timestamp of the entry that opened this turn, or null for the
+  // oldest sessions, whose entries carry no timestamp.
+  at: string | null;
+  blocks: PeekBlock[];
+};
+
+export type SessionPeek = {
+  id: string;
+  title: string;
+  projectLabel: string;
+  cwd: string | null;
+  gitBranch: string | null;
+  model: string | null;
+  startedAt: string | null;
+  lastMessageAt: string | null;
+  // Real messages — what a person typed and what Claude replied — not
+  // tool-result round trips, so it reads the way the conversation felt.
+  messageCount: number;
+  turns: PeekTurn[];
+  // True when PEEK_MAX_BLOCKS dropped earlier blocks: `turns` then holds the
+  // end of the conversation, and the overlay says so above them.
+  truncated: boolean;
+};
+
+// Home-relative, and relative to the session's own cwd when it's under it
+// — a peek is read at a glance, and the repeated project prefix on every
+// path is the least informative part of it.
+function shortPath(value: string, cwd: string | null): string {
+  if (cwd && value.startsWith(`${cwd}/`)) return value.slice(cwd.length + 1);
+  return value.replace(/^\/Users\/[^/]+/, "~");
 }
 
-function toolResultLabel(block: Record<string, unknown>): string {
-  const text = extractText(block.content);
-  const preview = text ? truncate(text, RESULT_PREVIEW_LENGTH) : "(result)";
-  return `Result: ${preview}`;
+// The single argument that identifies what a tool call actually did. Keyed
+// off the argument names the built-in tools use rather than the tool name,
+// so an MCP or plugin tool with a `path`/`query`/`command` input gets a
+// useful chip too instead of falling back to a bare name.
+function toolTarget(input: Record<string, unknown> | undefined, cwd: string | null): string {
+  if (!input) return "";
+  const pathLike = input.file_path ?? input.path ?? input.notebook_path;
+  if (typeof pathLike === "string") return shortPath(pathLike, cwd);
+  if (typeof input.pattern === "string") return input.pattern;
+  const plain =
+    input.command ?? input.query ?? input.url ?? input.prompt ?? input.description ?? input.skill;
+  if (typeof plain === "string") return truncate(plain.replace(/\s+/g, " "), PEEK_TARGET_LENGTH);
+  return "";
 }
 
-function normalizeBlocks(content: unknown): ChatBlock[] {
-  if (typeof content === "string") {
-    return content.trim() ? [{ type: "text", text: content }] : [];
+// tool_result content is either a string or a content-block array; both
+// shapes collapse to one short line here, with the newlines flattened so a
+// multi-line result can't stretch the chip down the page.
+function toolResultPreview(content: unknown): string {
+  const text = extractText(content);
+  if (!text || !text.trim()) return "(no output)";
+  return truncate(text.replace(/\s+/g, " "), PEEK_RESULT_LENGTH);
+}
+
+// The CLI writes a slash command as a user message wrapping the name in
+// <command-name>, usually preceded by <command-message>; `/insights` also
+// lands as a separate <local-command-stdout> entry. Returns the command's
+// name when this is one, so the caller can show a chip instead of the
+// expansion.
+const COMMAND_NAME_RE = /<command-name>\s*\/?([\w:-]+)\s*<\/command-name>/;
+function slashCommandName(text: string): string | null {
+  return text.match(COMMAND_NAME_RE)?.[1] ?? null;
+}
+
+// How many unanswered tool calls to keep waiting for a result. A result
+// lands in the entry right after its call, so this only has to outlive one
+// exchange; without a bound, a session with thousands of tool calls would
+// hold every chip it ever made long after they were dropped from `turns`.
+const PEEK_MAX_PENDING = 200;
+
+type PeekState = {
+  turns: PeekTurn[];
+  // tool_use id → the chip awaiting its result. Results arrive in a later
+  // entry (the next "user" line), so the chip is filled in after the fact
+  // rather than emitted as a block of its own.
+  pending: Map<string, PeekBlock & { type: "tool" }>;
+  blockCount: number;
+  messageCount: number;
+  truncated: boolean;
+};
+
+// Appends `blocks` to the trailing turn when it has the same role, so a
+// tool-use loop stays one continuous assistant turn instead of a run of
+// one-line turns alternating with the tool results feeding it.
+//
+// Over the cap, the oldest blocks go rather than the newest: a peek is read
+// to see where a session got to, and the overlay opens scrolled to the end.
+// Trimming as we go is also what keeps a 115 MB transcript's peek bounded in
+// memory, not just over IPC.
+function pushBlocks(state: PeekState, role: "user" | "assistant", at: string | null, blocks: PeekBlock[]) {
+  if (blocks.length === 0) return;
+  const last = state.turns[state.turns.length - 1];
+  if (last && last.role === role) last.blocks.push(...blocks);
+  else state.turns.push({ role, at, blocks });
+  state.blockCount += blocks.length;
+
+  while (state.blockCount > PEEK_MAX_BLOCKS && state.turns.length > 0) {
+    const oldest = state.turns[0];
+    oldest.blocks.shift();
+    state.blockCount -= 1;
+    state.truncated = true;
+    if (oldest.blocks.length === 0) state.turns.shift();
   }
-  if (!Array.isArray(content)) return [];
+}
 
-  const blocks: ChatBlock[] = [];
-  for (const raw of content) {
-    if (!raw || typeof raw !== "object") continue;
-    const block = raw as Record<string, unknown>;
+function peekBlocks(
+  content: unknown,
+  cwd: string | null,
+  state: PeekState
+): { blocks: PeekBlock[]; isRealMessage: boolean } {
+  const raw = typeof content === "string" ? [{ type: "text", text: content }] : content;
+  if (!Array.isArray(raw)) return { blocks: [], isRealMessage: false };
+
+  const blocks: PeekBlock[] = [];
+  let isRealMessage = false;
+
+  // "thinking" blocks are skipped rather than shown: the CLI records the
+  // block but writes its text empty (every one of them, across every
+  // transcript on disk), so there is nothing in a log to render.
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const block = item as Record<string, unknown>;
+
     if (block.type === "text" && typeof block.text === "string") {
-      blocks.push({ type: "text", text: block.text });
+      const text = stripClanceContextPrefix(stripLeadingImagePlaceholder(block.text)).trim();
+      if (!text) continue;
+      const command = slashCommandName(text);
+      if (command) {
+        blocks.push({ type: "command", name: command });
+        isRealMessage = true;
+        continue;
+      }
+      // Everything else the CLI injects on the user's behalf — the caveat
+      // banner, a local command's stdout — is machinery, not conversation.
+      if (isSyntheticLocalCommandText(text)) continue;
+      blocks.push({ type: "text", text: truncate(text, PEEK_TEXT_LENGTH) });
+      isRealMessage = true;
     } else if (block.type === "tool_use") {
-      blocks.push({ type: "tool", label: toolUseLabel(block) });
+      const chip: PeekBlock & { type: "tool" } = {
+        type: "tool",
+        name: typeof block.name === "string" ? block.name : "tool",
+        target: toolTarget(block.input as Record<string, unknown> | undefined, cwd),
+        result: null,
+        failed: false,
+      };
+      if (typeof block.id === "string") {
+        state.pending.set(block.id, chip);
+        // Map iterates in insertion order, so this drops the call that has
+        // gone longest without an answer.
+        while (state.pending.size > PEEK_MAX_PENDING) {
+          state.pending.delete(state.pending.keys().next().value as string);
+        }
+      }
+      blocks.push(chip);
     } else if (block.type === "tool_result") {
-      blocks.push({ type: "tool", label: toolResultLabel(block) });
-    } else if (block.type === "thinking") {
-      blocks.push({ type: "thinking" });
+      // Not a block of its own: it lands on the chip for the call it
+      // answers, which is already in an earlier turn.
+      const chip = typeof block.tool_use_id === "string" ? state.pending.get(block.tool_use_id) : undefined;
+      if (chip) {
+        chip.result = toolResultPreview(block.content);
+        chip.failed = block.is_error === true;
+        state.pending.delete(block.tool_use_id as string);
+      }
     }
   }
-  return blocks;
+
+  return { blocks, isRealMessage };
 }
 
-export async function getSession(filePath: string): Promise<SessionDetail | null> {
-  let raw: string;
-  try {
-    raw = await readFile(filePath, "utf8");
-  } catch {
-    return null;
-  }
+// Reads a session's transcript for the Peek overlay. `sessionId`, not a
+// path, because a live row only knows its session id — the file is found
+// the same way every other id-keyed lookup here finds it. Null when no
+// project bucket holds that id.
+export async function peekSession(sessionId: string): Promise<SessionPeek | null> {
+  const filePath = await findSessionFilePath(sessionId);
+  if (!filePath) return null;
 
-  const turns: ChatTurn[] = [];
+  const state: PeekState = {
+    turns: [],
+    pending: new Map(),
+    blockCount: 0,
+    messageCount: 0,
+    truncated: false,
+  };
   let title: string | undefined;
+  let aiTitle: string | undefined;
+  let cwd: string | null = null;
+  let gitBranch: string | null = null;
+  let model: string | null = null;
+  let startedAt: string | null = null;
+  let lastMessageAt: string | null = null;
 
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
-    let entry: Record<string, unknown>;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      continue;
+  const rl = createInterface({
+    input: createReadStream(filePath, "utf8"),
+    crlfDelay: Infinity,
+  });
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      let entry: Record<string, unknown>;
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      // The CLI's own one-line summary of the session, rewritten as the
+      // conversation goes on — a better header than the first message's
+      // opening words, so the last one wins.
+      if (entry.type === "ai-title" && typeof entry.aiTitle === "string") {
+        aiTitle = entry.aiTitle;
+        continue;
+      }
+      if (entry.type !== "user" && entry.type !== "assistant") continue;
+      // A subagent's own conversation, threaded into the same file. It
+      // belongs to the Task chip that spawned it, not between the user's
+      // turns, so it stays out of the peek entirely.
+      if (entry.isSidechain) continue;
+      // Context the CLI injected as if the user had typed it: a skill's
+      // body, a /context report. Not something a person said.
+      if (entry.isMeta) continue;
+
+      if (typeof entry.cwd === "string" && !cwd) cwd = entry.cwd;
+      // "HEAD" is what the CLI records for a detached checkout — a branch
+      // name it isn't, and nothing a reader can act on, so it's left off.
+      if (typeof entry.gitBranch === "string" && entry.gitBranch && entry.gitBranch !== "HEAD") {
+        gitBranch = entry.gitBranch;
+      }
+      const timestamp = typeof entry.timestamp === "string" ? entry.timestamp : null;
+
+      const message = entry.message as Record<string, unknown> | undefined;
+      if (entry.type === "assistant" && typeof message?.model === "string") model = message.model;
+
+      const { blocks, isRealMessage } = peekBlocks(message?.content, cwd, state);
+      if (blocks.length === 0) continue;
+
+      // A "user" entry carrying no real text is the CLI feeding tool
+      // results back to the model — part of Claude's turn, not a new one
+      // from the person.
+      const role: "user" | "assistant" = entry.type === "assistant" || !isRealMessage ? "assistant" : "user";
+
+      if (title === undefined && role === "user") {
+        const first = blocks.find((block) => block.type === "text");
+        if (first && first.type === "text") title = truncate(first.text, TITLE_MAX_LENGTH);
+      }
+      // What the header counts as a "message": something one of them
+      // actually said. An assistant entry that is only a tool call is part
+      // of answering the message before it, not another one.
+      if (blocks.some((block) => block.type === "text" || block.type === "command")) {
+        state.messageCount += 1;
+        if (timestamp) {
+          startedAt ??= timestamp;
+          lastMessageAt = timestamp;
+        }
+      }
+
+      pushBlocks(state, role, timestamp, blocks);
     }
-    if (entry.type !== "user" && entry.type !== "assistant") continue;
-
-    const message = entry.message as Record<string, unknown> | undefined;
-    const blocks = normalizeBlocks(message?.content);
-    if (blocks.length === 0) continue;
-
-    const isRealUserMessage =
-      entry.type === "user" &&
-      blocks.some((block) => block.type === "text" && !isSyntheticLocalCommandText(block.text));
-
-    if (title === undefined && isRealUserMessage) {
-      const textBlock = blocks.find(
-        (block): block is { type: "text"; text: string } =>
-          block.type === "text" && !isSyntheticLocalCommandText(block.text)
-      );
-      if (textBlock) title = truncate(textBlock.text, TITLE_MAX_LENGTH);
-    }
-
-    // A "user" entry with no real text is just the SDK feeding a tool
-    // result back to the model — not something the human typed. Folding it
-    // into the ongoing assistant turn (instead of giving it its own "YOU"
-    // turn) keeps a whole tool-use loop as one continuous exchange, rather
-    // than a wall of alternating one-line turns.
-    const role: "user" | "assistant" = isRealUserMessage ? "user" : "assistant";
-    const last = turns[turns.length - 1];
-    if (last && last.role === role) {
-      last.blocks.push(...blocks);
-    } else {
-      turns.push({ role, blocks });
-    }
+  } catch {
+    // A transcript being written to as it's read can end mid-line; keep
+    // whatever was parsed rather than failing the whole peek.
+  } finally {
+    rl.close();
   }
 
   return {
-    id: basename(filePath, ".jsonl"),
+    id: sessionId,
+    title: aiTitle || title || EMPTY_CONVERSATION_TITLE,
     projectLabel: projectLabelFor(basename(dirname(filePath))),
-    title: title ?? "New conversation",
-    turns,
+    cwd,
+    gitBranch,
+    model,
+    startedAt,
+    lastMessageAt,
+    messageCount: state.messageCount,
+    turns: state.turns,
+    truncated: state.truncated,
   };
 }
