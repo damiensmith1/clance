@@ -36,6 +36,10 @@
   /* Dims the window behind a modal overlay (the Sessions peek), so the
      panel reads as being in front of the app rather than part of it. */
   --scrim: rgba(23, 22, 20, 0.28);
+  /* A rule that has to read as a break between groups rather than as one
+     more row border — one step up from --surface-border, well short of a
+     text colour (the Sessions list's pinned group). */
+  --divider-strong: rgba(23, 22, 20, 0.16);
 
   /* Text */
   --text-primary: #171614;

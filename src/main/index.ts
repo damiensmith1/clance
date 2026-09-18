@@ -36,6 +36,7 @@ import {
 import { SHORTCUT_ACTIONS } from "./shortcuts";
 import { peekSession, listSessions, hasRealUserMessage } from "./chatHistory";
 import { setSessionArchived } from "./archivedSessions";
+import { setSessionPinned } from "./pinnedSessions";
 import { sessionFolder, revealFolder, resumeInTerminal } from "./sessionActions";
 import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
 import {
@@ -367,6 +368,11 @@ ipcMain.handle("chatHistory:resolve-open-args", async (_event, sessionId: string
 ipcMain.handle(
   "chatHistory:set-archived",
   (_event, sessionId: string, archived: boolean) => setSessionArchived(sessionId, archived)
+);
+
+ipcMain.handle(
+  "chatHistory:set-pinned",
+  (_event, sessionId: string, pinned: boolean) => setSessionPinned(sessionId, pinned)
 );
 
 ipcMain.handle("sessions:folder", (_event, sessionId: unknown) => sessionFolder(sessionId));

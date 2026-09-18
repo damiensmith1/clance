@@ -124,6 +124,14 @@ export const Icon = {
 
   close: (size = 16) => svg(size, html`<path d="M6 6l12 12M18 6L6 18" />`),
 
+  // A thumbtack seen head-on: cap, shaft with its flange, needle. Drawn
+  // with the same stroke as the rest of the set; `fill` is what makes the
+  // pinned state read as solid (see .session-pin-on).
+  pin: (size = 16) =>
+    svg(
+      size,
+      html`<path d="M7 4h10" /><path d="M9 4v7l-3 3h12l-3-3V4" /><path d="M12 14v6" />`
+    ),
   archive: (size = 16) =>
     svg(
       size,

@@ -1134,7 +1134,11 @@
       }
       .session-row {
         display: grid;
-        grid-template-columns: 14px minmax(0, 1fr) 130px 84px 60px 60px;
+        /* One indicator column, not two: a pin and a status dot never need
+           to be read in the same instant, and two columns left every
+           ordinary row — closed, unpinned, which is most of them — with an
+           empty gutter before its title. */
+        grid-template-columns: 16px minmax(0, 1fr) 130px 84px 60px 60px;
         align-items: center;
         column-gap: var(--space-3);
         padding: 0 var(--space-2);
@@ -1155,10 +1159,72 @@
       .session-row-selected .session-title {
         font-weight: var(--weight-medium);
       }
-      .session-lead {
+      /* Holds both the pin and the status dot, stacked, with exactly one of
+         them showing: the dot at rest, the pin when the row is hovered or
+         pinned. An unpinned, idle list therefore carries no pin ink at all,
+         and the affordance appears where the hand already is. */
+      .session-pin {
+        position: relative;
         display: flex;
         align-items: center;
         justify-content: center;
+        padding: 0;
+        border: none;
+        background: none;
+        cursor: pointer;
+        color: var(--text-tertiary);
+      }
+      .session-pin .status-dot {
+        position: absolute;
+      }
+      .session-pin svg {
+        visibility: hidden;
+      }
+      .session-row:hover .session-pin svg,
+      .session-row:focus-within .session-pin svg,
+      .session-pin-on svg {
+        visibility: visible;
+      }
+      .session-row:hover .session-pin .status-dot,
+      .session-row:focus-within .session-pin .status-dot,
+      .session-pin-on .status-dot {
+        visibility: hidden;
+      }
+      /* Arrow-key navigation shouldn't swap a resting row's dot for a pin
+         just because the pointer happens to be lying over it. */
+      .sessions-keyboard-nav .session-row:hover:not(:focus-within) .session-pin:not(.session-pin-on) svg {
+        visibility: hidden;
+      }
+      .sessions-keyboard-nav .session-row:hover:not(:focus-within) .session-pin:not(.session-pin-on) .status-dot {
+        visibility: visible;
+      }
+      /* Filled, so a pinned row reads as pinned rather than as one someone
+         happens to be hovering. The fill is what says "set", so the colour
+         can stay quieter than the title beside it — except on a live row,
+         where the pin inherits the dot's signal colour and goes on doing
+         the dot's job. */
+      .session-pin-on {
+        color: var(--text-secondary);
+      }
+      .session-pin-on svg {
+        fill: currentColor;
+      }
+      .session-pin-on.session-pin-tone-live {
+        color: var(--signal);
+      }
+      .session-pin-on.session-pin-tone-attention {
+        color: var(--warning);
+      }
+      .session-pin-on.session-pin-tone-danger {
+        color: var(--danger);
+      }
+      .session-pin:hover {
+        color: var(--text-primary);
+      }
+      /* Closes the pinned group. Heavier than the row borders on either side
+         of it, and the only rule in the table that isn't one. */
+      .session-row-pinned-last {
+        border-bottom: 1px solid var(--divider-strong);
       }
       .session-dot-attention {
         background: var(--warning);

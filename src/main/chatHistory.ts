@@ -5,6 +5,7 @@ import { homedir } from "os";
 import { basename, dirname, extname, join } from "path";
 import { SESSION_CWD } from "./paths";
 import { getArchivedSessionIds } from "./archivedSessions";
+import { getPinnedSessionIds } from "./pinnedSessions";
 
 // Where the Claude Code CLI (and Clance itself, via the Agent SDK) stores
 // every session's JSONL transcript, one subdirectory per project cwd.
@@ -22,9 +23,11 @@ export type SessionSummary = {
   projectLabel: string;
   title: string;
   lastModified: string;
-  // Clance-local bookkeeping (see archivedSessions.ts) — never reflects
-  // anything about the underlying transcript file itself.
+  // Clance-local bookkeeping (see archivedSessions.ts, pinnedSessions.ts) —
+  // neither reflects anything about the underlying transcript file itself.
   archived: boolean;
+  // Kept at the top of the Sessions list, whatever its date or state.
+  pinned: boolean;
   // Started by a program through the Agent SDK or `claude -p` rather than by
   // a person — e.g. the security-guidance plugin reviews every commit this
   // way. Hidden from the Sessions list unless its Automated filter is on.
@@ -329,6 +332,7 @@ export async function listSessions(): Promise<SessionSummary[]> {
 
   const summaries: SessionSummary[] = [];
   const archivedIds = getArchivedSessionIds();
+  const pinnedIds = getPinnedSessionIds();
 
   for (const dirName of projectDirs) {
     const projectPath = join(CLAUDE_PROJECTS_DIR, dirName);
@@ -370,6 +374,7 @@ export async function listSessions(): Promise<SessionSummary[]> {
           title,
           lastModified: fileStat.mtime.toISOString(),
           archived: archivedIds.has(id),
+          pinned: pinnedIds.has(id),
           automated,
         });
       } catch {

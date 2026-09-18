@@ -178,6 +178,26 @@ two Agent SDK passes per commit. They only appear under the Automated filter,
 never in All sessions, Closed, search or the widget's resume list; an archived
 one shows under Archived.
 
+Pinned sessions sort above everything else, whatever their date or state —
+a closed session from last week sits above a running one from this morning.
+`pinnedSessions.ts` keeps the ids in `pinned-sessions.json`, the same
+Clance-local shape archiving uses, and a slightly heavier rule closes the
+group. Pinning decides where a row sits, not whether it is exempt: the
+filter and the search still choose what's in the list at all, so a pinned
+closed session doesn't appear under Running. The renderer holds the pinned
+ids as one set rather than reading the flag off each row, since a live agent
+whose transcript hasn't been written yet has no summary to carry it.
+
+The pin shares the status dot's column rather than taking one of its own:
+two indicator columns left every ordinary row — closed and unpinned, which
+is most of them — with an empty gutter before its title. Exactly one of the
+pair shows at a time. The dot at rest, the pin when the row is hovered or
+pinned, so an unpinned, idle list carries no pin ink at all and the
+affordance appears where the hand already is. A pinned row that is also
+running would lose its dot that way, so the pin takes the dot's colour
+instead — amber on a session that needs you — and goes on doing its job:
+the shape says pinned, the colour says state.
+
 The page is keyboard-first. ⌘K anywhere in the main window, terminals
 included, switches to Sessions (opening it if needed) and focuses the search
 field. `Shell.js` catches it in the capture phase so a focused terminal never
@@ -186,8 +206,8 @@ mounted. The search dropdown lists
 the top matches and then "start a new session in" the default folder (⌘↩),
 recent folders or a chosen one (⌘O). In the table ↑↓ select, ↩ opens in a tab,
 ⌥↩ opens in the widget, ⌘⌫ archives (or stops a live session) and ⌘N starts a
-new session. Archiving shows a toast with Undo. Right-clicking a row adds
-Resume in Terminal, Copy folder path and Reveal in Finder. Those go through
+new session. Archiving shows a toast with Undo. Right-clicking a row adds Peek,
+Resume in Terminal, Copy folder path, Reveal in Finder and Pin/Unpin. Those go through
 `sessionActions.ts`, which re-validates the renderer's ids and paths. Resume
 in Terminal writes a `.command` file under `~/.clance/terminal` that runs
 `claude attach <agent>` or `claude --resume <session>` in the session's folder

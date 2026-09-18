@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld("clanceApp", {
     ipcRenderer.invoke("chatHistory:resolve-open-args", sessionId, name),
   setSessionArchived: (sessionId: string, archived: boolean) =>
     ipcRenderer.invoke("chatHistory:set-archived", sessionId, archived),
+  setSessionPinned: (sessionId: string, pinned: boolean) =>
+    ipcRenderer.invoke("chatHistory:set-pinned", sessionId, pinned),
   sessionFolder: (sessionId: string) => ipcRenderer.invoke("sessions:folder", sessionId),
   revealFolder: (dir: string) => ipcRenderer.invoke("sessions:reveal-folder", dir),
   resumeInTerminal: (target: { sessionId?: string; agentId?: string; cwd?: string }) =>

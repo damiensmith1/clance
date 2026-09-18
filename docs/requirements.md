@@ -98,7 +98,11 @@ Sessions Clance starts get these tools when Accessibility is granted:
   widget; Space to peek; ⌘⌫ to archive or stop; ⌘N for a new session.
 - Right-clicking a session offers peeking at it, opening it in a tab or the
   widget, resuming it in Terminal, copying its folder path, revealing the
-  folder in Finder, and archive, stop or restore.
+  folder in Finder, pin or unpin, and archive, stop or restore.
+- Sessions can be pinned, from that menu or a pin at the head of the row.
+  Pinned ones sit above every other session whatever their date or state, and
+  don't appear again among the rest. They are still subject to the filter and
+  the search — pinning changes where a session sits, not whether it shows.
 - A session can be peeked at without opening it — Space or the row menu shows
   what was said, read straight from the transcript: messages in full, tool
   calls as one line each, their output behind a toggle. It opens at the end

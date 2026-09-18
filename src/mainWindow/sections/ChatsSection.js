@@ -107,11 +107,11 @@ function SkeletonRows() {
   );
 }
 
-function SessionRow({ row, selected, onOpen, onContextMenu, onPopOut, onArchiveOrStop }) {
+function SessionRow({ row, selected, lastPinned, onOpen, onContextMenu, onPopOut, onArchiveOrStop, onTogglePin }) {
   const showDot = row.tone === "live" || row.tone === "attention" || row.tone === "danger";
   return html`
     <div
-      class="session-row ${selected ? "session-row-selected" : ""}"
+      class="session-row ${selected ? "session-row-selected" : ""} ${lastPinned ? "session-row-pinned-last" : ""}"
       role="button"
       tabindex="0"
       aria-selected=${selected}
@@ -122,10 +122,20 @@ function SessionRow({ row, selected, onOpen, onContextMenu, onPopOut, onArchiveO
         if (e.key === "Enter") onOpen();
       }}
     >
-      <span class="session-lead">
+      <button
+        class="session-pin ${row.pinned ? "session-pin-on" : ""} session-pin-tone-${row.tone}"
+        title=${row.pinned ? "Unpin session" : "Pin session"}
+        aria-label=${row.pinned ? "Unpin session" : "Pin session"}
+        aria-pressed=${row.pinned}
+        onClick=${(e) => {
+          e.stopPropagation();
+          onTogglePin();
+        }}
+      >
+        ${Icon.pin(13)}
         ${showDot &&
         html`<span class="status-dot ${row.tone === "live" ? "status-dot-live" : ""} session-dot-${row.tone}"></span>`}
-      </span>
+      </button>
       <span class="session-title">${row.title}</span>
       <span class="session-project">${row.project}</span>
       <span class="session-state session-state-${row.tone}">${row.state}</span>
@@ -205,6 +215,10 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
   const [contextMenu, setContextMenu] = useState(null);
   // The session id the Peek overlay is showing, or null when closed.
   const [peekId, setPeekId] = useState(null);
+  // Session ids kept at the top of the list. Held as one set rather than
+  // read off each row, because a live agent whose transcript hasn't been
+  // written yet has no SessionSummary to carry the flag.
+  const [pinnedIds, setPinnedIds] = useState(new Set());
   const [toast, setToast] = useState(null);
   const rootRef = useRef(null);
   const searchRef = useRef(null);
@@ -225,6 +239,7 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
   useEffect(() => {
     window.clanceApp.listChatSessions().then((result) => {
       setSessions(result);
+      setPinnedIds(new Set(result.filter((s) => s.pinned).map((s) => s.id)));
       setLoading(false);
     });
     Promise.all([window.clanceApp.getRecentDirectories(), window.clanceApp.getPreferences()]).then(
@@ -273,6 +288,7 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
         key: `agent:${agent.id}`,
         kind: "live",
         agent,
+        pinned: pinnedIds.has(agent.sessionId),
         title: displayNameFor(agent),
         project: agent.cwd ? dirBasename(agent.cwd) : "",
         state: label,
@@ -286,6 +302,7 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
         key: `session:${session.id}`,
         kind: session.archived ? "archived" : session.automated ? "automated" : "closed",
         session,
+        pinned: pinnedIds.has(session.id),
         title: session.title,
         project: session.projectLabel,
         state: session.archived ? "archived" : session.automated ? "automated" : "closed",
@@ -293,11 +310,11 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
         updated: relativeTime(session.lastModified),
       }));
     return [...live, ...history];
-  }, [agents, sessions, liveSessionIds, sessionTitleById]);
+  }, [agents, sessions, liveSessionIds, sessionTitleById, pinnedIds]);
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return allRows.filter((row) => {
+    const visible = allRows.filter((row) => {
       if (filter === "all" && (row.kind === "archived" || row.kind === "automated")) return false;
       if (filter === "running" && row.kind !== "live") return false;
       if (filter === "closed" && row.kind !== "closed") return false;
@@ -306,7 +323,15 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
       if (!q) return true;
       return row.title.toLowerCase().includes(q) || row.project.toLowerCase().includes(q);
     });
+    // Pinned rows go above everything else, in the order they'd otherwise
+    // have had. Filter and search still decide what's in the list at all —
+    // pinning is about where a row sits, not whether it's exempt.
+    return [...visible.filter((row) => row.pinned), ...visible.filter((row) => !row.pinned)];
   }, [allRows, filter, query]);
+
+  // Index of the last pinned row, so the table can rule a line under the
+  // group (see .session-row-pinned-last).
+  const pinnedCount = useMemo(() => rows.filter((row) => row.pinned).length, [rows]);
 
   // The command menu under the search field: matching sessions to open,
   // then folders to start a new session in.
@@ -337,6 +362,24 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
     // not wait on a round trip to find out it's allowed to.
     setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, archived } : s)));
     window.clanceApp.setSessionArchived(sessionId, archived);
+  }
+
+  // Optimistic like setArchived: the row only needs to move to the top of
+  // the list, not wait on a round trip to find out it may.
+  function togglePin(row) {
+    const id = sessionIdFor(row);
+    if (!id) {
+      showToast("This session has no transcript to pin yet");
+      return;
+    }
+    const pinned = !pinnedIds.has(id);
+    setPinnedIds((prev) => {
+      const next = new Set(prev);
+      if (pinned) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+    window.clanceApp.setSessionPinned(id, pinned);
   }
 
   function archive(row) {
@@ -568,7 +611,7 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
     e.preventDefault();
     setSelectedKey(row.key);
     const x = Math.min(e.clientX, window.innerWidth - 250);
-    const y = Math.min(e.clientY, window.innerHeight - 330);
+    const y = Math.min(e.clientY, window.innerHeight - 360);
     setContextMenu({ x, y, row });
   }
 
@@ -706,15 +749,17 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
                 ${keyboardHints}
                 <div class="session-table">
                   ${rows.map(
-                    (row) => html`
+                    (row, index) => html`
                       <${SessionRow}
                         key=${row.key}
                         row=${row}
                         selected=${row.key === selectedKey}
+                        lastPinned=${index === pinnedCount - 1}
                         onOpen=${() => openRow(row)}
                         onContextMenu=${(e) => openContextMenu(e, row)}
                         onPopOut=${() => popOut(row)}
                         onArchiveOrStop=${() => archiveOrStop(row)}
+                        onTogglePin=${() => togglePin(row)}
                       />
                     `
                   )}
@@ -732,6 +777,10 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
           <${MenuItem} title="Copy folder path" onSelect=${menuAction(copyFolder)} />
           <${MenuItem} title="Reveal in Finder" onSelect=${menuAction(revealFolder)} />
           <div class="menu-separator"></div>
+          <${MenuItem}
+            title=${contextMenu.row.pinned ? "Unpin" : "Pin"}
+            onSelect=${menuAction(togglePin)}
+          />
           ${contextMenu.row.kind === "live"
             ? html`<${MenuItem} title="Stop session" shortcut="⌘⌫" onSelect=${menuAction(archiveOrStop)} />`
             : contextMenu.row.kind === "archived"
