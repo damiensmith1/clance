@@ -66,6 +66,12 @@ contextBridge.exposeInMainWorld("clanceApp", {
     ipcRenderer.on("open-section", listener);
     return () => ipcRenderer.removeListener("open-section", listener);
   },
+  // Tab commands from the app menu's Window items (⌘W, ⌃⇥, ⇧⌃⇥).
+  onWindowCommand: (callback: (command: string) => void) => {
+    const listener = (_event: unknown, command: string) => callback(command);
+    ipcRenderer.on("window-command", listener);
+    return () => ipcRenderer.removeListener("window-command", listener);
+  },
   onOpenSessionTab: (
     callback: (payload: { terminalId: string; args: string[]; title: string | null }) => void
   ) => {

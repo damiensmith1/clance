@@ -42,8 +42,8 @@ What Clance does. Why is in `background.md`; how is in `design.md`.
   - **Hide** (or ⌥Space while the widget is open) — tuck the widget away
     with the session still running and return focus to the previous app.
     The next ⌥Space brings the same widget back.
-  - **Close** — dismiss it. A session with no user message is deleted;
-    anything else stays resumable.
+  - **Close** (or ⌘W) — dismiss it. A session with no user message is
+    deleted; anything else stays resumable.
 - A hint bar under the terminal shows the shortcuts and the session's folder.
 - If the session can't start, the widget says so, with Try again and Open
   Settings.
@@ -126,6 +126,10 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - Terminal tabs survive tab switches and window reloads. A session tab shows
   a live dot and a status line with its folder and start time, and can be
   popped out into the widget.
+- Tabs are driven from the keyboard the way they are in any macOS app: ⌘W
+  closes the active tab (and the window once its last tab goes), ⇧⌘W closes
+  the window, and ⌃⇥ / ⇧⌃⇥ move between the tabs of the pane in focus. The
+  bindings appear in the Window menu, and work while a terminal has focus.
 - While Claude is signed out, the main window shows a banner with Sign in.
 
 ## Extensibility

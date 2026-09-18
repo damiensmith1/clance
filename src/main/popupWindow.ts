@@ -79,6 +79,10 @@ let ignoreNextMove = false;
 // silently undo the move, which defeats the point of dragging it at all.
 let userHasRepositioned = false;
 
+export function isPopupWindow(win: BrowserWindow): boolean {
+  return popup !== null && !popup.isDestroyed() && win.id === popup.id;
+}
+
 // Hides the widget without destroying it (so its state/pty wiring is cheap
 // to resume next time) — the only way it closes now. It used to also
 // auto-hide on blur, but that made it disappear mid-drag or whenever
@@ -87,6 +91,15 @@ let userHasRepositioned = false;
 export function hidePopup(): void {
   if (popup && !popup.isDestroyed()) popup.hide();
   currentMode = null;
+}
+
+// What the widget's ✕ does — and so what ⌘W on the widget does (see
+// appMenu.ts): hide the window, which is never destroyed, and give back a
+// session nobody ever used. One function, so the button and the keystroke
+// can't drift apart.
+export function closeWidget(): void {
+  hidePopup();
+  cleanupIfAbandoned();
 }
 
 // The toolbar's Hide button and the hotkey on a visible widget. Unlike
@@ -206,10 +219,7 @@ function positionNearCursor(win: BrowserWindow): void {
   win.setPosition(Math.max(x, display.workArea.x), Math.max(y, display.workArea.y));
 }
 
-ipcMain.on("popup:close", () => {
-  hidePopup();
-  cleanupIfAbandoned();
-});
+ipcMain.on("popup:close", () => closeWidget());
 
 ipcMain.on("popup:hide", () => hideWidgetKeepAlive());
 ipcMain.handle("popup:retry", () => toggleClancePopup());

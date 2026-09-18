@@ -322,8 +322,9 @@ every open would cost latency and be stale or irrelevant most of the time.
 
 ### Dismissing
 
-- **Close** hides the window, forgets the session, and removes it if it never
-  got a real user message.
+- **Close** (the ✕, or ⌘W on the widget — both call `closeWidget`) hides the
+  window, forgets the session, and removes it if it never got a real user
+  message.
 - **Hide** (and ⌥Space while open) keeps the session live. It calls
   `popup.hide()` then, if the widget had focus, `focusTarget()` to refocus the
   window the user came from. `app.hide()`
@@ -565,6 +566,26 @@ button opens `$SHELL -il` in the default directory.
 - Other windows open a section through `openMainWindowSection`, which waits for
   the renderer before sending `open-section` (the HUD's "open settings", the
   popup's error state).
+
+Tab keys live in the app menu's Window items (`appMenu.ts`) rather than in a
+renderer key listener: a menu accelerator is handled before the window sees
+the key, so a focused terminal can't swallow it, and the bindings stay where
+macOS users look for them. Each sends a `window-command` to the main window,
+which `Shell.js` applies to the pane that has focus.
+
+- **⌘W** closes the active tab, ending its pty the way the tab's own ✕ does
+  (the background agent behind a session goes on running either way). A
+  pane's last tab takes the pane with it. The layout store keeps the window
+  from ever being empty, so ⌘W on the last tab of the only pane closes the
+  window instead, as it does in every other macOS app — which is why plain
+  ⌘W is no longer the `close` role and **⇧⌘W** is Close Window now.
+- **⌃⇥ / ⇧⌃⇥** cycle the focused pane's tabs, wrapping at either end. A pane
+  is its own tab strip, so cycling stays inside one rather than wandering
+  across a split.
+- ⌘W on the widget is its ✕, exactly: `closeWidget` in `popupWindow.ts`, the
+  same function its close button goes through, so the two can't drift. The
+  widget's own window is never destroyed — its live session and xterm state
+  are what make the next hotkey press instant. Tab commands elsewhere no-op.
 
 ### Panes
 

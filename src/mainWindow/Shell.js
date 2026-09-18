@@ -584,6 +584,49 @@ export function Shell() {
     openTab({ id, type: id, label: item.label, icon: item.icon }, { paneId: getState().activePaneId });
   }
 
+  // ⌘W. The store keeps the window from ever being empty, so the last tab
+  // of the only pane can't be closed — ⌘W then means what it means in every
+  // other macOS app and closes the window. Closing a pane's last tab drops
+  // the pane itself, which the store already handles.
+  function closeActiveTab() {
+    const current = getState();
+    const pane = findPane(current.root, current.activePaneId);
+    const tab = pane?.tabs.find((t) => t.id === pane.activeTabId);
+    if (!pane || !tab) return;
+    if (current.root.type === "leaf" && pane.tabs.length <= 1) {
+      window.close();
+      return;
+    }
+    // Same as the tab's own ✕: a terminal tab keeps its pty alive across a
+    // mere tab switch, so closing it has to end it explicitly. The session
+    // behind it is a background agent and goes on running either way.
+    if (tab.type === "terminal") destroyTerminal(tab.terminalId);
+    closeTab(pane.id, tab.id);
+  }
+
+  // ⌃⇥ / ⇧⌃⇥, within the pane that has focus — a pane is its own tab strip,
+  // so cycling stays inside one rather than wandering across a split.
+  function cycleTab(step) {
+    const current = getState();
+    const pane = findPane(current.root, current.activePaneId);
+    if (!pane || pane.tabs.length < 2) return;
+    const index = pane.tabs.findIndex((t) => t.id === pane.activeTabId);
+    const next = pane.tabs[(index + step + pane.tabs.length) % pane.tabs.length];
+    activateTab(pane.id, next.id);
+  }
+
+  // These arrive from the app menu (appMenu.ts) rather than a key listener
+  // here, so a focused terminal never sees the keystroke first. getState()
+  // rather than `state`, since the listener outlives the render it was
+  // registered in.
+  useEffect(() => {
+    return window.clanceApp.onWindowCommand((command) => {
+      if (command === "close-tab") closeActiveTab();
+      else if (command === "next-tab") cycleTab(1);
+      else if (command === "prev-tab") cycleTab(-1);
+    });
+  }, []);
+
   // Minting a background agent is a real subprocess round trip (~0.5-1s),
   // not the old instant local pty spawn — long enough for an impatient
   // double-click to fire a second open before the first tab has appeared.

@@ -1,6 +1,35 @@
-import { Menu, MenuItemConstructorOptions } from "electron";
+import { BaseWindow, BrowserWindow, Menu, MenuItemConstructorOptions } from "electron";
 import { cancelDictation, toggleDictation } from "./dictation";
 import { readConfig } from "./config";
+import { isMainWindow } from "./mainWindow";
+import { closeWidget, isPopupWindow } from "./popupWindow";
+
+// The window a menu command was invoked from. Menu clicks hand back a
+// BaseWindow, which has no webContents of its own.
+function browserWindowFor(win: BaseWindow | undefined): BrowserWindow | null {
+  return win instanceof BrowserWindow ? win : null;
+}
+
+// Tab commands only mean something in the main window; anywhere else the
+// keystroke does nothing rather than acting on some other window's tabs.
+function sendTabCommand(target: BaseWindow | undefined, command: "close-tab" | "next-tab" | "prev-tab"): void {
+  const win = browserWindowFor(target);
+  if (win && isMainWindow(win)) win.webContents.send("window-command", command);
+}
+
+// ⌘W in the main window closes a tab (and the window itself once its last
+// one goes — see Shell.js). On the widget it is that window's ✕, exactly:
+// `closeWidget` hides it and releases a session nothing was ever typed
+// into. Not `win.close()` — the widget's window is never destroyed, since
+// its live session and xterm state are what make the next hotkey press
+// instant.
+function closeFocused(target: BaseWindow | undefined): void {
+  const win = browserWindowFor(target);
+  if (!win) return;
+  if (isMainWindow(win)) win.webContents.send("window-command", "close-tab");
+  else if (isPopupWindow(win)) closeWidget();
+  else win.close();
+}
 
 export function createAppMenu(): Menu {
   // The HUD is frameless and non-focusable by design, so it has no title
@@ -57,7 +86,29 @@ export function createAppMenu(): Menu {
         { role: "minimize" },
         { role: "zoom" },
         { type: "separator" },
-        { role: "close" },
+        // Registered here rather than as a key listener in the renderer:
+        // a menu accelerator is handled before the window sees the key, so
+        // a focused terminal can't swallow it, and the binding stays where
+        // macOS users look for it.
+        {
+          label: "Show Next Tab",
+          accelerator: "Control+Tab",
+          click: (_item, win) => sendTabCommand(win, "next-tab"),
+        },
+        {
+          label: "Show Previous Tab",
+          accelerator: "Control+Shift+Tab",
+          click: (_item, win) => sendTabCommand(win, "prev-tab"),
+        },
+        { type: "separator" },
+        {
+          label: "Close Tab",
+          accelerator: "CommandOrControl+W",
+          click: (_item, win) => closeFocused(win),
+        },
+        // ⇧⌘W for the window itself, as in every tabbed macOS app, now that
+        // plain ⌘W belongs to the tab.
+        { role: "close", label: "Close Window", accelerator: "Shift+CommandOrControl+W" },
       ],
     },
   ];

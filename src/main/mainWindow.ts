@@ -46,6 +46,12 @@ function createMainWindow(): BrowserWindow {
   return win;
 }
 
+// Whether a menu command came from the main window, which is the only one
+// with tabs to act on (see appMenu.ts's Window menu).
+export function isMainWindow(win: BrowserWindow): boolean {
+  return mainWindow !== null && !mainWindow.isDestroyed() && win.id === mainWindow.id;
+}
+
 export function openMainWindow(): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
     mainWindow = createMainWindow();
