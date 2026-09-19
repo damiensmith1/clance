@@ -16,16 +16,25 @@ the text at your cursor.
 
 - **A popup that stays out of the way.** Opens instantly near the cursor,
   can be moved and resized, and hides until you call it back. Nothing about
-  your screen is sent unless a session asks for it or you press ⌘⇧R.
-- **Computer-use tools.** Sessions can take a screenshot, read the selection,
-  list windows, click, and type into other apps. Anything that could act on
-  an app you didn't point at goes through Claude Code's normal approval
-  prompt, and each tool can be switched off.
+  your screen is captured unless a session asks for it.
+- **Computer-use tools.** Sessions can read your screen as text — the window
+  in front of you, the field you're typing in, whatever you've highlighted —
+  or take a screenshot when a picture is what's needed. They can also list
+  open apps, click a control by the name shown on it, and type into other
+  apps. Anything that could act on an app you didn't point at goes through
+  Claude Code's normal approval prompt, and each tool can be switched off.
 - **Every session in one place.** The main window lists every Claude Code
-  session on your Mac — running or finished, from any project — and opens
-  them as terminal tabs you can split into panes. Sessions run as Claude Code
-  background agents, so closing a window never ends one, and each can be
-  resumed with `claude --resume` in a terminal.
+  session on your Mac — running or finished, from any project. Peek at one
+  without opening it, pin the ones you're living in, or open them as terminal
+  tabs you can split into panes. Sessions run as Claude Code background
+  agents, so closing a window never ends one, and each can be resumed with
+  `claude --resume` in a terminal.
+- **Read the code your sessions write.** A Changes pane shows what has moved
+  in a git repository and updates as files change on disk, so a session
+  working in it is watched rather than checked on. Open any file as a tab to
+  read it whole, syntax highlighted, with its changes marked in place, then
+  stage, commit and push from the same pane. Clance never edits a file — the
+  session does that.
 - **On-device dictation.** Works in any app, powered by
   [whisper.cpp](https://github.com/ggml-org/whisper.cpp). Clance recommends a
   speech model for your Mac, and keeps a searchable history of everything
@@ -67,7 +76,7 @@ choosing shortcuts and, optionally, setting up dictation.
 | Permission | What it's for | Required |
 |---|---|---|
 | Accessibility | Typing, clicking and reading selections in other apps; pasting dictation | Yes |
-| Screen Recording | Screenshots (`look_at_screen`, ⌘⇧R) | No |
+| Screen Recording | Screenshots (`look_at_screen`) | No |
 | Microphone | Dictation | Only for dictation |
 
 If Clance is switched on in System Settings but still reported as not
@@ -77,10 +86,11 @@ adds Clance to the Screen Recording list once; if it's missing, add it with
 
 ## Using Clance
 
+From anywhere on your Mac:
+
 | Shortcut | Action |
 |---|---|
-| ⌥Space | Open a new conversation in the popup (press again to close it) |
-| ⌘⇧R, in the popup | Paste a screenshot, the front window's title and the selected text into your message |
+| ⌥Space | Open a new conversation in the popup (press again to hide it) |
 | ⌥D | Start or stop dictation |
 | Esc, while dictating | Cancel |
 
@@ -92,12 +102,23 @@ conversation into the main window (**Open in App**), **Hide** it with the
 session still running, or **Close** it. Drop a file onto any terminal to
 paste its path.
 
-Open the main window from the Dock icon or the menu-bar icon.
+Open the main window from the Dock icon or the menu-bar icon. It opens
+Sessions, Changes, Dictation and Settings as tabs, which you can split into
+panes by dragging one to an edge.
+
+| Shortcut | Action |
+|---|---|
+| ⌘K | Search every session on your Mac, or start a new one |
+| ⌘P | Open a file in the current repository by name |
+| ⌘N | New session |
+| Space | Peek at the selected session without opening it |
+| ⌘⌫ | Archive the selected session, or stop it if it's running |
+| ⌘W / ⌃⇥ | Close the active tab / move between tabs |
 
 ## Privacy
 
-- Your screen is read only when a session calls a screen tool or you press
-  ⌘⇧R. Screenshots from ⌘⇧R are saved in `~/.clance/screenshots/`.
+- Your screen is read only when a session calls a screen tool. Nothing is
+  captured in the background, and password fields are never readable.
 - Audio is transcribed on your Mac and deleted afterwards. Transcripts stay
   in `~/.clance/dictation.db`.
 - Clance's own network requests are speech model downloads (Hugging Face)
