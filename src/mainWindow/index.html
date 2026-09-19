@@ -1915,8 +1915,14 @@
         flex-shrink: 0;
         padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
       }
+      /* Holds the repo button, the branch button and the live dot on one
+         row. Without display:flex the two buttons are inline boxes and a long
+         branch name wraps under the repo name. */
       .changes-repo {
         position: relative;
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
         flex: 1;
         min-width: 0;
       }
@@ -1944,14 +1950,88 @@
         overflow: hidden;
         text-overflow: ellipsis;
       }
+      /* A control now, not a label: it opens the branch picker. */
       .changes-branch {
-        flex-shrink: 0;
+        flex-shrink: 1;
+        min-width: 0;
+        padding: var(--space-1) var(--space-2);
+        background: transparent;
+        border: none;
+        border-radius: var(--radius-md);
         font-family: var(--font-mono);
         font-size: var(--text-xs);
         color: var(--text-tertiary);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        cursor: pointer;
+      }
+      .changes-branch:hover {
+        background: var(--surface-hover);
+        color: var(--text-primary);
+      }
+      /* Not a warning — nothing needs doing — but a state worth noticing,
+         so it carries the mono label rather than passing for a branch name. */
+      .changes-branch-detached {
+        color: var(--warning);
+      }
+
+      /* ---- the branch picker ---- */
+      .changes-branches {
+        position: absolute;
+        top: calc(100% + var(--space-1));
+        left: 0;
+        right: 0;
+        z-index: 20;
+        min-width: 0;
+        max-width: none;
+      }
+      .branch-list {
+        max-height: 320px;
+        overflow-y: auto;
+      }
+      .branch-row {
+        gap: var(--space-2);
+      }
+      .branch-dot {
+        width: 1ch;
+        flex-shrink: 0;
+        color: var(--signal);
+        font-size: var(--text-xs);
+      }
+      .branch-name {
+        flex: 1;
+        min-width: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        direction: rtl;
+        text-align: left;
+      }
+      .branch-track {
+        display: flex;
+        gap: var(--space-1);
+        flex-shrink: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+      }
+      .branch-local {
+        color: var(--text-tertiary);
+      }
+      .branch-when {
+        width: 4ch;
+        flex-shrink: 0;
+        text-align: right;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .branch-note {
+        padding: var(--space-2) 10px;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
       }
       /* Pinned to both edges of the repo button's box rather than sized by
          its contents: .menu's own min-width and the full paths inside pushed

@@ -944,6 +944,25 @@ host must look like a host — without that test the shape swallows any
 The renderer asks to open *this repo's* remote and never passes a URL; the
 main process re-derives it from the repo and opens it with `shell.openExternal`.
 
+**Branches** are shown, never changed. `listBranches` is one `for-each-ref`
+over `refs/heads`, sorted by commit date, carrying each branch's upstream,
+ahead/behind (parsed out of `%(upstream:track)`'s `[ahead 2, behind 1]`),
+tip subject and whether it's the checked-out one. Newline-separated records
+are safe here in a way they never are for paths: git's own ref-name rules
+forbid control characters, so a branch name can't contain one.
+
+The picker is read-only because a checkout with a dirty tree either refuses or
+carries the changes across, and that is a decision rather than a button. What
+a row can usefully do instead is hand over the name to paste into a checkout,
+so clicking one copies it. The header's branch and repo are two controls over
+one menu slot (`menu` is `"repo"`, `"branch"` or null), so opening one closes
+the other without a second piece of state to keep in step.
+
+A **detached HEAD** is labelled `detached <sha>` in the warning colour rather
+than rendered as a bare short sha, which read exactly like a branch named that
+and quietly hid the fact that a commit there would be on no branch. Nothing is
+marked current in the picker while detached, which is the truth.
+
 **The repo switcher** offers the default session directory, the recent ones
 and wherever the running agents are working, deduped through `findRepoRoot` —
 no configuration of its own, because Clance already knows where the user
@@ -971,6 +990,14 @@ choice over that one read: hiding the deleted lines and the marks leaves
 exactly the working-tree file. Two separate reads could disagree about what
 the file says; this can't. A file with no changes is read from disk as all
 context, an untracked one as all addition, a deleted one from `show HEAD:`.
+
+**A branch switch under an open tab.** The watcher covers `.git/HEAD` and
+`refs/`, so checking out elsewhere reloads every open file tab. When the file
+isn't on the new branch, `getFileView` asks `rev-list --all -- <path>` whether
+git has ever known it and says "Not on this branch" rather than "isn't in this
+repository any more" — the file is fine, it just isn't here. That question is
+only asked when the path is missing from the current tree, so it costs nothing
+normally.
 
 **Where files open.** `paneForFileTabs` picks a pane that isn't the one
 holding Changes, preferring one that already has a file in it, so reading a

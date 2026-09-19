@@ -153,7 +153,13 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - The header gives the repository and its branch, marks when a session is
   working there, and carries Fetch, with Pull and Push only when there is
   something to pull or push. A merge, rebase or cherry-pick in progress is
-  named.
+  named. A detached HEAD is named as such rather than shown as a bare commit
+  id, so it can't be mistaken for a branch.
+- The branch opens a read-only list of the repository's branches, most
+  recently committed to first: which one is checked out, how far each is
+  ahead of or behind its upstream, which have no upstream, and when each was
+  last committed to. Clicking one copies its name. Nothing there checks a
+  branch out — switching is done in a terminal or by a session.
 - Each changed file gives its path, what happened to it (added, modified,
   deleted, renamed, untracked, conflicted) and its line counts, with the
   repository's totals above them. Clicking one opens it as a file tab; a
@@ -209,6 +215,9 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - One tab per file — opening the same file again focuses the tab that's
   already there. Files open beside the Changes pane rather than over it.
 - A file too large to show, or a binary one, says so rather than trying.
+- A file tab open when the branch changes under it follows the branch. If the
+  file doesn't exist on the new branch it says so, which is different from
+  saying the file is gone — a file git has never heard of says that instead.
 
 ## Main window
 

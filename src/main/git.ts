@@ -787,7 +787,15 @@ export async function getFileView(dir: unknown, path: unknown): Promise<FileView
   // has to be inside the repo, which `ls-files` is the authority on.
   if (!file) {
     const known = await git(root, ["--no-optional-locks", "ls-files", "--error-unmatch", "-z", "--", path], 64 * 1024);
-    if (known.code !== 0) return null;
+    if (known.code !== 0) {
+      // Not in this tree. A file tab open across a branch switch lands here,
+      // and "isn't in this repository any more" would be a lie — the file is
+      // fine, it just doesn't exist on the branch now checked out.
+      if (await knownToHistory(root, path)) {
+        return { ...base, changed: false, lines: [], binary: false, omitted: "Not on this branch", truncated: false };
+      }
+      return null;
+    }
     return { ...base, changed: false, ...readWholeFile(root, path, "context") };
   }
 
@@ -941,4 +949,81 @@ export async function getRemote(dir: unknown): Promise<{ url: string; host: stri
   const run = await git(root, ["--no-optional-locks", "remote", "get-url", "origin"], 64 * 1024);
   if (run.code !== 0 || !run.stdout.trim()) return null;
   return webUrlFromRemote(run.stdout);
+}
+
+// ---- branches ---------------------------------------------------------------
+
+export type GitBranch = {
+  name: string;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  /** ISO 8601 of the branch tip's commit, which is what the list sorts by. */
+  date: string;
+  subject: string;
+  current: boolean;
+};
+
+/** Branches beyond this aren't listed; a repo with more has a search problem, not a list problem. */
+const MAX_BRANCHES = 200;
+
+/**
+ * Local branches, most recently committed to first.
+ *
+ * Read-only on purpose: the pane shows where the branches are and what they're
+ * ahead or behind by, and leaves checking one out to a terminal or the session
+ * next door. A checkout with a dirty tree either refuses or carries the changes
+ * across, and that's a decision rather than a button.
+ *
+ * Newline-separated records are safe here in a way they aren't for paths: git's
+ * own ref-name rules forbid control characters, so a branch name can't contain
+ * one. Fields use US (0x1f) for the same reason `listCommits` does.
+ */
+export async function listBranches(dir: unknown): Promise<GitBranch[]> {
+  const root = await findRepoRoot(dir);
+  if (!root) return [];
+  const run = await git(root, [
+    "--no-optional-locks",
+    "for-each-ref",
+    "refs/heads",
+    "--sort=-committerdate",
+    `--count=${MAX_BRANCHES}`,
+    "--format=%(refname:short)%1f%(upstream:short)%1f%(upstream:track)%1f%(committerdate:iso8601)%1f%(HEAD)%1f%(contents:subject)",
+  ]);
+  if (run.code !== 0) return [];
+
+  return run.stdout
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [name, upstream, track, date, head, subject] = line.split("\x1f");
+      // `%(upstream:track)` prints "[ahead 2, behind 1]", "[gone]" or nothing.
+      const ahead = Number(track?.match(/ahead (\d+)/)?.[1] ?? 0);
+      const behind = Number(track?.match(/behind (\d+)/)?.[1] ?? 0);
+      return {
+        name: name ?? "",
+        upstream: upstream || null,
+        ahead,
+        behind,
+        date: date ?? "",
+        subject: subject ?? "",
+        current: head === "*",
+      };
+    })
+    .filter((branch) => branch.name);
+}
+
+/**
+ * Whether git has ever known this path on any ref — the difference between a
+ * file that is merely not on the branch you're standing on and one that is
+ * genuinely gone. Only asked when the path isn't in the current tree, so it
+ * never costs anything in the normal case.
+ */
+async function knownToHistory(root: string, path: string): Promise<boolean> {
+  const run = await git(
+    root,
+    ["--no-optional-locks", "rev-list", "--all", "--max-count=1", "--", path],
+    64 * 1024
+  );
+  return run.code === 0 && run.stdout.trim().length > 0;
 }

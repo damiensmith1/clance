@@ -119,6 +119,7 @@ contextBridge.exposeInMainWorld("clanceApp", {
   gitFileView: (dir: string, path: string) => ipcRenderer.invoke("git:file-view", dir, path),
   gitListFiles: (dir: string) => ipcRenderer.invoke("git:list-files", dir),
   gitLog: (dir: string, limit?: number) => ipcRenderer.invoke("git:log", dir, limit),
+  gitBranches: (dir: string) => ipcRenderer.invoke("git:branches", dir),
   gitRemote: (dir: string) => ipcRenderer.invoke("git:remote", dir),
   gitOpenRemote: (dir: string) => ipcRenderer.invoke("git:open-remote", dir),
   gitStage: (dir: string, paths: string[]) => ipcRenderer.invoke("git:stage", dir, paths),

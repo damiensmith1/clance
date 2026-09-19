@@ -155,6 +155,51 @@ function History({ commits, remote, onOpenRemote }) {
   `;
 }
 
+/**
+ * Branches, read-only. It says where they are — ahead and behind their
+ * upstream, and when each was last committed to — and leaves checking one out
+ * to a terminal or the session next door: a checkout with a dirty tree either
+ * refuses or carries the changes across, which is a decision rather than a
+ * button. What a row *can* usefully do is hand over the name.
+ */
+function BranchMenu({ branches, copied, onCopy }) {
+  return html`
+    <div class="menu changes-branches">
+      <div class="menu-label">branches</div>
+      ${branches === null
+        ? html`<div class="branch-note">Reading…</div>`
+        : branches.length === 0
+          ? html`<div class="branch-note">No branches yet.</div>`
+          : html`
+              <div class="branch-list">
+                ${branches.map(
+                  (branch) => html`
+                    <button
+                      class="menu-item branch-row ${branch.current ? "menu-item-active" : ""}"
+                      key=${branch.name}
+                      title=${`${branch.subject}\n${branch.upstream ? `tracks ${branch.upstream}` : "no upstream"}`}
+                      onClick=${() => onCopy(branch.name)}
+                    >
+                      <span class="branch-dot">${branch.current ? "●" : ""}</span>
+                      <span class="branch-name">${branch.name}</span>
+                      <span class="branch-track">
+                        ${branch.ahead > 0 && html`<span class="change-ins">↑${branch.ahead}</span>`}
+                        ${branch.behind > 0 && html`<span class="change-del">↓${branch.behind}</span>`}
+                        ${!branch.upstream && html`<span class="branch-local">local</span>`}
+                      </span>
+                      <span class="branch-when">
+                        ${copied === branch.name ? "copied" : relativeTime(branch.date)}
+                      </span>
+                    </button>
+                  `
+                )}
+              </div>
+            `}
+      <div class="branch-note">Click a name to copy it. Switch branches in a terminal.</div>
+    </div>
+  `;
+}
+
 function FileRow({ file, isNew, expanded, repoRoot, onOpen, onToggleStage, onToggleExpand, onDiscard }) {
   const [confirming, setConfirming] = useState(false);
   const { dir, name } = splitPath(file.path);
@@ -228,7 +273,12 @@ export function ChangesSection({ onOpenFile }) {
   const [error, setError] = useState(null);
   const [note, setNote] = useState(null);
   const [newPaths, setNewPaths] = useState(() => new Set());
-  const [switcherOpen, setSwitcherOpen] = useState(false);
+  // Which header menu is open, if any: "repo" or "branch". One at a time, so
+  // opening one closes the other without a second piece of state to keep in
+  // step with the first.
+  const [menu, setMenu] = useState(null);
+  const [branches, setBranches] = useState(null);
+  const [copied, setCopied] = useState(null);
   const [agentWorking, setAgentWorking] = useState(false);
   const [commits, setCommits] = useState(null);
   const [remote, setRemote] = useState(null);
@@ -250,8 +300,13 @@ export function ChangesSection({ onOpenFile }) {
     setLoaded(true);
     // The same watcher tick that moved the working tree may have been a
     // commit, so the history is re-read with it rather than on its own timer.
-    const log = await window.clanceApp.gitLog(targetRoot, HISTORY_FETCH);
-    if (rootRef.current === targetRoot) setCommits(log);
+    const [log, refs] = await Promise.all([
+      window.clanceApp.gitLog(targetRoot, HISTORY_FETCH),
+      window.clanceApp.gitBranches(targetRoot),
+    ]);
+    if (rootRef.current !== targetRoot) return;
+    setCommits(log);
+    setBranches(refs);
   }
 
   useEffect(() => {
@@ -284,7 +339,9 @@ export function ChangesSection({ onOpenFile }) {
     if (!root) return;
 
     setCommits(null);
+    setBranches(null);
     setRemote(null);
+    setMenu(null);
     window.clanceApp.gitRemote(root).then((next) => {
       if (rootRef.current === root) setRemote(next);
     });
@@ -330,12 +387,12 @@ export function ChangesSection({ onOpenFile }) {
   // Capture phase, so a click on a file row closes it instead of being eaten
   // by the row underneath.
   useEffect(() => {
-    if (!switcherOpen) return;
+    if (!menu) return;
     function onDown(event) {
-      if (!repoRef.current?.contains(event.target)) setSwitcherOpen(false);
+      if (!repoRef.current?.contains(event.target)) setMenu(null);
     }
     function onKey(event) {
-      if (event.key === "Escape") setSwitcherOpen(false);
+      if (event.key === "Escape") setMenu(null);
     }
     document.addEventListener("mousedown", onDown, true);
     document.addEventListener("keydown", onKey, true);
@@ -343,7 +400,7 @@ export function ChangesSection({ onOpenFile }) {
       document.removeEventListener("mousedown", onDown, true);
       document.removeEventListener("keydown", onKey, true);
     };
-  }, [switcherOpen]);
+  }, [menu]);
 
   // What moved while the user was looking elsewhere. The first listing for a
   // repo is the baseline — otherwise opening the pane would light every row up
@@ -439,13 +496,22 @@ export function ChangesSection({ onOpenFile }) {
     }
   }
 
+  // The picker is read-only, so the useful thing a row can do is hand you the
+  // name to paste into a checkout.
+  function copyBranchName(name) {
+    navigator.clipboard.writeText(name).then(() => {
+      setCopied(name);
+      setTimeout(() => setCopied(null), 1200);
+    });
+  }
+
   function markAllSeen() {
     for (const file of files) seenRef.current.set(file.path, signature(file));
     setNewPaths(new Set());
   }
 
   async function browseForRepo() {
-    setSwitcherOpen(false);
+    setMenu(null);
     const dir = await window.clanceApp.pickDirectory();
     if (!dir) return;
     const resolved = await window.clanceApp.gitSetLastRepo(dir);
@@ -475,6 +541,11 @@ export function ChangesSection({ onOpenFile }) {
   }
 
   const repoName = repos.find((repo) => repo.root === root)?.name ?? root?.split("/").filter(Boolean).pop() ?? "";
+  // A detached HEAD used to render as a bare short sha, which reads exactly
+  // like a branch named that — and quietly hid the fact that a commit here
+  // wouldn't be on any branch.
+  const detached = Boolean(status && !status.branch && status.head);
+  const branchLabel = status?.branch ?? (detached ? `detached ${status.head}` : "…");
   const ahead = status?.ahead ?? 0;
   const behind = status?.behind ?? 0;
 
@@ -482,13 +553,23 @@ export function ChangesSection({ onOpenFile }) {
     <div class="changes-pane">
       <header class="changes-bar">
         <div class="changes-repo" ref=${repoRef}>
-          <button class="changes-repo-button" onClick=${() => setSwitcherOpen((open) => !open)}>
+          <button
+            class="changes-repo-button"
+            title="Switch repository"
+            onClick=${() => setMenu((open) => (open === "repo" ? null : "repo"))}
+          >
             ${Icon.gitBranch(13)}
             <span class="changes-repo-name">${repoName}</span>
-            <span class="changes-branch">${status?.branch ?? status?.head ?? "…"}</span>
-            ${agentWorking && html`<span class="status-dot status-dot-live" title="claude is working here"></span>`}
           </button>
-          ${switcherOpen &&
+          <button
+            class="changes-branch ${detached ? "changes-branch-detached" : ""}"
+            title=${detached ? `Detached at ${status.head} — not on a branch` : "Branches"}
+            onClick=${() => setMenu((open) => (open === "branch" ? null : "branch"))}
+          >
+            ${branchLabel}
+          </button>
+          ${agentWorking && html`<span class="status-dot status-dot-live" title="claude is working here"></span>`}
+          ${menu === "repo" &&
           html`
             <div class="menu changes-switcher">
               <div class="menu-label">repository</div>
@@ -497,7 +578,7 @@ export function ChangesSection({ onOpenFile }) {
                   <button
                     class="menu-item ${repo.root === root ? "menu-item-active" : ""}"
                     onClick=${() => {
-                      setSwitcherOpen(false);
+                      setMenu(null);
                       if (repo.root !== root) setRoot(repo.root);
                     }}
                   >
@@ -509,6 +590,8 @@ export function ChangesSection({ onOpenFile }) {
               <button class="menu-item" onClick=${browseForRepo}>Choose folder…</button>
             </div>
           `}
+          ${menu === "branch" &&
+          html`<${BranchMenu} branches=${branches} copied=${copied} onCopy=${copyBranchName} />`}
         </div>
         <div class="changes-sync">
           ${behind > 0 &&

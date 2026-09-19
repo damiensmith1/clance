@@ -65,6 +65,7 @@ import {
   getFileView,
   listFiles,
   listCommits,
+  listBranches,
   getRemote,
   stageFiles,
   unstageFiles,
@@ -480,6 +481,8 @@ ipcMain.handle("git:list-files", (_event, dir: unknown) => listFiles(dir));
 ipcMain.handle("git:log", (_event, dir: unknown, limit?: unknown) =>
   listCommits(dir, typeof limit === "number" ? limit : 10)
 );
+
+ipcMain.handle("git:branches", (_event, dir: unknown) => listBranches(dir));
 
 ipcMain.handle("git:remote", (_event, dir: unknown) => getRemote(dir));
 
