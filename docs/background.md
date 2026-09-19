@@ -18,8 +18,9 @@ Press ⌥D anywhere to dictate. Clance transcribes on the Mac and types the
 text wherever your cursor was.
 
 A main window holds the rest: every Claude Code session on the machine,
-openable as terminal tabs; dictation history; installed skills and MCP
-servers; and settings.
+openable as terminal tabs; a view of what those sessions have changed in a
+git repository; dictation history; installed skills and MCP servers; and
+settings.
 
 ## Why it exists
 
@@ -42,6 +43,17 @@ servers; and settings.
   into any app, not just Claude. Clance already needs reliable text insertion
   into other apps for its tools, which makes on-device dictation a small step
   and a reason to keep it running.
+- **Reading the code is part of using the agent.** When the model writes the
+  code, the work left for the person is reading it — and reading a change
+  means reading the code around it, not just the diff. Clance already has the
+  terminal the code is run from and the sessions that wrote it, so the last
+  reason to leave the window was to go and look at the files. That makes
+  Clance a read-only IDE: a Changes pane that says what is moving, and file
+  tabs that show the whole file with its changes marked in place. It never
+  edits a file — the session does that. Committing and pushing are the exits
+  from the reading loop rather than the point of it, and branching, rebasing
+  and history surgery stay where they already work, in a terminal or in the
+  session next door.
 
 ## Principles
 
@@ -61,6 +73,10 @@ servers; and settings.
 ## Reference points
 
 - **Spotlight** — hotkey, small floating window, gone as quickly as it came.
+- **VS Code's Source Control panel** — the file list an engineer already
+  knows, minus the parts of a git client nobody reaches for. Its layout is
+  what Clance's first attempt copied and had to abandon: a sidebar file
+  picker stretched across a window is a poor way to read a changeset.
 - **VS Code's integrated terminal** — a real process in an embedded terminal
   instead of a reimplemented interface.
 - **Wispr Flow, superwhisper** — dictation that works in every app.

@@ -138,12 +138,85 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - Any session started in Clance can be resumed with `claude --resume` in a
   terminal, and vice versa.
 
+## Changes
+
+- A Changes pane shows what has changed in a git repository since its last
+  commit — which, while a session is writing code, is what Claude has just
+  done. It is a monitor, not a reader: files are read in file tabs.
+- It opens beside the work rather than over it — in a pane of its own on the
+  right, a quarter of the window wide, when the window has room for one. It
+  keeps whatever width it is given afterwards.
+- One repository at a time, chosen from a switcher that offers the default
+  session directory, recently used directories, wherever the running agents
+  are working, and any other folder. It reopens on the repository it was last
+  pointed at.
+- The header gives the repository and its branch, marks when a session is
+  working there, and carries Fetch, with Pull and Push only when there is
+  something to pull or push. A merge, rebase or cherry-pick in progress is
+  named.
+- Each changed file gives its path, what happened to it (added, modified,
+  deleted, renamed, untracked, conflicted) and its line counts, with the
+  repository's totals above them. Clicking one opens it as a file tab; a
+  chevron expands a short diff in place, for when a glance is all that's
+  wanted.
+- The list updates by itself as files change on disk, so a session working in
+  the repository is watched rather than polled by hand.
+- Files that changed while the user was looking elsewhere are marked, and the
+  count of them can be cleared in one action. Opening or peeking at a file
+  clears its own mark. The first listing after opening a repository is the
+  baseline and marks nothing.
+- Files are staged and unstaged individually or all at once, and a commit
+  takes exactly what is staged. Staging is per file; there is no hunk-level
+  staging.
+- A commit needs a message, and can be followed straight away by a push. ⌘↩
+  in the message box commits. A push from a branch with no upstream sets one.
+  A pull is fast-forward only.
+- A file's uncommitted changes can be discarded, behind a confirmation. This
+  is the only destructive action, and for an untracked file it deletes the
+  file.
+- Under the commit box, recent commits — subject, how long ago, short hash —
+  so a commit can be seen to land and the pane still says something when the
+  working tree is clean. As many are shown as fit the space between the
+  commit box and the remote button, re-measured when the pane is resized;
+  the strip never scrolls, and disappears entirely when there is no room for
+  even one. A repository with no commits yet says so.
+- If the repository has a remote that can be browsed, a button opens it in
+  the default browser. A repository with no remote, or one that isn't a web
+  address, doesn't show the button.
+- Every git failure is reported in git's own words rather than as a generic
+  error, and nothing is reported as done that didn't happen.
+- Not included: a commit graph, browsing history beyond what that strip
+  shows, branch switching, merges, rebases, stashes and anything that
+  rewrites history. Those stay in a terminal or in the session next door.
+
+## Files
+
+- Any file in the current repository can be opened as a tab and read — Clance
+  is a read-only viewer over the code a session is writing. It never edits a
+  file.
+- ⌘P opens a file by name from anywhere in the main window, matching on any
+  subsequence of its path, over every tracked file and every untracked one git
+  isn't ignoring.
+- A file tab shows the whole file, syntax highlighted, with its changes marked
+  in place: added lines, and deleted lines put back where they were.
+- A Diff / Clean choice switches between the marks and the file exactly as it
+  stands on disk. Both views come from one read, so they can't disagree about
+  what the file says.
+- A changed file's tab says how many changes it has and can jump between
+  them, since a change can be a long way down a long file.
+- A file tab follows the file: a session writing to it while it's open updates
+  what's shown.
+- One tab per file — opening the same file again focuses the tab that's
+  already there. Files open beside the Changes pane rather than over it.
+- A file too large to show, or a binary one, says so rather than trying.
+
 ## Main window
 
 - Opens from the Dock icon or the menu-bar menu. While setup is incomplete it
   opens on launch.
-- A launcher opens Sessions, Dictation, Settings, or a
-  plain shell terminal. Sections open as tabs; reopening one focuses it.
+- A launcher opens Sessions, Changes, Dictation, Settings, or a
+  plain shell terminal. Changes opens in a pane of its own on the right when
+  the window can take one; files open as tabs beside it. Sections open as tabs; reopening one focuses it.
 - Tabs can be split into up to four panes by dragging to an edge (at most a
   2×2 grid), resized by dragging dividers, and reordered. The layout is
   restored on launch.
@@ -251,6 +324,11 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - Cloud sync and telemetry.
 - A custom chat UI, or reimplementing anything the CLI already does.
 - Clance writing or deleting session transcripts.
+- A full git client: history and graph views, branching, merging, rebasing,
+  stashing, conflict resolution or anything that rewrites history.
+- Editing files. Clance reads code; the session writes it.
+- A file tree, cross-file search, or anything else an editor does beyond
+  opening a file by name and reading it.
 - A plugin marketplace or installer.
 - Self-updating.
 - For dictation: speaking responses aloud, non-English-first transcription,

@@ -43,6 +43,8 @@ on-device dictation.
 | Local tools transport | `@modelcontextprotocol/sdk`, Streamable HTTP | See "Local tools server" |
 | Speech-to-text | Homebrew `whisper.cpp` (`whisper-cli`), ggml models, Metal | Spawned per utterance |
 | Dictation history | `node:sqlite` + FTS5 | Built into Electron's Node — no second native addon to rebuild |
+| Git | The `git` binary, via `execFile` | See "Changes pane" |
+| Syntax highlighting | Hand-rolled (`src/shared/syntax.js`) | See "Syntax highlighting" |
 | Packaging | `electron-builder`, self-signed | See "Packaging and distribution" |
 
 ### Local data
@@ -52,7 +54,7 @@ which is also the working directory for sessions that have no project:
 
 | Path | Contents | Owner |
 |---|---|---|
-| `config.json` | Shortcuts, default directory, recent directories, enabled local tools, dictation settings | `config.ts` |
+| `config.json` | Shortcuts, default directory, recent directories, the Changes pane's last repo, enabled local tools, dictation settings | `config.ts` |
 | `archived-sessions.json` | Archived session ids | `archivedSessions.ts` |
 | `window-layout.json` | Main window pane/tab tree; tabs for sections that no longer exist are dropped on restore | `windowLayout.ts` |
 | `pool.json` | The pre-warmed popup session | `agentPool.ts` |
@@ -727,7 +729,7 @@ check and an on/off switch per tool (`config.enabledLocalTools`, default
 ### Shell and navigation
 
 `Shell.js` renders a floating launcher in the top-right corner — Sessions,
-Dictation, Settings, and a plain terminal — rather than a
+Changes, Dictation, Settings, and a plain terminal — rather than a
 sidebar, so it takes no layout space. Sections are singleton tabs: opening
 one that's already open focuses it, in whichever pane it's in. The terminal
 button opens `$SHELL -il` in the default directory.
@@ -796,6 +798,234 @@ and splits (`{ direction, sizes, children }`, always two children).
   400 ms, and restored on launch. Restored agent tabs re-attach with their
   saved args.
 
+### Changes pane
+
+`sections/ChangesSection.js` over `src/main/git.ts`. A monitor, not a reader:
+it says what is moving in a repository right now, and hands the reading to a
+file tab. It opens in a pane of its own on the right — `openSection` opens the
+tab, splits it away, and resizes that new split to `CHANGES_PANE_PCT` (25)
+rather than the even half `wrapAsSplit` gives by default. It does this only
+when the pane it landed in has another tab to split from and the window isn't
+already at `MAX_PANES`; otherwise it stays a tab where it is rather than
+refusing. A sidecar that covered the work it sits beside would be pointless.
+The resize applies only to the split that just created the pane: reopening
+Changes while it's already open focuses it instead of splitting again, so a
+width the user has since dragged is never overwritten.
+
+Because reading moved out, the pane fits a narrow column honestly: a bar with
+the repository, branch and a live dot when a session is working there; one
+mono line of counts; the file list; and a commit box that appears only when
+there is something to commit. An earlier version put a full-width diff and a
+permanent commit slab in the same surface, and the result was a file picker
+pretending to be a review tool.
+
+**Running git.** `git.ts` shells out to the `git` binary through `execFile`
+rather than linking a library — git is already on any machine with a repo to
+look at, and a native addon would be another thing to rebuild for Electron,
+the same reasoning that chose `node:sqlite` for dictation. Commands run with
+the resolved login-shell `PATH` (so a credential helper is found),
+`GIT_TERMINAL_PROMPT=0` (a push that wants a password must fail rather than
+block a main-process subprocess on a tty nobody can type into) and no pager
+or editor. Reads use `--no-optional-locks`, so looking at a repo never takes
+`index.lock` away from an agent running git in it at the same time. A
+non-zero exit is returned rather than thrown, because `diff --no-index`
+exits 1 by contract every time it's called.
+
+**Trusting nothing from the renderer.** Every entry point re-derives the repo
+root with `rev-parse --show-toplevel` from the directory it was handed, and
+file paths are kept only if the current `status` — or `ls-files`, for a file
+nobody has touched — is already reporting them. So a command can't be pointed
+at a path outside the repo, and `execFile`'s argv means a name with a space or
+a quote in it can't become an argument. Same posture as `sessionActions.ts`.
+
+**A leading dash still can, though**, which is why every path handed to git is
+preceded by a `--` separator — including in the blob-versus-worktree form a
+rename uses (`diff HEAD:<old> -- <new>`), which is the one place that lacked
+it. argv keeps a path whole, but git reads an element beginning with `-` as an
+option wherever one is allowed, and a file really can be named
+`--output=pwned.txt`: git reports that name in `status`, so being in the
+listing is no guarantee at all — the listing is where such a name comes from.
+Without the separator, opening that file's diff ran
+`git diff HEAD:<old> --output=pwned.txt` and git wrote the diff to that path.
+Branch names are safe by git's own rule (it refuses to create one starting
+with `-`) and a commit message is safe because `-m` consumes its operand
+whatever it looks like, but neither is a reason to drop a separator.
+
+**Status.** `status --porcelain=v2 --branch -z`: the only format with both a
+stable machine-readable shape and the branch/ahead/behind header, and
+NUL-separated because a filename can contain anything, newlines included —
+the line-based format quotes those instead, and unquoting is a second parser
+to get wrong. A rename's source arrives as its own NUL field and is consumed
+there rather than found by splitting the record. Line counts come from
+`diff --numstat` for both the staged and unstaged halves, summed. An untracked
+file is in neither diff, so its lines are counted by reading it (with a size
+cap, and a NUL byte in the first 8 kB meaning binary, which is git's own
+guess).
+
+**Diffs** are always HEAD → working tree. An untracked file has nothing in
+HEAD to compare with, so it goes through `diff --no-index` against
+`/dev/null`. A renamed file is diffed as `HEAD:<old> <new>` — rename detection
+switches off once a pathspec limits the diff, so asking for both names gives a
+delete and an add instead of one moved file. The unified-diff parser tracks
+file headers rather than assuming they only appear at the top: a patch can
+cover more than one file, and a header read as content shows up as garbled
+context lines.
+
+**Watching.** `watchRepo` is what makes the pane live rather than something to
+refresh by hand. One recursive `fs.watch` per repo — on macOS that's FSEvents,
+so a whole worktree costs one watcher — debounced 300 ms, because a commit or
+an `npm install` emits thousands of events. Everything under `.git` is ignored
+except the few paths that mean the repo actually moved (`HEAD`, `index`,
+`refs/`, the in-progress heads), as are `node_modules` and `.DS_Store`. If a
+watch can't be established (a network mount, the descriptor limit) it falls
+back to a 4 s poll rather than leaving the pane silently frozen on a stale
+listing. Watchers are shared per root and reference-counted; the main process
+keys subscriptions by the renderer's id and drops them when it goes, since a
+reload sends no unwatch.
+
+**What the pane does.**
+
+- **New since you looked.** Each file carries a signature (its porcelain codes
+  and line counts). The first listing after opening a repo is the baseline, so
+  opening the pane never lights every row up; after that, a file whose
+  signature moved gets a signal-orange dot, and the header offers to clear
+  them all. Opening or peeking at a file clears its own — looking at it is
+  what "seen" means.
+- **Claude is working here.** The running agents are polled every 5 s and the
+  bar carries a live dot when one is working in this repo, because the listing
+  underneath is then a moving target.
+- **Staging is file-level**, and its checkbox is a hairline box that fills in
+  only when it's on. A column of solid ink for a side errand was the loudest
+  thing in the pane. A file that is staged *and* changed again since stages
+  the rest rather than unstaging what's there — the commit box's count would
+  otherwise be a quiet lie.
+- **The inline peek** draws at most 120 lines. A peek is a glance; a 900-line
+  diff in a narrow pane is neither, and the file tab is one click away.
+- **Discard** is the only destructive action and confirms on the row itself,
+  where the thing being destroyed stays on screen while it's asked about. An
+  untracked file is deleted outright, which git can't undo.
+- **Failures are reported in git's own words.** `commit` passes `-m` and
+  nothing else — no `-a`, so what's committed is exactly what the list showed
+  as staged, and no `--amend`. `pull` is `--ff-only`: a pull needing a merge
+  is a decision, not a button.
+
+**History.** Recent commits sit under the commit box and take whatever height
+the file list doesn't want, which is what stops the pane being mostly
+empty — a clean tree with nothing staged is its most common state, and until
+this it showed a bar and the words "Working tree clean." The strip is status,
+not a history browser: it answers "did that land" and "what just happened
+here", the pane's own question asked about commits instead of the working
+tree. It re-reads on the same watcher tick as the status, since a tick may
+have been a commit. A repo with no commits exits non-zero from `git log`,
+which is an empty history rather than a failure, and says so.
+
+How many it shows is measured, not fixed: `HISTORY_FETCH` (60) commits are
+read and the strip renders `floor(height / COMMIT_ROW_HEIGHT)` of them, so it
+fills the gap between the commit box and the remote button exactly and never
+scrolls. A `ResizeObserver` re-measures when the pane is resized. Both the
+strip and its list use `flex-basis: 0` rather than `auto`: with a
+content-sized basis the number of rows fed back into the layout that decides
+how many rows fit, which is a `ResizeObserver` loop. With no room for even one
+row the heading goes too — a "recent" label over nothing is worse than no
+label — but the list element stays mounted, since it is what gets measured and
+unmounting it would leave nothing to re-measure when the pane grows again.
+
+**The remote button** opens the repo's origin in a browser, and is absent when
+there's nothing to open. Deriving that URL is the one place here that turns
+repository content into something handed to another program: `.git/config`
+travels with a clone, so a remote URL is untrusted input. Only `https`, `http`,
+`ssh` and `git` remotes convert — a local path, or a helper scheme like
+`ext::sh -c '…'`, gets no button. The URL is rebuilt from the parsed host and
+path rather than mutated, which drops any embedded credentials: an https
+remote can carry a token, and opening that in a browser would write the token
+into history. scp-like syntax (`git@host:path`) has no scheme to check, so its
+host must look like a host — without that test the shape swallows any
+`scheme:rest` string, and `javascript:alert(1)` parsed as host "javascript".
+The renderer asks to open *this repo's* remote and never passes a URL; the
+main process re-derives it from the repo and opens it with `shell.openExternal`.
+
+**The repo switcher** offers the default session directory, the recent ones
+and wherever the running agents are working, deduped through `findRepoRoot` —
+no configuration of its own, because Clance already knows where the user
+works — plus a folder picker. The chosen repo is remembered in
+`config.json`'s `lastGitRepo`. Its menu is pinned to both edges of the repo
+button rather than sized by its contents — `.menu`'s own `min-width` plus the
+full paths inside pushed it past the pane's right edge, where it was clipped —
+and it closes on a click outside or Escape, since a menu that only closes by
+pressing the thing that opened it is a trap.
+
+### File tabs
+
+`sections/FileSection.js`. Clance is a read-only viewer over the code its
+sessions write: the person's job is reading, and reading a change means
+reading the code around it, which a diff alone can't give. So a file opens as
+an ordinary tab — draggable into a split, one per file, keyed
+`file:<root>:<path>` so opening the same file twice focuses the tab that is
+already there.
+
+**One payload, two views.** The Diff / Clean segmented control picks between
+them. `getFileView` runs `diff -U<20000>`, a context
+size larger than any real file, so git emits the whole file as a single hunk
+instead of islands around each change. The "Clean" button is then a rendering
+choice over that one read: hiding the deleted lines and the marks leaves
+exactly the working-tree file. Two separate reads could disagree about what
+the file says; this can't. A file with no changes is read from disk as all
+context, an untracked one as all addition, a deleted one from `show HEAD:`.
+
+**Where files open.** `paneForFileTabs` picks a pane that isn't the one
+holding Changes, preferring one that already has a file in it, so reading a
+second file doesn't split the window further and the sidecar stays visible.
+
+**Windowed.** Rows are a fixed 20 px and only the visible slice plus 40 rows
+of overscan is in the DOM, so a 10 000-line file costs what a short one does.
+The line-number gutter is `position: sticky`, so scrolling a long line
+sideways doesn't lose the margin.
+
+**Width follows the pane.** Rows fill the pane and track it as it's resized,
+and grow past it only when a line is genuinely longer, which scrolls the
+viewer horizontally rather than wrapping. Two things make that work, and
+leaving out either breaks it in opposite directions: the rows' container is
+`width: auto; min-width: max-content` (shrink-wrapping to the longest line
+instead left a changed line's tint stopping halfway across the pane), and
+`.file-section` and `.changes-pane`, as flex items of `.content-flush`, carry
+`min-width: 0` (without it a flex item's automatic minimum is its content's
+max-content width, and one long line pushed the whole viewer wider than the
+pane instead of scrolling inside it).
+
+The pane packs to the top: the file list takes the height its rows need, so
+the commit box sits under it rather than at the floor with a hole above, and
+shrinks to scroll once the rows outgrow the pane so the commit box stays on
+screen.
+
+**⌘P** opens any file in the current repository by name, over `ls-files`
+(tracked, plus untracked files git isn't ignoring). Matching is on any
+subsequence of the path, ranked by how tight the match is and whether it
+landed in the filename rather than a directory. Without it the only readable
+files would be the ones an agent happened to touch, which is a diff viewer
+wearing a hat.
+
+### Syntax highlighting
+
+`src/shared/syntax.js`, hand-rolled, for the same reason the icon set and the
+layout store are: the job is narrow — colour code that is only ever read,
+never edited — and every alternative is a vendored parser per language. It
+recognises comments, strings, numbers, keywords and call sites, and leaves
+everything else plain. Being wrong should mean an uncoloured word, never a
+missing one.
+
+It escapes every chunk before introducing a tag of its own, the order
+`markdown.js` uses, and emits nothing but its own fixed set of
+`<span class="tok-*">` — which is what makes the viewer's one
+`dangerouslySetInnerHTML` safe. A block-comment flag is threaded down the file
+so a multi-line comment stays one colour; it's computed for the whole file
+rather than per visible row, because a window starting mid-comment would
+otherwise highlight it as code, and a deleted line doesn't carry its state
+forward, since it isn't part of the file the next line belongs to.
+
+The token colours are muted enough to sit on paper and on a diff tint without
+shouting, and each clears 4.5:1 on paper.
+
+
 ### Visual design
 
 The design language is **Quiet instrument**: ink on off-white paper, flat,
@@ -825,6 +1055,8 @@ so the terminal themes in `popup.js` and `TerminalSection.js` repeat the palette
 | Signal: live things only | `--signal` | `#E2632F` |
 | Recording dot | `--recording` | `#C8412F` |
 | OK / attention / danger | `--success`, `--warning`, `--danger` | `#2F7D4F`, `#9A5C00`, `#B3362B` |
+| Diff row tints | `--diff-add-bg`, `--diff-del-bg`, `--diff-hunk-bg` | `#E8F2EA`, `#FBECEB`, `#EEF0F3` |
+| Syntax tokens | `--tok-keyword`, `--tok-string`, `--tok-number`, `--tok-call`, `--tok-comment` | `#8A3B6B`, `#7A5320`, `#2F5FA8`, `#3A5A7A`, `#75726B` |
 
 Rules:
 - Every text colour clears 4.5:1 on paper.
@@ -858,7 +1090,9 @@ inputs, 12 windows. Four shadows: `--shadow-menu`, `--shadow-window`,
 - Status is shown as a dot plus a mono word (`granted`, `needs you`,
   `off · optional`) rather than icons.
 - Keyboard shortcuts render as keycaps.
-- Value choices (Dictation's date ranges) are a segmented pill.
+- Value choices — Dictation's date ranges, a file tab's Diff / Clean — are a
+  segmented pill. A view toggle is a choice between two states, not an
+  action, so it isn't a button.
 - Menus are white with `--shadow-menu`: a lowercase mono section label, an
   optional right-aligned mono detail and shortcut, and a wash highlight.
 
@@ -1229,5 +1463,26 @@ on errors.
 - **`resolveOpenArgs`'s wrong-cwd branch forks.** For the same reason, a
   stopped agent minted in the wrong directory is revived under a new session
   id rather than continued.
+- **Syntax highlighting is approximate.** `syntax.js` is a tokeniser, not a
+  parser: a regex literal read as division, a nested template literal, JSX
+  inside a `.tsx` file. It fails by leaving a word uncoloured, which is the
+  right failure, but if it starts looking wrong on real files the answer is a
+  vendored highlighter rather than more special cases.
+- **No file tree or cross-file search.** ⌘P is the only way to reach a file
+  that isn't in the Changes list. Whether that's enough isn't known yet.
+- **Sending a diff back into a session.** The Changes pane knows the repo and
+  the file; the pane next to it may hold a session working in that same
+  directory. Handing a selected file or hunk to that session as context is
+  the obvious next step, and the one interaction no other git UI can have,
+  but it needs a reliable way to match a terminal tab to the agent whose cwd
+  it is — a tab knows only its launch args. Not built.
+- **Attributing a change to the session that made it.** Transcripts record
+  every `Edit`/`Write` with a path and a timestamp, so the file list could
+  group by which session touched what. Cost on a large transcript is
+  unmeasured.
+- **A dirty-file count on a Sessions row.** `chatHistory.ts` already reads
+  each session's `gitBranch`; a count of uncommitted files per project would
+  be the same data the Changes pane reads, but polling it for every row in
+  the list has not been costed.
 - **Dead code.** `src/shared/markdown.js` and the `chatHistory:get-session`
   handler are left over from the old chat UI and have no callers.
