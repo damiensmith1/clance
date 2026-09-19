@@ -65,6 +65,25 @@
   --warning: #9a5c00;
   --warning-bg: #fbf1e3;
 
+  /* Diff. The text keeps its ordinary ink — a diff is read as code, and
+     colouring every added line green makes it harder to read, not easier.
+     The tint on the row is what says added or removed, and the sign in the
+     margin says it again for anyone who can't see the difference. */
+  --diff-add-bg: #e8f2ea;
+  --diff-del-bg: #fbeceb;
+  --diff-add-mark: #2f7d4f;
+  --diff-del-mark: #b3362b;
+  --diff-hunk-bg: #eef0f3;
+
+  /* Syntax. Muted enough to sit on paper and on a diff tint without
+     shouting — the code is the subject, the colour is only a hint about
+     what kind of token something is. Each clears 4.5:1 on paper. */
+  --tok-keyword: #8a3b6b;
+  --tok-string: #7a5320;
+  --tok-number: #2f5fa8;
+  --tok-call: #3a5a7a;
+  --tok-comment: #75726b;
+
   /* Shape */
   --radius-sm: 4px;
   --radius-md: 6px;

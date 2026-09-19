@@ -1,6 +1,8 @@
-import { html, useEffect, useRef, useState } from "../shared/vendor/preact-htm-standalone.module.js";
+import { html, useEffect, useMemo, useRef, useState } from "../shared/vendor/preact-htm-standalone.module.js";
 import { Icon } from "../shared/icons.js";
 import { ChatsListSection, focusSessionSearch } from "./sections/ChatsSection.js";
+import { ChangesSection } from "./sections/ChangesSection.js";
+import { FileSection } from "./sections/FileSection.js";
 import { SettingsSection } from "./sections/SettingsSection.js";
 import { DictationSection } from "./sections/DictationSection.js";
 import { TerminalSection, nextTerminalId, destroyTerminal } from "./sections/TerminalSection.js";
@@ -23,6 +25,7 @@ import {
 
 const LAUNCHER_ITEMS = [
   { id: "chats", label: "Sessions", icon: "chat" },
+  { id: "changes", label: "Changes", icon: "gitBranch" },
   { id: "dictation", label: "Dictation", icon: "mic" },
   { id: "settings", label: "Settings", icon: "gear" },
 ];
@@ -30,6 +33,28 @@ const LAUNCHER_ITEMS = [
 // How often an unnamed session tab asks whether its conversation has a name
 // yet. Only runs while at least one tab is still unnamed.
 const TAB_TITLE_POLL_MS = 3000;
+
+// How much of the window the Changes sidecar takes when it opens itself a
+// pane. Above MIN_PANE_PCT, so the divider can still be dragged either way.
+const CHANGES_PANE_PCT = 25;
+
+// The split whose own child leaf holds `tabId` — the one created by the split
+// that just put it there, and so the one whose sizes decide its width.
+function findSplitContainingTab(node, tabId) {
+  if (node.type !== "split") return null;
+  const holdsTab = (child) => child.type !== "split" && child.tabs.some((tab) => tab.id === tabId);
+  if (node.children.some(holdsTab)) return node;
+  for (const child of node.children) {
+    const found = findSplitContainingTab(child, tabId);
+    if (found) return found;
+  }
+  return null;
+}
+
+// Tab types that fill their pane themselves rather than sitting in the
+// padded, 880px-wide content column — a terminal, a file and the Changes
+// sidecar all want every pixel.
+const FLUSH_TAB_TYPES = new Set(["terminal", "file", "changes"]);
 
 const EDGES = ["top", "right", "bottom", "left"];
 const MIN_PANE_PCT = 15;
@@ -115,10 +140,125 @@ function tabIcon(tab) {
   return Icon[tab.icon] ? Icon[tab.icon](15) : null;
 }
 
-function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut, openSection) {
+
+// ⌘P — open any file in the Changes pane's repository by name. Without it the
+// only files that can be read are the ones an agent happened to touch, which
+// makes a file viewer a diff viewer wearing a hat.
+function FilePalette({ onPick, onClose }) {
+  const [files, setFiles] = useState(null);
+  const [repoRoot, setRepoRoot] = useState(null);
+  const [query, setQuery] = useState("");
+  const [index, setIndex] = useState(0);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    (async () => {
+      const root = await window.clanceApp.gitGetLastRepo();
+      setRepoRoot(root);
+      setFiles(root ? await window.clanceApp.gitListFiles(root) : []);
+    })();
+    inputRef.current?.focus();
+  }, []);
+
+  // Subsequence matching, the way every file palette works: "mwsh" finds
+  // mainWindow/Shell.js. Ranked by how tight the match is, so the file whose
+  // name the letters land in beats one that matched across a long path.
+  const matches = useMemo(() => {
+    if (!files) return [];
+    const needle = query.trim().toLowerCase();
+    if (!needle) return files.slice(0, 50);
+    const scored = [];
+    for (const path of files) {
+      const hay = path.toLowerCase();
+      let at = -1;
+      let first = -1;
+      let last = -1;
+      let ok = true;
+      for (const char of needle) {
+        at = hay.indexOf(char, at + 1);
+        if (at === -1) {
+          ok = false;
+          break;
+        }
+        if (first === -1) first = at;
+        last = at;
+      }
+      if (!ok) continue;
+      // A tight span is a better match, and a hit inside the filename beats
+      // one spread across directories.
+      const slash = hay.lastIndexOf("/");
+      scored.push({ path, score: last - first + (first > slash ? 0 : 200) });
+    }
+    scored.sort((a, b) => a.score - b.score || a.path.length - b.path.length);
+    return scored.slice(0, 50).map((entry) => entry.path);
+  }, [files, query]);
+
+  useEffect(() => setIndex(0), [query]);
+
+  function onKeyDown(event) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setIndex((i) => Math.min(matches.length - 1, i + 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setIndex((i) => Math.max(0, i - 1));
+    } else if (event.key === "Enter" && matches[index]) {
+      event.preventDefault();
+      onPick(repoRoot, matches[index]);
+      onClose();
+    }
+  }
+
+  return html`
+    <div class="palette-scrim" onClick=${onClose}>
+      <div class="palette" onClick=${(e) => e.stopPropagation()}>
+        <input
+          ref=${inputRef}
+          class="palette-input"
+          placeholder=${repoRoot ? `Open a file in ${repoRoot.split("/").filter(Boolean).pop()}` : "No repository"}
+          value=${query}
+          onInput=${(e) => setQuery(e.target.value)}
+          onKeyDown=${onKeyDown}
+        />
+        <div class="palette-list">
+          ${files === null
+            ? html`<div class="palette-empty">Reading the repository…</div>`
+            : matches.length === 0
+              ? html`<div class="palette-empty">Nothing matches.</div>`
+              : matches.map((path, i) => {
+                  const cut = path.lastIndexOf("/");
+                  return html`
+                    <button
+                      key=${path}
+                      class="palette-item ${i === index ? "palette-item-active" : ""}"
+                      onMouseEnter=${() => setIndex(i)}
+                      onClick=${() => {
+                        onPick(repoRoot, path);
+                        onClose();
+                      }}
+                    >
+                      <span class="palette-name">${cut === -1 ? path : path.slice(cut + 1)}</span>
+                      <span class="palette-dir">${cut === -1 ? "" : path.slice(0, cut)}</span>
+                    </button>
+                  `;
+                })}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut, openSection, openFileTab) {
   switch (tab.type) {
     case "chats":
       return html`<${ChatsListSection} onOpenChat=${openChatTab} onNewChat=${openNewChatTab} />`;
+    case "changes":
+      return html`<${ChangesSection} onOpenFile=${openFileTab} />`;
+    case "file":
+      return html`<${FileSection} repoRoot=${tab.repoRoot} path=${tab.path} />`;
     case "settings":
       return html`<${SettingsSection} />`;
     case "dictation":
@@ -311,7 +451,7 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
         `}
       </div>
       ${showLauncher && launcher.banner}
-      <main class="content ${activeTab?.type === "terminal" ? "content-chat" : ""}">
+      <main class="content ${FLUSH_TAB_TYPES.has(activeTab?.type) ? "content-flush" : ""}">
         ${activeTab &&
         renderTabContent(
           activeTab,
@@ -327,7 +467,8 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
           // is inside PaneLeaf, and openSection is defined in Shell — a
           // bare reference here is a ReferenceError that throws during
           // render and leaves the whole window stuck on "Loading…".
-          launcher.openSection
+          launcher.openSection,
+          launcher.openFileTab
         )}
         ${dragTab &&
         splittableEdges.length > 0 &&
@@ -357,6 +498,7 @@ export function Shell() {
   const [claudeInstalled, setClaudeInstalled] = useState(true);
   const [signingIn, setSigningIn] = useState(false);
   const [update, setUpdate] = useState(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [updateCopied, setUpdateCopied] = useState(false);
   const [dragTab, setDragTab] = useState(null);
   const paneAreaRef = useRef(null);
@@ -599,11 +741,19 @@ export function Shell() {
   // focused terminal never sees the key.
   useEffect(() => {
     function onKeyDown(e) {
-      if (!e.metaKey || e.altKey || e.ctrlKey || e.shiftKey || e.key.toLowerCase() !== "k") return;
-      e.preventDefault();
-      e.stopPropagation();
-      openSection("chats");
-      focusSessionSearch();
+      if (!e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) return;
+      const key = e.key.toLowerCase();
+      // Capture phase, so a focused terminal never sees these first.
+      if (key === "k") {
+        e.preventDefault();
+        e.stopPropagation();
+        openSection("chats");
+        focusSessionSearch();
+      } else if (key === "p") {
+        e.preventDefault();
+        e.stopPropagation();
+        setPaletteOpen(true);
+      }
     }
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
@@ -634,7 +784,59 @@ export function Shell() {
   // current when called from a listener registered once.
   function openSection(id) {
     const item = LAUNCHER_ITEMS.find((i) => i.id === id);
-    openTab({ id, type: id, label: item.label, icon: item.icon }, { paneId: getState().activePaneId });
+    const paneId = getState().activePaneId;
+    openTab({ id, type: id, label: item.label, icon: item.icon }, { paneId });
+    // Changes is a sidecar: it's read while something else is being worked on,
+    // so it opens beside the work rather than on top of it. Only when there's
+    // something to open beside — splitting a pane away from its only tab is a
+    // no-op in the store, and a window already at MAX_PANES can't take
+    // another, in which case this quietly stays a tab where it landed.
+    if (id !== "changes") return;
+    const pane = findPane(getState().root, paneId);
+    if (!pane || pane.tabs.length < 2) return;
+    if (!canSplitAt(getState().root, paneId, id, paneId, "right")) return;
+    splitPane(id, paneId, paneId, "right");
+    // A sidecar, so it takes a quarter rather than the even half a split
+    // gives by default. Only on the split that just created it — a pane the
+    // user has since resized keeps the width they gave it, because reopening
+    // Changes while it's already open focuses it instead of splitting again.
+    const split = findSplitContainingTab(getState().root, id);
+    if (split) resizeSplit(split.id, [100 - CHANGES_PANE_PCT, CHANGES_PANE_PCT]);
+  }
+
+  // Where a file opens. Not the pane Changes is in: clicking a row there
+  // would otherwise cover the list that was just clicked, and the point of
+  // the sidecar is that it stays put while files come and go beside it.
+  // Files land together in one pane, so reading a second doesn't split the
+  // window further.
+  function paneForFileTabs() {
+    const { root, activePaneId } = getState();
+    const leaves = [];
+    (function walk(node) {
+      if (node.type === "split") node.children.forEach(walk);
+      else leaves.push(node);
+    })(root);
+    const changesPane = leaves.find((leaf) => leaf.tabs.some((tab) => tab.id === "changes"));
+    if (!changesPane || leaves.length === 1) return activePaneId;
+    const withFile = leaves.find((leaf) => leaf.id !== changesPane.id && leaf.tabs.some((t) => t.type === "file"));
+    const other = leaves.find((leaf) => leaf.id !== changesPane.id);
+    return (withFile ?? other ?? changesPane).id;
+  }
+
+  // One tab per file, keyed by repo and path so opening the same file twice
+  // focuses the tab that's already there rather than making a second copy.
+  function openFileTab(repoRoot, path) {
+    openTab(
+      {
+        id: `file:${repoRoot}:${path}`,
+        type: "file",
+        label: path.split("/").pop(),
+        icon: "file",
+        repoRoot,
+        path,
+      },
+      { paneId: paneForFileTabs() }
+    );
   }
 
   // ⌘W. The store keeps the window from ever being empty, so the last tab
@@ -783,6 +985,7 @@ export function Shell() {
       : null;
 
   const launcher = {
+    openFileTab,
     topRightPaneId,
     claudeConnected,
     activeSectionId: activeTab?.type,
@@ -793,6 +996,8 @@ export function Shell() {
 
   return html`
     <div class="shell">
+      ${paletteOpen &&
+      html`<${FilePalette} onPick=${openFileTab} onClose=${() => setPaletteOpen(false)} />`}
       <div class="shell-main">
         ${update &&
         html`

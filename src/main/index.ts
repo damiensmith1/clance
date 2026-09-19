@@ -1,4 +1,4 @@
-import { app, ipcMain, Menu, BrowserWindow } from "electron";
+import { app, ipcMain, Menu, BrowserWindow, shell } from "electron";
 import { join } from "path";
 import { createTray, updateTrayState } from "./tray";
 import { registerHotkey, unregisterAllHotkeys, isValidAccelerator } from "./hotkey";
@@ -20,6 +20,7 @@ import {
   writeConfig,
   getDefaultDirectory,
   addRecentDirectory,
+  setLastGitRepo,
   DEFAULT_VOCABULARY,
 } from "./config";
 import { pickDirectory } from "./directoryPicker";
@@ -58,6 +59,24 @@ import {
 import { resolveOpenArgs, resolveSessionId, spawnBackgroundAgent, stopAgent, listAgents } from "./agentSessions";
 import { isPoolSpareId } from "./agentPool";
 import { copyDroppedFile } from "./dropFiles";
+import {
+  getStatus as getGitStatus,
+  getFileDiff,
+  getFileView,
+  listFiles,
+  listCommits,
+  getRemote,
+  stageFiles,
+  unstageFiles,
+  discardFiles,
+  commit as gitCommit,
+  push as gitPush,
+  pull as gitPull,
+  fetch as gitFetch,
+  findRepoRoot,
+  listRepos,
+  watchRepo,
+} from "./git";
 import { readWindowLayout, writeWindowLayout } from "./windowLayout";
 import { getHud } from "./dictationWindow";
 import {
@@ -443,6 +462,112 @@ ipcMain.handle("agents:list", async (_event, opts: { all?: boolean }) => {
   );
   return kept.filter((agent): agent is (typeof agents)[number] => agent !== null);
 });
+
+// ---- git (see docs/design.md's "Changes pane") ----
+//
+// Every one of these re-derives the repo root from the directory the renderer
+// sends (git.ts's findRepoRoot) rather than trusting it, the same way
+// sessionActions.ts re-validates session ids and folders.
+
+ipcMain.handle("git:status", (_event, dir: unknown) => getGitStatus(dir));
+
+ipcMain.handle("git:file-diff", (_event, dir: unknown, path: unknown) => getFileDiff(dir, path));
+
+ipcMain.handle("git:file-view", (_event, dir: unknown, path: unknown) => getFileView(dir, path));
+
+ipcMain.handle("git:list-files", (_event, dir: unknown) => listFiles(dir));
+
+ipcMain.handle("git:log", (_event, dir: unknown, limit?: unknown) =>
+  listCommits(dir, typeof limit === "number" ? limit : 10)
+);
+
+ipcMain.handle("git:remote", (_event, dir: unknown) => getRemote(dir));
+
+// The renderer asks for "this repo's remote", never for a URL to open: the
+// URL is re-derived here from the repo's own config and re-checked, so a
+// compromised renderer can't turn this into "open anything".
+ipcMain.handle("git:open-remote", async (_event, dir: unknown) => {
+  const remote = await getRemote(dir);
+  if (!remote) return { ok: false, error: "This repository has no web remote" };
+  await shell.openExternal(remote.url);
+  return { ok: true, error: null };
+});
+
+ipcMain.handle("git:stage", (_event, dir: unknown, paths: unknown) => stageFiles(dir, paths));
+
+ipcMain.handle("git:unstage", (_event, dir: unknown, paths: unknown) => unstageFiles(dir, paths));
+
+ipcMain.handle("git:discard", (_event, dir: unknown, paths: unknown) => discardFiles(dir, paths));
+
+ipcMain.handle("git:commit", (_event, dir: unknown, message: unknown) => gitCommit(dir, message));
+
+ipcMain.handle("git:push", (_event, dir: unknown) => gitPush(dir));
+
+ipcMain.handle("git:pull", (_event, dir: unknown) => gitPull(dir));
+
+ipcMain.handle("git:fetch", (_event, dir: unknown) => gitFetch(dir));
+
+// The repos worth offering in the switcher: wherever new sessions open,
+// wherever the user has recently opened one, and wherever the running agents
+// are actually working. No configuration of its own — Clance already knows.
+ipcMain.handle("git:list-repos", async () => {
+  const config = readConfig();
+  const agents = await listAgents({ all: true }).catch(() => []);
+  return listRepos([
+    getDefaultDirectory(),
+    ...config.recentDirectories,
+    ...agents.map((agent) => agent.cwd).filter((cwd): cwd is string => typeof cwd === "string"),
+  ]);
+});
+
+// Where the pane was pointed last, so it reopens there. Resolved through
+// findRepoRoot like everything else, so a repo that has since been moved or
+// deleted quietly falls back to the switcher's first choice.
+ipcMain.handle("git:get-last-repo", () => findRepoRoot(readConfig().lastGitRepo));
+
+ipcMain.handle("git:set-last-repo", async (_event, dir: unknown) => {
+  const root = await findRepoRoot(dir);
+  if (root) setLastGitRepo(root);
+  return root;
+});
+
+// One subscription per (window, repo). Keyed by the sender's id so a reload —
+// which fires no unwatch — can't leave a watcher behind holding an FSEvents
+// stream open for a renderer that no longer exists.
+const repoWatches = new Map<number, Map<string, () => void>>();
+
+function dropRepoWatches(senderId: number, root?: string): void {
+  const forSender = repoWatches.get(senderId);
+  if (!forSender) return;
+  for (const [watched, unsubscribe] of forSender) {
+    if (root && watched !== root) continue;
+    unsubscribe();
+    forSender.delete(watched);
+  }
+  if (forSender.size === 0) repoWatches.delete(senderId);
+}
+
+ipcMain.handle("git:watch", async (event, dir: unknown) => {
+  const root = await findRepoRoot(dir);
+  if (!root) return null;
+  const senderId = event.sender.id;
+  // A pane only ever watches the repo it's showing, so switching repos drops
+  // the previous watch rather than accumulating one per repo ever visited.
+  dropRepoWatches(senderId);
+
+  const unsubscribe = watchRepo(root, () => {
+    if (event.sender.isDestroyed()) return;
+    event.sender.send("git:changed", root);
+  });
+  const forSender = repoWatches.get(senderId) ?? new Map<string, () => void>();
+  forSender.set(root, unsubscribe);
+  repoWatches.set(senderId, forSender);
+
+  event.sender.once("destroyed", () => dropRepoWatches(senderId));
+  return root;
+});
+
+ipcMain.handle("git:unwatch", (event) => dropRepoWatches(event.sender.id));
 
 ipcMain.handle("popup:open-with-args", (_event, args: string[]) => openPopupWithArgs(args));
 

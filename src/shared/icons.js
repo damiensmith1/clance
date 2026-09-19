@@ -164,6 +164,26 @@ export const Icon = {
         <path d="M12 19v3" />`
     ),
 
+  // The Changes pane: a branch with a commit on it.
+  gitBranch: (size = 16) =>
+    svg(
+      size,
+      html`<circle cx="7" cy="6" r="2.2" />
+        <circle cx="7" cy="18" r="2.2" />
+        <circle cx="17" cy="9" r="2.2" />
+        <path d="M7 8.2v7.6" />
+        <path d="M17 11.2c0 3-2.4 4.6-5.6 5.1" />`
+    ),
+
+  file: (size = 16) =>
+    svg(
+      size,
+      html`<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z" />
+        <path d="M14 3v5h5" />`
+    ),
+
+  check: (size = 16) => svg(size, html`<path d="M5 12.5l4.5 4.5L19 7" />`),
+
   arrowUp: (size = 16) => svg(size, html`<path d="M12 19V5M5 12l7-7 7 7" />`),
 };
 

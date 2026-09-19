@@ -113,6 +113,35 @@ contextBridge.exposeInMainWorld("clanceApp", {
   checkLocalToolsServerHealth: () =>
     ipcRenderer.invoke("extensibility:check-local-tools-server-health"),
 
+  // ---- git (see docs/design.md's "Changes pane") ----
+  gitStatus: (dir: string) => ipcRenderer.invoke("git:status", dir),
+  gitFileDiff: (dir: string, path: string) => ipcRenderer.invoke("git:file-diff", dir, path),
+  gitFileView: (dir: string, path: string) => ipcRenderer.invoke("git:file-view", dir, path),
+  gitListFiles: (dir: string) => ipcRenderer.invoke("git:list-files", dir),
+  gitLog: (dir: string, limit?: number) => ipcRenderer.invoke("git:log", dir, limit),
+  gitRemote: (dir: string) => ipcRenderer.invoke("git:remote", dir),
+  gitOpenRemote: (dir: string) => ipcRenderer.invoke("git:open-remote", dir),
+  gitStage: (dir: string, paths: string[]) => ipcRenderer.invoke("git:stage", dir, paths),
+  gitUnstage: (dir: string, paths: string[]) => ipcRenderer.invoke("git:unstage", dir, paths),
+  gitDiscard: (dir: string, paths: string[]) => ipcRenderer.invoke("git:discard", dir, paths),
+  gitCommit: (dir: string, message: string) => ipcRenderer.invoke("git:commit", dir, message),
+  gitPush: (dir: string) => ipcRenderer.invoke("git:push", dir),
+  gitPull: (dir: string) => ipcRenderer.invoke("git:pull", dir),
+  gitFetch: (dir: string) => ipcRenderer.invoke("git:fetch", dir),
+  gitListRepos: () => ipcRenderer.invoke("git:list-repos"),
+  gitGetLastRepo: () => ipcRenderer.invoke("git:get-last-repo"),
+  gitSetLastRepo: (dir: string) => ipcRenderer.invoke("git:set-last-repo", dir),
+  // Resolves to the repo root actually being watched, or null if the
+  // directory isn't in one. A pane watches one repo at a time: watching a
+  // second replaces the first.
+  gitWatch: (dir: string) => ipcRenderer.invoke("git:watch", dir),
+  gitUnwatch: () => ipcRenderer.invoke("git:unwatch"),
+  onGitChanged: (callback: (root: string) => void) => {
+    const listener = (_event: unknown, root: string) => callback(root);
+    ipcRenderer.on("git:changed", listener);
+    return () => ipcRenderer.removeListener("git:changed", listener);
+  },
+
   // ---- dictation (see docs/design.md's "Dictation") ----
   dictationToggle: () => ipcRenderer.invoke("dictation:toggle"),
   dictationAvailability: () => ipcRenderer.invoke("dictation:availability"),

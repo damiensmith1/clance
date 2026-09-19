@@ -15,6 +15,10 @@ export type ClanceConfig = {
   // most-recently-used first — lets that flow offer one-click reopen
   // without a fresh Finder dialog every time.
   recentDirectories: string[];
+  // The repository the Changes pane was last pointed at, so it comes back
+  // where the user left it rather than guessing from the recents list every
+  // launch. Null until they've opened the pane once.
+  lastGitRepo: string | null;
   // Which of localToolsServer.ts's LOCAL_TOOLS the agent may use. Defaults
   // to "all" (opt-out) — these are Clance's own first-party tools
   // (screenshot, click, type), not arbitrary third-party skill
@@ -72,6 +76,7 @@ const DEFAULT_CONFIG: ClanceConfig = {
   shortcutsConfigured: false,
   defaultDirectory: null,
   recentDirectories: [],
+  lastGitRepo: null,
   enabledLocalTools: "all",
   dictation: DEFAULT_DICTATION,
 };
@@ -123,5 +128,13 @@ export function addRecentDirectory(dir: string): void {
   const config = readConfig();
   const withoutDup = config.recentDirectories.filter((d) => d !== dir);
   config.recentDirectories = [dir, ...withoutDup].slice(0, MAX_RECENT_DIRECTORIES);
+  writeConfig(config);
+}
+
+// The Changes pane's repo, remembered across launches. Written whenever the
+// switcher lands on a repo, not when it's merely offered one.
+export function setLastGitRepo(root: string | null): void {
+  const config = readConfig();
+  config.lastGitRepo = root;
   writeConfig(config);
 }

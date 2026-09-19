@@ -185,7 +185,9 @@
         padding: var(--space-6) var(--space-7) 64px;
         position: relative;
       }
-      .content-chat {
+      /* A pane filled by its own content: a terminal, a file viewer, the
+         Changes sidecar. No page padding and no content column. */
+      .content-flush {
         padding: 0;
         overflow: hidden;
         display: flex;
@@ -1891,6 +1893,711 @@
         height: 100vh;
         color: var(--text-secondary);
       }
+
+      /* ---- Changes pane (see docs/design.md's "Changes pane") ----
+         A monitor, sized for a narrow pane on the right: a bar saying where
+         you are, a list of what is moving, and a commit box only when there
+         is something to commit. Reading a file happens in a file tab. */
+      /* Same reasoning as .file-section: a flex item of .content-flush has
+         to be told it may be narrower than its content. */
+      .changes-pane {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-width: 0;
+        height: 100%;
+        min-height: 0;
+      }
+      .changes-bar {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        flex-shrink: 0;
+        padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+      }
+      .changes-repo {
+        position: relative;
+        flex: 1;
+        min-width: 0;
+      }
+      .changes-repo-button {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        max-width: 100%;
+        padding: var(--space-1) var(--space-2);
+        margin-left: calc(var(--space-2) * -1);
+        background: transparent;
+        border: none;
+        border-radius: var(--radius-md);
+        color: var(--text-primary);
+        font-family: var(--font-sans);
+        font-size: var(--text-md);
+        cursor: pointer;
+      }
+      .changes-repo-button:hover {
+        background: var(--surface-hover);
+      }
+      .changes-repo-name {
+        font-weight: var(--weight-medium);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .changes-branch {
+        flex-shrink: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      /* Pinned to both edges of the repo button's box rather than sized by
+         its contents: .menu's own min-width and the full paths inside pushed
+         it past the pane's right edge, where it was clipped. The paths
+         truncate instead (.menu-item-detail already ellipsises). */
+      .changes-switcher {
+        position: absolute;
+        top: calc(100% + var(--space-1));
+        left: 0;
+        right: 0;
+        z-index: 20;
+        min-width: 0;
+        max-width: none;
+      }
+      .changes-sync {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        flex-shrink: 0;
+      }
+      /* One line, dismissed by clicking it — a banner with its own button
+         would be two controls for a message. */
+      .changes-note {
+        flex-shrink: 0;
+        padding: var(--space-2) var(--space-3);
+        background: var(--success-bg);
+        font-size: var(--text-sm);
+        cursor: pointer;
+        overflow-wrap: anywhere;
+      }
+      .changes-note-warn {
+        background: var(--warning-bg);
+        color: var(--warning);
+      }
+      /* The one mono line in the pane: counts and state, not prose. */
+      .changes-summary {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        flex-shrink: 0;
+        padding: 0 var(--space-2) var(--space-2) var(--space-3);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .changes-count {
+        flex: 1;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .changes-totals {
+        display: flex;
+        gap: var(--space-2);
+        flex-shrink: 0;
+      }
+      .changes-new-count {
+        flex-shrink: 0;
+        padding: 1px var(--space-2);
+        border: none;
+        border-radius: var(--radius-sm);
+        background: var(--signal-soft);
+        color: var(--signal);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        cursor: pointer;
+      }
+      /* Takes the height its rows need and no more, so the commit box sits
+         under the list rather than at the bottom of the pane with a gap
+         above it. It still shrinks and scrolls when the rows outgrow the
+         pane, which keeps the commit box on screen. */
+      .changes-list {
+        flex: 0 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        padding-bottom: var(--space-2);
+      }
+      .changes-clean,
+      .changes-blank {
+        margin: 0;
+        padding: var(--space-4) var(--space-3);
+        font-size: var(--text-md);
+        color: var(--text-tertiary);
+      }
+      .changes-blank {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-3);
+      }
+      .changes-blank p {
+        margin: 0;
+      }
+
+      /* ---- a file row ---- */
+      .change-item-open {
+        background: var(--surface-bg);
+      }
+      .change-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        min-height: 26px;
+        padding: 0 var(--space-1) 0 var(--space-3);
+        cursor: default;
+      }
+      .change-row:hover {
+        background: var(--surface-hover);
+      }
+      /* A hairline box, not a filled one: staging is a side errand here and
+         a column of solid ink was the loudest thing in the pane. It fills in
+         only once it is actually on. */
+      .change-check {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 13px;
+        height: 13px;
+        flex-shrink: 0;
+        padding: 0;
+        background: transparent;
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-sm);
+        color: var(--accent-contrast);
+        cursor: pointer;
+      }
+      .change-row:hover .change-check {
+        border-color: var(--divider-strong);
+      }
+      .change-check-on,
+      .change-row:hover .change-check-on {
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+      .change-status {
+        width: 1ch;
+        flex-shrink: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .change-status-added,
+      .change-status-untracked {
+        color: var(--success);
+      }
+      .change-status-deleted {
+        color: var(--danger);
+      }
+      .change-status-conflicted {
+        color: var(--warning);
+      }
+      /* The name carries the weight and the directory recedes — a list of
+         twenty paths from one project is read by its filenames. Truncation
+         eats the front, because the end of a path is the part that names it. */
+      .change-path {
+        flex: 1;
+        min-width: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        direction: rtl;
+        text-align: left;
+      }
+      .change-path > span {
+        direction: ltr;
+        unicode-bidi: embed;
+      }
+      .change-dir {
+        color: var(--text-tertiary);
+      }
+      .change-name {
+        color: var(--text-primary);
+      }
+      .change-new {
+        width: 5px;
+        height: 5px;
+        flex-shrink: 0;
+        border-radius: 50%;
+        background: var(--signal);
+      }
+      .change-counts {
+        display: flex;
+        gap: var(--space-1);
+        flex-shrink: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+      }
+      .change-ins {
+        color: var(--success);
+      }
+      .change-del {
+        color: var(--danger);
+      }
+      .change-binary {
+        color: var(--text-tertiary);
+      }
+      .change-expand {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        flex-shrink: 0;
+        padding: 0;
+        background: transparent;
+        border: none;
+        border-radius: var(--radius-sm);
+        color: var(--text-tertiary);
+        cursor: pointer;
+        transition: transform 0.12s ease;
+      }
+      .change-expand:hover {
+        color: var(--text-primary);
+      }
+      .change-expand-on {
+        transform: rotate(90deg);
+        color: var(--text-primary);
+      }
+      .change-item-actions {
+        display: flex;
+        gap: var(--space-1);
+        padding: 0 var(--space-2) var(--space-2) var(--space-3);
+      }
+      .change-item-actions .change-discard {
+        color: var(--danger);
+      }
+      .change-confirm {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        flex-wrap: wrap;
+        padding: var(--space-2) var(--space-3);
+        background: var(--warning-bg);
+      }
+      .change-confirm-text {
+        flex: 1;
+        min-width: 0;
+        font-size: var(--text-sm);
+        color: var(--warning);
+        overflow-wrap: anywhere;
+      }
+      .change-row-confirming {
+        background: var(--warning-bg);
+      }
+
+      /* ---- the inline peek ---- */
+      .peek-diff {
+        max-height: 220px;
+        overflow: auto;
+        padding: var(--space-1) 0;
+        margin: 0 var(--space-2) 0 var(--space-3);
+        border-left: 1px solid var(--surface-border);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        line-height: 1.5;
+      }
+      .peek-diff-empty {
+        padding: var(--space-1) var(--space-3);
+        color: var(--text-tertiary);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+      }
+      .peek-diff-line {
+        display: flex;
+        white-space: pre;
+      }
+      .peek-diff-mark {
+        width: 2ch;
+        flex-shrink: 0;
+        text-align: center;
+        user-select: none;
+        color: var(--text-tertiary);
+      }
+      .peek-diff-text {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .peek-diff-add {
+        background: var(--diff-add-bg);
+      }
+      .peek-diff-add .peek-diff-mark {
+        color: var(--diff-add-mark);
+      }
+      .peek-diff-del {
+        background: var(--diff-del-bg);
+      }
+      .peek-diff-del .peek-diff-mark {
+        color: var(--diff-del-mark);
+      }
+      .peek-diff-hunk {
+        color: var(--text-tertiary);
+      }
+
+      /* ---- the history strip ----
+         What the pane shows when there is nothing to review, which is most of
+         the time. It takes the space the file list doesn't want. */
+      /* flex-basis 0, not auto: with a content-sized basis the number of
+         commit rows fed back into the layout that decides how many rows fit,
+         which is a ResizeObserver loop. Height comes from leftover space. */
+      .changes-history {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 0;
+        min-height: 0;
+        border-top: 1px solid var(--surface-border);
+      }
+      .changes-history-head {
+        flex-shrink: 0;
+        padding: var(--space-2) var(--space-3) var(--space-1);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .changes-history-empty {
+        margin: 0;
+        padding: var(--space-1) var(--space-3) var(--space-3);
+        font-size: var(--text-sm);
+        color: var(--text-tertiary);
+      }
+      /* Never scrolls — it renders exactly the number of rows that fit
+         (COMMIT_ROW_HEIGHT in ChangesSection.js), so the strip ends where
+         the remote button begins. */
+      .changes-history-list {
+        flex: 1 1 0;
+        min-height: 0;
+        overflow: hidden;
+      }
+      /* A fixed height, because the row count above is computed from it. */
+      .commit-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        height: 26px;
+        box-sizing: border-box;
+        padding: 0 var(--space-3);
+      }
+      .commit-row:hover {
+        background: var(--surface-hover);
+      }
+      /* The subject is the line you read; the time and sha are markers. */
+      .commit-subject {
+        flex: 1;
+        min-width: 0;
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .commit-when,
+      .commit-sha {
+        flex-shrink: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .changes-remote {
+        align-self: flex-start;
+        flex-shrink: 0;
+        margin: var(--space-2) var(--space-2) var(--space-3);
+      }
+
+      /* ---- the commit box ---- */
+      .changes-commit {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        flex-shrink: 0;
+        padding: var(--space-3);
+        border-top: 1px solid var(--surface-border);
+      }
+      /* Deliberately plain — a field, not a card. The commit box used to be
+         the largest object on screen for the thing touched least often. */
+      .changes-message {
+        width: 100%;
+        box-sizing: border-box;
+        resize: none;
+        padding: var(--space-2);
+        background: var(--surface-card);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-md);
+        font-family: var(--font-sans);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+      .changes-message:focus {
+        outline: none;
+        border-color: var(--text-primary);
+      }
+      .changes-commit-actions {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+
+      /* ---- File tab (see docs/design.md's "File tabs") ----
+         The whole file, with its changes in place. Rows are a fixed height
+         because the viewer windows them — only the visible slice is in the
+         DOM, so a 10 000-line file costs the same as a short one. */
+      /* flex/min-width:0 because this is a flex item of .content-flush: left
+         at the default min-width:auto, its minimum size is its content's
+         max-content width, and one long line of code would push the whole
+         viewer wider than the pane instead of scrolling inside it. */
+      .file-section {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-width: 0;
+        height: 100%;
+        min-height: 0;
+      }
+      .file-head {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        flex-shrink: 0;
+        padding: var(--space-2) var(--space-3);
+        border-bottom: 1px solid var(--surface-border);
+      }
+      .file-path {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        direction: rtl;
+        text-align: left;
+      }
+      .file-counts {
+        display: flex;
+        gap: var(--space-2);
+        flex-shrink: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+      }
+      .file-unchanged {
+        flex-shrink: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .file-head-spacer {
+        flex: 1;
+      }
+      .file-jump {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+        flex-shrink: 0;
+      }
+      /* The shared .segmented sets align-self: flex-start for use in a
+         column; in this row it has to sit on the header's centre line. */
+      .file-head .segmented {
+        align-self: center;
+        flex-shrink: 0;
+      }
+      .file-jump-count {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .file-empty {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex: 1;
+        padding: var(--space-5);
+        color: var(--text-tertiary);
+        font-size: var(--text-md);
+      }
+      .file-body {
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+        overflow: auto;
+      }
+      /* Width auto, so it fills the pane and tracks it as the pane is
+         resized; min-width max-content, so a line longer than the pane makes
+         it scroll instead of wrapping. `width: max-content` here instead
+         shrink-wrapped to the longest line and left a changed line's tint
+         stopping halfway across the pane. */
+      .file-lines {
+        position: relative;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        min-width: max-content;
+      }
+      .fileline {
+        display: flex;
+        align-items: center;
+        width: 100%;
+        white-space: pre;
+      }
+      /* Sticky, so scrolling a long line sideways doesn't lose the margin. */
+      .fileline-no {
+        position: sticky;
+        left: 0;
+        flex-shrink: 0;
+        padding-right: var(--space-2);
+        text-align: right;
+        color: var(--text-tertiary);
+        background: var(--app-bg);
+        user-select: none;
+      }
+      .fileline-mark {
+        width: 2ch;
+        flex-shrink: 0;
+        text-align: center;
+        color: var(--text-tertiary);
+        user-select: none;
+      }
+      .fileline-text {
+        padding-right: var(--space-4);
+        color: var(--text-primary);
+      }
+      .fileline-add {
+        background: var(--diff-add-bg);
+      }
+      .fileline-add .fileline-no {
+        background: var(--diff-add-bg);
+      }
+      .fileline-add .fileline-mark {
+        color: var(--diff-add-mark);
+      }
+      .fileline-del {
+        background: var(--diff-del-bg);
+      }
+      .fileline-del .fileline-no {
+        background: var(--diff-del-bg);
+      }
+      .fileline-del .fileline-mark {
+        color: var(--diff-del-mark);
+      }
+      .fileline-hunk {
+        background: var(--diff-hunk-bg);
+      }
+      .file-truncated {
+        margin: 0;
+        padding: var(--space-3);
+        font-family: var(--font-sans);
+        font-size: var(--text-sm);
+        color: var(--text-tertiary);
+      }
+
+      /* Syntax tokens (see src/shared/syntax.js). */
+      .tok-keyword {
+        color: var(--tok-keyword);
+      }
+      .tok-string {
+        color: var(--tok-string);
+      }
+      .tok-number {
+        color: var(--tok-number);
+      }
+      .tok-call {
+        color: var(--tok-call);
+      }
+      .tok-comment {
+        color: var(--tok-comment);
+      }
+
+      /* ---- ⌘P file palette ---- */
+      .palette-scrim {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        padding-top: 12vh;
+        background: var(--scrim);
+      }
+      .palette {
+        display: flex;
+        flex-direction: column;
+        width: min(560px, 90vw);
+        max-height: 60vh;
+        background: var(--surface-card);
+        border-radius: var(--radius-xl);
+        box-shadow: var(--shadow-menu);
+        overflow: hidden;
+      }
+      .palette-input {
+        flex-shrink: 0;
+        padding: var(--space-3) var(--space-4);
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid var(--surface-border);
+        font-family: var(--font-sans);
+        font-size: var(--text-lg);
+        color: var(--text-primary);
+      }
+      .palette-input:focus {
+        outline: none;
+      }
+      .palette-list {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: var(--space-1);
+      }
+      .palette-item {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-2);
+        width: 100%;
+        box-sizing: border-box;
+        padding: var(--space-1) var(--space-3);
+        border: none;
+        border-radius: var(--radius-md);
+        background: transparent;
+        text-align: left;
+        cursor: pointer;
+      }
+      .palette-item-active {
+        background: var(--surface-bg);
+      }
+      .palette-name {
+        flex-shrink: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-md);
+        color: var(--text-primary);
+      }
+      .palette-dir {
+        flex: 1;
+        min-width: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        direction: rtl;
+        text-align: left;
+      }
+      .palette-empty {
+        padding: var(--space-4);
+        font-size: var(--text-md);
+        color: var(--text-tertiary);
+      }
+
     </style>
     <link rel="stylesheet" href="../shared/vendor/xterm/xterm.css" />
   </head>
