@@ -23,11 +23,16 @@ Everything with OS or process access lives in the main process
 (`src/main/`). Renderers are context-isolated and talk to it only through
 their preload's IPC surface.
 
-The central idea: **Clance never runs a model itself.** Every conversation
-is a real Claude Code CLI process, started as a background agent and shown
-through an embedded terminal. Clance adds OS integration around it —
-hotkeys, windows, a local MCP server of screen/keyboard/mouse tools, and
-on-device dictation.
+The central idea: **Clance never runs a conversation itself.** Every
+conversation is a real Claude Code CLI process, started as a background
+agent and shown through an embedded terminal. Clance adds OS integration
+around it — hotkeys, windows, a local MCP server of screen/keyboard/mouse
+tools, and on-device dictation.
+
+Clance does make model calls of its own, but only to *decide*, never to
+write: the assistant (⌥A) classifies speech into actions Clance already
+knows how to perform. No model output is ever shown to the user as prose —
+anything open-ended is handed to a Claude Code session. See "Assistant".
 
 ### Tech stack
 
@@ -1443,6 +1448,230 @@ CREATE VIRTUAL TABLE transcripts_fts USING fts5(text, content='transcripts', con
   preferences — is the same `DictationStep` component the wizard uses,
   rendered in Settings.
 
+## Assistant
+
+⌥A opens a listening session: Clance transcribes on the Mac, decides what
+each command meant, and performs it. What it does is in `assistant.md`; this
+is how.
+
+### Shape
+
+```
+whisper ──partials──> transcript ──stable prefix──> decide ──> act
+  (local)               buffer                      (Jev)     (AX + Clance)
+                           ^                                       |
+                           └────────── commit point ───────────────┘
+```
+
+Five parts, each replaceable on its own:
+
+| Part | Module | Owns |
+|---|---|---|
+| Session | `assistant/session.ts` | The state machine; the only thing that knows the mode |
+| Transcript | `assistant/transcript.ts` | Partial buffer, stability, commit points |
+| Deciding | `assistant/decide/` | A stable phrase plus context to a resolution |
+| Intents | `assistant/intents/` | What kinds of thing exist, and how each resolves its target |
+| Acting | `assistant/act/` | Performing, risk, undo |
+
+Below them, `capabilities/` — extracted from `localToolsServer.ts` — is the
+shared implementation the MCP server and the assistant both call.
+
+### The transcript buffer
+
+Streaming transcription emits a partial every few hundred milliseconds and
+revises what it already said. Deciding on every partial would be jittery and
+wasteful, so the buffer exposes a **stable prefix**: the longest leading run
+of the transcript that hasn't changed for ~200 ms. Only stable prefixes are
+decided on.
+
+When a decision fires an action, the buffer takes a **commit point**: the
+consumed prefix is dropped and whatever follows carries forward. That is
+what makes one ⌥A press hold a conversation — the user never stops talking,
+and each finished command clears itself out of the way.
+
+A stable prefix that the decider calls incomplete is held. Silence past a
+threshold with an uncommitted prefix discards it rather than guessing.
+
+### Deciding, in one round trip
+
+A flat choice over everything a Mac can do is both too large for a single
+`choice` (255 options) and the wrong shape. Deciding is two questions:
+
+1. **Intent** — which of ~15 kinds of thing is this? Launch, switch, menu
+   command, navigate, window, focus, press, type, dictate-into, Clance,
+   ask-Claude, undo, cancel, stop, none.
+2. **Target** — resolved *within* that intent, from the provider that owns
+   it: the app list for launch, this app's menu tree for a menu command, the
+   window's controls for press.
+
+Two questions would normally mean two round trips. Jev prices a batch of
+questions at roughly the cost of one, so both stages are issued **in a
+single speculative fan-out**: the intent question, plus the target question
+for each of the two or three intents most likely given the app in front. One
+call, ~100 ms, and the resolution is already in hand when the intent lands.
+Where the speculation misses, a second call resolves it — rare, and still
+inside budget.
+
+```ts
+type Situation = {
+  utterance: string;              // the stable prefix only
+  app: { name: string; bundleId: string; windowTitle: string };
+  candidates: Record<IntentId, Candidate[]>;
+  mode: "command" | "dictating";
+};
+
+type Decision =
+  | { kind: "wait" }
+  | { kind: "resolved"; resolution: Resolution; confidence: number }
+  | { kind: "ambiguous"; among: Candidate[] }
+  | { kind: "escalate"; prompt: string }
+  | { kind: "none" };
+
+interface Decider { decide(s: Situation): Promise<Decision>; }
+```
+
+`JevDecider` is one implementation. `KeywordDecider` — string matching over
+the same candidate lists — is the other, and is not a toy: it is the test
+double, it is what runs with the decision service switched off in Settings,
+and it is the fallback when Jev is unreachable. The assistant degrades to
+"the commands it can recognise locally" rather than to nothing.
+
+### Intents and resolvers
+
+An intent is a kind of thing to do; a resolver turns a phrase into a target
+and a way to perform it.
+
+```ts
+type Resolution = {
+  intent: IntentId;
+  label: string;                  // what the HUD shows: "New Note — Notes"
+  risk: Risk;
+  perform(): Promise<Outcome>;
+  undo?(): Promise<Outcome>;
+};
+
+interface Resolver {
+  id: IntentId;
+  candidates(ctx: Context): Promise<Candidate[]>;   // fed to the decider
+  resolve(c: Candidate, ctx: Context): Resolution;
+}
+```
+
+| Resolver | Candidates from | Notes |
+|---|---|---|
+| `launch` / `switch` / `quit` | Installed and running apps | |
+| `menu` | The frontmost app's menu tree | The reason this generalises — see below |
+| `navigate` | A fixed verb set | Scroll, page, top, bottom, back, tabs *(new)* |
+| `window` | The app's windows | Move, resize, fullscreen, arrange *(new)* |
+| `target` | The window's controls | Focus or press, by label |
+| `text` | Stored values, selection, dictation | *(new: stored values)* |
+| `clance` | Clance's own verbs | New session, open a section, start dictation |
+| `claude` | — | Always available; see "Handing off" |
+
+Adding a capability is adding a resolver. The session, the decider and the
+actuator don't change, which is what keeps the *(new)* list in
+`assistant.md` a matter of work rather than redesign.
+
+**The menu resolver** is what lets the assistant work in apps Clance has
+never seen. macOS apps publish their whole menu bar through the
+accessibility API, so an app's commands are read rather than taught, and
+include whether each is currently enabled. It is cached per bundle id and
+invalidated on focus change and on window change — a menu is a function of
+the app's state, and a stale one offers commands that fail.
+
+### Risk and confirmation
+
+Risk is a property of the intent, narrowed by the resolver — never a
+judgement the decider makes about itself. Asking the component you don't
+fully trust to decide whether it should be trusted is not a gate.
+
+| | |
+|---|---|
+| `safe` | `navigate`, `window`, `switch`, `focus` — by construction reversible |
+| `confirm` | `quit`, anything matching a destructive lexicon (delete, remove, trash, send, discard, erase, clear, reset), anything the resolver can't classify |
+
+The default for the unclassified is `confirm`. A menu item Clance can't
+place is confirmed, which is noisy and correct; the noise is answered by a
+per-app allow list the user grows by saying "always allow this", not by
+loosening the default.
+
+Separately, confidence below a threshold asks even for a `safe` action. The
+threshold is per intent — mishearing a scroll is cheaper than mishearing an
+app switch — and is the single number this feature lives or dies by.
+
+### Acting
+
+One serial executor. Commands are queued in the order they were committed
+and run one at a time; a command spoken while the previous is still running
+waits rather than racing it. Every outcome is reported — performed, refused
+with the app's own words, or unavailable.
+
+Undo has three tiers, tried in order: a `Resolution`'s own inverse where it
+has one (switch back, refocus the previous field); the app's own undo where
+the app accepts it; otherwise Clance says it can't, which is precisely the
+set of things that were `confirm`-risk on the way in.
+
+### Handing off
+
+`escalate` is both the path for anything needing reasoning and the fallback
+for anything no resolver claimed, so the assistant never dead-ends.
+
+- No suitable session running: mint one with `--append-system-prompt`
+  carrying what the user said, the app and window, and the selection.
+- A session already working where the user is: write the prompt into its
+  PTY, which Clance already owns.
+
+Matching a running session to the work in front of the user is the same
+unsolved problem the Changes pane has (see Open questions); until it is
+solved, escalation always mints.
+
+### What leaves the Mac
+
+The `Situation` type carries the command buffer, the app's identity and the
+candidate labels. It has no field for document text, field contents or
+anything dictated, and dictated content lives in a buffer no `Decider` is
+handed — so content reaching a third party is a compile error rather than a
+convention. The `dictate-into` intent resolves to *focusing a field and
+handing off to the dictation path*; the words themselves never pass through
+the decider at all.
+
+### Surface
+
+The HUD follows `dictationWindow.ts` exactly — `focusable: false`,
+`showInactive()`, always on top, excluded from Clance's own screenshots —
+because the assistant's whole premise is that the app the user was in keeps
+focus. It shows what is being heard, what is about to happen, and what just
+happened; questions and confirmations render there and are answerable by
+voice or Escape.
+
+### Latency budget
+
+| | |
+|---|---|
+| Partial to stable prefix | ~200 ms (inherent to streaming ASR) |
+| Decide, one fan-out call | ~100 ms |
+| Dispatch through AX | ~50 ms |
+| **Command complete to action begun** | **~350 ms** |
+
+A speculation miss adds one more decide. The budget has no room for walking
+a menu tree inline, which is why menus are cached, nor for a second ASR
+pass, which is why deciding runs on the stable prefix rather than on a final
+transcript.
+
+### Build order
+
+1. Extract `capabilities/` from `localToolsServer.ts` — pure refactor.
+2. Intents, resolvers and the actuator, exercised by `KeywordDecider` over
+   whole utterances from today's stop-then-transcribe flow. The assistant
+   works end to end here, without streaming and without Jev.
+3. The HUD, risk gating, confirmation and undo.
+4. `JevDecider` behind the same interface.
+5. Streaming partials and the commit-point buffer.
+
+Steps 1–3 are shippable on their own as a push-to-talk assistant. Streaming
+is what makes it feel alive, and it is deliberately last because it is the
+only step that changes the dictation engine.
+
 ## Setup, permissions and shortcuts
 
 ### Setup gating
@@ -1590,6 +1819,43 @@ on errors.
 
 ## Open questions
 
+- **The ⌥A confidence threshold is unmeasured.** Per intent, and pickable
+  only from real utterances by real voices — too low and the assistant acts
+  on what it misheard, too high and it asks about everything. There is no
+  bench substitute for this.
+- **The destructive lexicon is a heuristic.** Risk falls back to `confirm`
+  for anything unclassified, which is the safe direction, but the word list
+  that classifies the rest is English and assumes apps word things the usual
+  way. An app that calls it "Move to Archive" gets confirmed (harmless); one
+  that calls destruction something friendly gets classified `safe` by a
+  resolver that recognised it for another reason. The allow list lets a user
+  loosen this; nothing lets them tighten it.
+- **Speculative fan-out hit rate is unknown.** Issuing target questions for
+  the two or three likeliest intents alongside the intent question is what
+  keeps deciding to one round trip. How often the speculation misses — and
+  therefore what the real latency distribution looks like rather than its
+  best case — can only be measured against real commands.
+- **The 200 ms stability window is a guess.** Too short and the decider runs
+  on transcripts whisper is about to revise; too long and the assistant
+  feels laggy. It likely depends on the speech model.
+- **Jev is new, waitlisted and unproven.** It launched in September 2026,
+  access is granted by request, and its calibration is attested only by its
+  own vendor. `KeywordDecider` and the `Decider` interface exist so the
+  assistant degrades rather than dies, but how useful that fallback actually
+  is at the moment it's needed hasn't been tested.
+- **Streaming partial transcription doesn't exist yet.** The dictation engine
+  spawns `whisper-cli` per utterance and reads the result from a file; the
+  assistant wants partials mid-sentence. Whether `whisper.cpp` gives that
+  cheaply enough on the recommended model is unknown. Until it does, ⌥A works
+  on whole utterances, which the build order treats as shippable.
+- **Menu-tree cache invalidation.** Cached per bundle id, invalidated on
+  focus and window change. Whether that is enough is untested: menus also
+  change with selection, document state and dynamic window lists, and a stale
+  cache offers commands that fail.
+- **⌥A and the Option key.** ⌥+letter produces a diacritic on macOS (⌥A is
+  "å"). `globalShortcut` should intercept before the character is composed,
+  but this needs verifying against a live text field — a failed registration
+  would silently type "å" instead of opening the assistant.
 - **Dictation accuracy on real voices.** Tier ordering and timings are
   sound, but the benchmark clips were synthesized; someone needs to record
   real utterances.
