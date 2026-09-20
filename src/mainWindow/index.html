@@ -1900,6 +1900,297 @@
          is something to commit. Reading a file happens in a file tab. */
       /* Same reasoning as .file-section: a flex item of .content-flush has
          to be told it may be narrower than its content. */
+      /* ---- Rendered file views (markdown, images) ---------------------
+         A file tab's second view, when its reader has one. Both sit inside
+         .file-body, so they scroll with the same container the text view
+         uses. */
+      .file-markdown {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: var(--space-5) var(--space-5) 64px;
+        font-family: var(--font-sans);
+        font-size: var(--text-md);
+        line-height: 1.65;
+        color: var(--text-primary);
+      }
+      .file-markdown h1,
+      .file-markdown h2,
+      .file-markdown h3 {
+        font-weight: var(--weight-semibold);
+        letter-spacing: -0.03em;
+        margin: var(--space-5) 0 var(--space-3);
+      }
+      .file-markdown h1 {
+        font-size: var(--text-2xl);
+      }
+      .file-markdown h2 {
+        font-size: var(--text-xl);
+      }
+      .file-markdown h3 {
+        font-size: var(--text-lg);
+      }
+      .file-markdown p {
+        margin: 0 0 var(--space-3);
+      }
+      .file-markdown ul,
+      .file-markdown ol {
+        margin: 0 0 var(--space-3);
+        padding-left: var(--space-5);
+      }
+      .file-markdown li {
+        margin-bottom: var(--space-1);
+      }
+      .file-markdown code {
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        background: var(--surface-bg);
+        border-radius: var(--radius-sm);
+        padding: 1px 4px;
+      }
+      .file-markdown pre code {
+        background: none;
+        padding: 0;
+      }
+      .file-markdown a {
+        color: var(--text-primary);
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+      .file-markdown table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 0 0 var(--space-4);
+        font-size: var(--text-sm);
+      }
+      .file-markdown th,
+      .file-markdown td {
+        border: 1px solid var(--surface-border);
+        padding: var(--space-2) var(--space-3);
+        text-align: left;
+        vertical-align: top;
+      }
+      .file-markdown th {
+        background: var(--surface-bg);
+        font-weight: var(--weight-medium);
+      }
+      /* Where a picture would be. Nothing is loaded to render a document. */
+      .md-image-alt {
+        font-style: italic;
+        color: var(--text-tertiary);
+      }
+      .file-markdown blockquote {
+        margin: 0 0 var(--space-3);
+        padding-left: var(--space-3);
+        border-left: 2px solid var(--surface-border);
+        color: var(--text-secondary);
+      }
+      /* A checkerboard, so a transparent PNG reads as transparent rather
+         than as whatever colour the page happens to be. */
+      .file-image-body {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: var(--space-5);
+      }
+      .file-image {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        border-radius: var(--radius-sm);
+        background-color: var(--surface-card);
+        background-image: linear-gradient(45deg, var(--surface-bg) 25%, transparent 25%),
+          linear-gradient(-45deg, var(--surface-bg) 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, var(--surface-bg) 75%),
+          linear-gradient(-45deg, transparent 75%, var(--surface-bg) 75%);
+        background-size: 16px 16px;
+        background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+      }
+      .file-image-size {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .file-source {
+        margin: 0;
+        padding: var(--space-4);
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        line-height: 1.6;
+        color: var(--text-primary);
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      /* ---- Files explorer (see docs/design.md's "Files explorer") ------
+         A sidecar like the Changes pane, so it borrows its column metrics.
+         The tree is the only scrolling part; the header stays put. */
+      .files-pane {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-width: 0;
+        height: 100%;
+        min-height: 0;
+      }
+      .files-bar {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        flex-shrink: 0;
+        padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+      }
+      .files-folder {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        min-width: 0;
+        flex: 1;
+      }
+      .files-folder-button {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        max-width: 100%;
+        padding: var(--space-1) var(--space-2);
+        margin-left: calc(var(--space-2) * -1);
+        background: transparent;
+        border: none;
+        border-radius: var(--radius-md);
+        color: var(--text-primary);
+        font-family: var(--font-sans);
+        font-size: var(--text-md);
+        cursor: pointer;
+      }
+      .files-folder-button:hover {
+        background: var(--surface-hover);
+      }
+      .files-folder-name {
+        font-weight: var(--weight-medium);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      /* Says the folder sits inside a repository, which is why rows can carry
+         ignore marks and why the toggle is there at all. */
+      .files-repo-hint {
+        flex-shrink: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .files-ignored-toggle {
+        flex-shrink: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .files-ignored-toggle.is-on {
+        color: var(--text-primary);
+      }
+      .files-switcher {
+        position: absolute;
+        top: calc(100% + var(--space-1));
+        left: 0;
+        right: 0;
+        z-index: 20;
+        min-width: 0;
+        max-width: none;
+      }
+      .files-error {
+        flex-shrink: 0;
+        margin: 0 var(--space-3) var(--space-2);
+        font-size: var(--text-sm);
+        color: var(--warning);
+      }
+      .files-tree {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding-bottom: var(--space-3);
+        outline: none;
+      }
+      .files-tree:focus-visible {
+        box-shadow: inset 0 0 0 2px var(--signal);
+      }
+      /* A row is a button so it is reachable and clickable as one thing; the
+         tree's own keyboard handling does the moving between them. */
+      .files-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+        width: 100%;
+        padding-right: var(--space-2);
+        min-height: 22px;
+        background: transparent;
+        border: none;
+        color: var(--text-primary);
+        font-family: var(--font-sans);
+        font-size: var(--text-sm);
+        text-align: left;
+        cursor: pointer;
+      }
+      .files-row:hover {
+        background: var(--surface-hover);
+      }
+      .files-row[data-selected="true"] {
+        background: var(--surface-bg);
+      }
+      .files-row-ignored {
+        color: var(--text-tertiary);
+      }
+      .files-row-twist {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        width: 12px;
+        color: var(--text-tertiary);
+      }
+      .files-chevron {
+        display: flex;
+        transition: transform 90ms ease;
+      }
+      .files-chevron.is-open {
+        transform: rotate(90deg);
+      }
+      .files-row-icon {
+        display: flex;
+        flex-shrink: 0;
+        color: var(--text-tertiary);
+      }
+      /* The pane is a quarter of the window, so a name truncates rather than
+         wrapping. It truncates at the end: `direction: rtl` would put the
+         ellipsis on the left, which reads better for a long name, but it also
+         hands the line to the bidi algorithm, and a leading dot is a neutral
+         character — ".gitignore" comes out as "gitignore.". Dotfiles are the
+         one thing a tree must not misspell. */
+      .files-row-name {
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .files-row-tag {
+        flex-shrink: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .files-empty,
+      .files-blank {
+        margin: 0;
+        padding: var(--space-4) var(--space-3);
+        font-size: var(--text-md);
+        color: var(--text-tertiary);
+      }
+      .file-empty-detail {
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        color: var(--text-tertiary);
+      }
       .changes-pane {
         display: flex;
         flex-direction: column;

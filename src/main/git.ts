@@ -1,6 +1,6 @@
-import { execFile } from "child_process";
+import { execFile, spawn } from "child_process";
 import { promisify } from "util";
-import { watch, statSync, readFileSync, FSWatcher } from "fs";
+import { watch, statSync, readFileSync, realpathSync, FSWatcher } from "fs";
 import { isAbsolute, join, sep } from "path";
 import { getLoginShellPath } from "./ptyManager";
 
@@ -713,6 +713,12 @@ export type FileView = {
   path: string;
   /** For the highlighter — the extension, lowercased, with no dot. */
   language: string;
+  /**
+   * A second way of showing this same text, if it has one. The tab offers
+   * Rendered / Raw when it's set; null means the text is the only view there
+   * is. A capability the reader declares, not something every file has.
+   */
+  renders: "markdown" | null;
   /** The whole file, with deleted lines put back where they were. */
   lines: DiffLine[];
   /** Whether this file differs from the last commit at all. */
@@ -736,9 +742,59 @@ function looksBinary(buffer: Buffer): boolean {
   return buffer.subarray(0, 8192).includes(0);
 }
 
+/**
+ * git with something on stdin. `execFile` has no way to write to a child, so
+ * this one spawns directly; everything else about it matches `git` above —
+ * the same environment, the same "a non-zero exit is a result, not a throw".
+ */
+function gitWithInput(cwd: string, args: string[], input: string, maxBuffer: number): Promise<GitRun> {
+  return new Promise(async (resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn("git", ["--no-pager", ...args], { cwd, env: await gitEnv() });
+    } catch (error) {
+      resolve({ stdout: "", stderr: error instanceof Error ? error.message : "git could not be run", code: -1 });
+      return;
+    }
+    let stdout = "";
+    let stderr = "";
+    let over = false;
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      if (stdout.length + chunk.length > maxBuffer) {
+        over = true;
+        child.kill();
+        return;
+      }
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => resolve({ stdout: "", stderr: error.message, code: -1 }));
+    child.on("close", (code) =>
+      resolve(over ? { stdout: "", stderr: "too much output", code: -1 } : { stdout, stderr, code: code ?? -1 })
+    );
+    // A closed stdin on a child that has already exited is an EPIPE, not a
+    // problem worth failing the read over.
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(input);
+  });
+}
+
 /** Every line of a plain file, as context — nothing about it changed. */
-function readWholeFile(root: string, path: string, kind: DiffLine["kind"]): Omit<FileView, "path" | "language" | "changed"> {
-  const full = join(root, path);
+function readWholeFile(root: string, path: string, kind: DiffLine["kind"]): Omit<FileView, "path" | "language" | "changed" | "renders"> {
+  return readWholeFileAt(join(root, path), kind);
+}
+
+/**
+ * The same read, given an absolute path that has already been checked. Files
+ * reached through the Files explorer may sit outside any repository, where
+ * there is no `ls-files` to vouch for them, so containment is the caller's
+ * job (see `containedFile`) and this only reads.
+ */
+function readWholeFileAt(full: string, kind: DiffLine["kind"]): Omit<FileView, "path" | "language" | "changed" | "renders"> {
   let buffer: Buffer;
   try {
     if (statSync(full).size > MAX_FILE_BYTES) {
@@ -765,6 +821,179 @@ function readWholeFile(root: string, path: string, kind: DiffLine["kind"]): Omit
   return { lines, binary: false, omitted: null, truncated };
 }
 
+/** How many paths go to one `check-ignore`. A directory can hold thousands. */
+const CHECK_IGNORE_CHUNK = 500;
+
+/**
+ * An absolute path for `path` inside `root`, or null if it escapes.
+ *
+ * Inside a repository `ls-files` is the authority on what belongs, and git
+ * will not name a path outside the tree, so containment comes free. A folder
+ * chosen in the Files explorer has no such authority, so it is checked here —
+ * and checked *after* resolving symbolic links rather than before, because a
+ * link sitting inside the folder and pointing at ~/.ssh/id_rsa passes every
+ * test that can be made on the path as text.
+ */
+function containedFile(root: unknown, path: unknown): string | null {
+  if (!isDirectory(root) || typeof path !== "string" || !path) return null;
+  if (path.startsWith("/") || path.split("/").includes("..")) return null;
+  try {
+    const realRoot = realpathSync(root);
+    const full = realpathSync(join(realRoot, path));
+    if (full !== realRoot && !full.startsWith(realRoot + sep)) return null;
+    return statSync(full).isFile() ? full : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A file read from a folder that isn't a repository: all context, no diff. */
+function readPlainFileView(dir: unknown, path: unknown): FileView | null {
+  const full = containedFile(dir, path);
+  if (full === null || typeof path !== "string") return null;
+  const language = languageOf(path);
+  return { path, language, renders: rendersAs(language), changed: false, ...readWholeFileAt(full, "context") };
+}
+
+/**
+ * Which of `paths` (absolute) git is ignoring, for the Files tree.
+ *
+ * The paths go in over stdin rather than as arguments: `-z` is what keeps a
+ * newline inside a filename from splitting one path into two, and git only
+ * accepts it with `--stdin`. A directory can hold thousands of entries, which
+ * would be a long argv anyway.
+ *
+ * Exit 1 means nothing matched, which is an answer. Anything else is a
+ * failure, and it returns null rather than an empty set — "git could not
+ * tell" and "nothing is ignored" look identical to a caller that can't tell
+ * them apart, and the second one quietly puts node_modules on screen.
+ */
+export async function checkIgnore(root: string, paths: string[]): Promise<Set<string> | null> {
+  if (paths.length === 0) return new Set();
+  const ignored = new Set<string>();
+  for (let i = 0; i < paths.length; i += CHECK_IGNORE_CHUNK) {
+    const chunk = paths.slice(i, i + CHECK_IGNORE_CHUNK);
+    const run = await gitWithInput(
+      root,
+      ["--no-optional-locks", "check-ignore", "-z", "--stdin"],
+      chunk.join("\0"),
+      4 * 1024 * 1024
+    );
+    if (run.code === 1) continue;
+    if (run.code !== 0) return null;
+    for (const entry of run.stdout.split("\0")) if (entry) ignored.add(entry);
+  }
+  return ignored;
+}
+
+/**
+ * What a file tab is handed. A file is drawn by a *reader* chosen from its
+ * path, and text is the first one rather than the shape of the feature: an
+ * image has no lines, no diff, and nothing to say about a 20,000-line
+ * ceiling. A reader returns its own payload and the tab draws whichever it
+ * got, so adding one later means writing a reader rather than reworking file
+ * tabs.
+ *
+ * "No reader" isn't a failure — it's the fallback, and it says what it can
+ * about the file rather than apologising for it. Readers are added to this
+ * union in the codebase; nothing here is loaded from a user's disk.
+ *
+ * A reader never executes what it reads. File content is data: it is drawn,
+ * never turned into markup. SVG and HTML both carry script, and Files browses
+ * any folder on the machine.
+ */
+export type FileOpen =
+  | { reader: "text"; view: FileView }
+  | {
+      reader: "image";
+      path: string;
+      /** A data URL. An image is *drawn*, never injected as markup — an
+       *  `<img>` can't run the script an SVG is allowed to carry. */
+      dataUrl: string;
+      /** SVG has a text source worth reading; a PNG doesn't. */
+      source: string | null;
+      bytes: number;
+    }
+  | { reader: "none"; path: string; bytes: number | null; reason: string };
+
+/** Which extensions have a rendered view as well as a raw one. */
+function rendersAs(language: string): "markdown" | null {
+  return language === "md" || language === "markdown" || language === "mdown" || language === "mkd"
+    ? "markdown"
+    : null;
+}
+
+/** Extensions the image reader claims, and the type each is drawn as. */
+const IMAGE_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  bmp: "image/bmp",
+  ico: "image/x-icon",
+  avif: "image/avif",
+  svg: "image/svg+xml",
+};
+
+/**
+ * The image reader's own ceiling. Limits belong to a reader: 20,000 lines
+ * means nothing to a photograph, and 16 MB of text is a pathological file
+ * while 16 MB of camera output is a Tuesday.
+ */
+const MAX_IMAGE_BYTES = 24 * 1024 * 1024;
+
+async function readImage(dir: unknown, path: string, mime: string): Promise<FileOpen | null> {
+  const root = (await findRepoRoot(dir)) ?? (isDirectory(dir) ? dir : null);
+  if (!root) return null;
+  const full = containedFile(root, path);
+  if (!full) return null;
+  try {
+    const bytes = statSync(full).size;
+    if (bytes > MAX_IMAGE_BYTES) {
+      return { reader: "none", path, bytes, reason: "Image is too large to show" };
+    }
+    const buffer = readFileSync(full);
+    return {
+      reader: "image",
+      path,
+      dataUrl: `data:${mime};base64,${buffer.toString("base64")}`,
+      source: mime === "image/svg+xml" ? buffer.toString("utf8") : null,
+      bytes,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Picks the reader for a file and reads it. One place a path is checked. */
+export async function openFileView(dir: unknown, path: unknown): Promise<FileOpen | null> {
+  // The reader is chosen from the path, before anything tries to read the
+  // file as text — an image read as text is 20,000 lines of noise.
+  if (typeof path === "string") {
+    const mime = IMAGE_TYPES[languageOf(path)];
+    // An "image" that won't read as one falls through and is treated like
+    // any other file rather than reported as missing.
+    if (mime) {
+      const image = await readImage(dir, path, mime);
+      if (image) return image;
+    }
+  }
+  const view = await getFileView(dir, path);
+  if (!view) return null;
+  if (!view.binary) return { reader: "text", view };
+  const root = (await findRepoRoot(dir)) ?? (isDirectory(dir) ? dir : null);
+  let bytes: number | null = null;
+  if (root) {
+    try {
+      bytes = statSync(join(root, view.path)).size;
+    } catch {
+      bytes = null;
+    }
+  }
+  return { reader: "none", path: view.path, bytes, reason: "No reader for this kind of file" };
+}
+
 /**
  * A whole file, with its changes in place — what a file tab shows. The tab's
  * "show diff" toggle is a rendering choice over this one payload: hiding the
@@ -776,12 +1005,17 @@ function readWholeFile(root: string, path: string, kind: DiffLine["kind"]): Omit
  */
 export async function getFileView(dir: unknown, path: unknown): Promise<FileView | null> {
   const root = await findRepoRoot(dir);
-  if (!root || typeof path !== "string" || !path || path.startsWith("/") || path.includes("..")) return null;
+  // Not a repository. There is no diff to show and no `ls-files` to say what
+  // belongs here, so the file is read straight from disk and the tab gets a
+  // view that is all context — which is what makes its Diff / Clean toggle
+  // disappear rather than appear with one working side.
+  if (!root) return readPlainFileView(dir, path);
+  if (typeof path !== "string" || !path || path.startsWith("/") || path.includes("..")) return null;
 
   const status = await getStatus(root);
   const file = status?.files.find((f) => f.path === path);
   const language = languageOf(path);
-  const base = { path, language };
+  const base = { path, language, renders: rendersAs(language) };
 
   // Not in the status listing: an ordinary file nobody has touched. It still
   // has to be inside the repo, which `ls-files` is the authority on.

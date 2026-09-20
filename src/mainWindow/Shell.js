@@ -2,6 +2,7 @@ import { html, useEffect, useMemo, useRef, useState } from "../shared/vendor/pre
 import { Icon } from "../shared/icons.js";
 import { ChatsListSection, focusSessionSearch } from "./sections/ChatsSection.js";
 import { ChangesSection } from "./sections/ChangesSection.js";
+import { FilesSection } from "./sections/FilesSection.js";
 import { FileSection } from "./sections/FileSection.js";
 import { SettingsSection } from "./sections/SettingsSection.js";
 import { DictationSection } from "./sections/DictationSection.js";
@@ -26,17 +27,23 @@ import {
 const LAUNCHER_ITEMS = [
   { id: "chats", label: "Sessions", icon: "chat" },
   { id: "changes", label: "Changes", icon: "gitBranch" },
+  { id: "files", label: "Files", icon: "folder" },
   { id: "dictation", label: "Dictation", icon: "mic" },
   { id: "settings", label: "Settings", icon: "gear" },
 ];
+
+// Sections read *alongside* the work rather than instead of it, so they open
+// in a pane beside it. The second one to open joins the first's pane as a tab
+// rather than taking another quarter of the window.
+const SIDECARS = new Set(["changes", "files"]);
 
 // How often an unnamed session tab asks whether its conversation has a name
 // yet. Only runs while at least one tab is still unnamed.
 const TAB_TITLE_POLL_MS = 3000;
 
-// How much of the window the Changes sidecar takes when it opens itself a
-// pane. Above MIN_PANE_PCT, so the divider can still be dragged either way.
-const CHANGES_PANE_PCT = 25;
+// How much of the window a sidecar takes when it opens itself a pane. Above
+// MIN_PANE_PCT, so the divider can still be dragged either way.
+const SIDECAR_PANE_PCT = 25;
 
 // The split whose own child leaf holds `tabId` — the one created by the split
 // that just put it there, and so the one whose sizes decide its width.
@@ -54,7 +61,7 @@ function findSplitContainingTab(node, tabId) {
 // Tab types that fill their pane themselves rather than sitting in the
 // padded, 880px-wide content column — a terminal, a file and the Changes
 // sidecar all want every pixel.
-const FLUSH_TAB_TYPES = new Set(["terminal", "file", "changes"]);
+const FLUSH_TAB_TYPES = new Set(["terminal", "file", "changes", "files"]);
 
 const EDGES = ["top", "right", "bottom", "left"];
 const MIN_PANE_PCT = 15;
@@ -257,6 +264,8 @@ function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut, openSectio
       return html`<${ChatsListSection} onOpenChat=${openChatTab} onNewChat=${openNewChatTab} />`;
     case "changes":
       return html`<${ChangesSection} onOpenFile=${openFileTab} />`;
+    case "files":
+      return html`<${FilesSection} onOpenFile=${openFileTab} />`;
     case "file":
       return html`<${FileSection} repoRoot=${tab.repoRoot} path=${tab.path} />`;
     case "settings":
@@ -782,16 +791,33 @@ export function Shell() {
 
   // Reads the store directly rather than the render's `state`, so it's
   // current when called from a listener registered once.
+  // Every leaf pane in the tree, left to right.
+  function leavesOf(node, out = []) {
+    if (node.type === "split") node.children.forEach((child) => leavesOf(child, out));
+    else out.push(node);
+    return out;
+  }
+
+  // The pane a sidecar is already living in, if one is open.
+  function sidecarPane() {
+    return leavesOf(getState().root).find((leaf) => leaf.tabs.some((tab) => SIDECARS.has(tab.id))) ?? null;
+  }
+
   function openSection(id) {
     const item = LAUNCHER_ITEMS.find((i) => i.id === id);
-    const paneId = getState().activePaneId;
+    // A second sidecar joins the first rather than claiming another quarter
+    // of the window: both are read alongside the work, and two quarter-width
+    // columns would leave half a window to work in. They become tabs in the
+    // one pane, switched with ⌃⇥ like any other pair.
+    const existing = SIDECARS.has(id) ? sidecarPane() : null;
+    const paneId = existing ? existing.id : getState().activePaneId;
     openTab({ id, type: id, label: item.label, icon: item.icon }, { paneId });
-    // Changes is a sidecar: it's read while something else is being worked on,
-    // so it opens beside the work rather than on top of it. Only when there's
-    // something to open beside — splitting a pane away from its only tab is a
-    // no-op in the store, and a window already at MAX_PANES can't take
-    // another, in which case this quietly stays a tab where it landed.
-    if (id !== "changes") return;
+    // A sidecar is read while something else is being worked on, so it opens
+    // beside the work rather than on top of it. Only when there's something
+    // to open beside — splitting a pane away from its only tab is a no-op in
+    // the store, and a window already at MAX_PANES can't take another, in
+    // which case this quietly stays a tab where it landed.
+    if (!SIDECARS.has(id) || existing) return;
     const pane = findPane(getState().root, paneId);
     if (!pane || pane.tabs.length < 2) return;
     if (!canSplitAt(getState().root, paneId, id, paneId, "right")) return;
@@ -799,9 +825,9 @@ export function Shell() {
     // A sidecar, so it takes a quarter rather than the even half a split
     // gives by default. Only on the split that just created it — a pane the
     // user has since resized keeps the width they gave it, because reopening
-    // Changes while it's already open focuses it instead of splitting again.
+    // a sidecar while it's already open focuses it instead of splitting again.
     const split = findSplitContainingTab(getState().root, id);
-    if (split) resizeSplit(split.id, [100 - CHANGES_PANE_PCT, CHANGES_PANE_PCT]);
+    if (split) resizeSplit(split.id, [100 - SIDECAR_PANE_PCT, SIDECAR_PANE_PCT]);
   }
 
   // Where a file opens. Not the pane Changes is in: clicking a row there
@@ -811,16 +837,12 @@ export function Shell() {
   // window further.
   function paneForFileTabs() {
     const { root, activePaneId } = getState();
-    const leaves = [];
-    (function walk(node) {
-      if (node.type === "split") node.children.forEach(walk);
-      else leaves.push(node);
-    })(root);
-    const changesPane = leaves.find((leaf) => leaf.tabs.some((tab) => tab.id === "changes"));
-    if (!changesPane || leaves.length === 1) return activePaneId;
-    const withFile = leaves.find((leaf) => leaf.id !== changesPane.id && leaf.tabs.some((t) => t.type === "file"));
-    const other = leaves.find((leaf) => leaf.id !== changesPane.id);
-    return (withFile ?? other ?? changesPane).id;
+    const leaves = leavesOf(root);
+    const sidecar = leaves.find((leaf) => leaf.tabs.some((tab) => SIDECARS.has(tab.id)));
+    if (!sidecar || leaves.length === 1) return activePaneId;
+    const withFile = leaves.find((leaf) => leaf.id !== sidecar.id && leaf.tabs.some((t) => t.type === "file"));
+    const other = leaves.find((leaf) => leaf.id !== sidecar.id);
+    return (withFile ?? other ?? sidecar).id;
   }
 
   // One tab per file, keyed by repo and path so opening the same file twice

@@ -19,6 +19,10 @@ export type ClanceConfig = {
   // where the user left it rather than guessing from the recents list every
   // launch. Null until they've opened the pane once.
   lastGitRepo: string | null;
+  // The folder the Files explorer was last pointed at. Independent of
+  // lastGitRepo: Files browses anything, including folders that aren't
+  // repositories at all, so the two can't share one setting.
+  lastFolder: string | null;
   // Which of localToolsServer.ts's LOCAL_TOOLS the agent may use. Defaults
   // to "all" (opt-out) — these are Clance's own first-party tools
   // (screenshot, click, type), not arbitrary third-party skill
@@ -77,6 +81,7 @@ const DEFAULT_CONFIG: ClanceConfig = {
   defaultDirectory: null,
   recentDirectories: [],
   lastGitRepo: null,
+  lastFolder: null,
   enabledLocalTools: "all",
   dictation: DEFAULT_DICTATION,
 };
@@ -136,5 +141,11 @@ export function addRecentDirectory(dir: string): void {
 export function setLastGitRepo(root: string | null): void {
   const config = readConfig();
   config.lastGitRepo = root;
+  writeConfig(config);
+}
+
+export function setLastFolder(root: string | null): void {
+  const config = readConfig();
+  config.lastFolder = root;
   writeConfig(config);
 }

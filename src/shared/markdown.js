@@ -1,8 +1,11 @@
-// Minimal, dependency-free markdown -> HTML for rendering Claude's replies.
-// Covers what the model actually produces day-to-day (bold/italic, inline
-// code, fenced code blocks, headings, simple lists, paragraphs) — not full
-// CommonMark (no tables, nested lists, links). Input is always treated as
-// untrusted text and HTML-escaped before any tag is introduced.
+// Minimal, dependency-free markdown -> HTML. Written for the old chat UI and
+// now what a file tab's "Rendered" view uses for a .md file.
+// Covers bold/italic, inline code, fenced code blocks, headings, simple
+// lists, paragraphs, links and tables — not full CommonMark (no nested
+// lists, reference links, footnotes). Input is always treated as untrusted
+// text and HTML-escaped before any tag is introduced, which is what makes it
+// safe to point at a file that was cloned a minute ago: a .md holding
+// `<script>` renders those characters rather than running them.
 //
 // Code content is pulled into placeholders before any other formatting
 // runs, and restored at the very end, so code is never itself reformatted
@@ -97,15 +100,52 @@ function renderCodeBlock(lang, code) {
   </div>`;
 }
 
+/** A `| a | b |` row followed by a `|---|---|` rule. */
+function isTableStart(lines, i) {
+  if (!/\|/.test(lines[i] ?? "")) return false;
+  const rule = lines[i + 1] ?? "";
+  return /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(rule) && /\|/.test(rule);
+}
+
+function splitRow(line) {
+  return line
+    .trim()
+    .replace(/^\||\|$/g, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function renderTable(lines, start) {
+  const head = splitRow(lines[start]);
+  let end = start + 1;
+  const body = [];
+  while (end + 1 < lines.length && /\|/.test(lines[end + 1] ?? "") && lines[end + 1].trim() !== "") {
+    end += 1;
+    body.push(splitRow(lines[end]));
+  }
+  const th = head.map((cell) => `<th>${cell}</th>`).join("");
+  const rows = body
+    .map((row) => `<tr>${head.map((_, c) => `<td>${row[c] ?? ""}</td>`).join("")}</tr>`)
+    .join("");
+  return { html: `<table><thead><tr>${th}</tr></thead><tbody>${rows}</tbody></table>`, end };
+}
+
 function renderBlocks(text) {
   const lines = text.split("\n");
   let html = "";
   let listType = null;
   let paragraphLines = [];
 
+  // A hard-wrapped paragraph flows back together: in markdown a single
+  // newline is a space, not a break. Two trailing spaces is the one way to
+  // ask for a real one. (The old chat caller wanted every newline to break,
+  // which is wrong for a document that was wrapped at 80 columns.)
   function flushParagraph() {
     if (paragraphLines.length) {
-      html += `<p>${paragraphLines.join("<br>")}</p>`;
+      const joined = paragraphLines
+        .map((line, i) => (i === paragraphLines.length - 1 ? line.text : line.text + (line.hardBreak ? "<br>" : " ")))
+        .join("");
+      html += `<p>${joined}</p>`;
       paragraphLines = [];
     }
   }
@@ -116,12 +156,21 @@ function renderBlocks(text) {
     }
   }
 
-  for (const line of lines) {
+  // Indexed rather than for-of: a table is recognised by the row *after* the
+  // header, so this needs to look ahead and then skip what it consumed.
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
     const heading = line.match(/^(#{1,3})\s+(.*)$/);
     const ul = line.match(/^[-*]\s+(.*)$/);
     const ol = line.match(/^\d+\.\s+(.*)$/);
 
-    if (CODE_LINE_RE.test(line)) {
+    if (isTableStart(lines, i)) {
+      flushParagraph();
+      closeList();
+      const table = renderTable(lines, i);
+      html += table.html;
+      i = table.end;
+    } else if (CODE_LINE_RE.test(line)) {
       flushParagraph();
       closeList();
       html += line;
@@ -149,9 +198,14 @@ function renderBlocks(text) {
     } else if (line.trim() === "") {
       flushParagraph();
       closeList();
+    } else if (listType && /^\s+\S/.test(line)) {
+      // An indented line under a list item continues it rather than starting
+      // a paragraph of its own. Without this every wrapped bullet breaks into
+      // an item plus a stray paragraph.
+      html = html.replace(/<\/li>$/, ` ${line.trim()}</li>`);
     } else {
       closeList();
-      paragraphLines.push(line);
+      paragraphLines.push({ text: line.replace(/\s+$/, ""), hardBreak: /\s{2,}$/.test(line) });
     }
   }
   flushParagraph();
@@ -176,6 +230,21 @@ export function renderMarkdown(raw) {
 
   text = text.replace(/\*\*([^\n*]+)\*\*/g, "<strong>$1</strong>");
   text = text.replace(/\*([^\n*]+)\*/g, "<em>$1</em>");
+
+  // Images, before links — `![a](b)` contains `[a](b)`. Nothing is loaded:
+  // a rendered document shows the alt text where a picture would be. Opening
+  // a file should not read other files, or fetch anything from whoever wrote
+  // it. An image is looked at by opening it, which is its own file tab.
+  text = text.replace(/!\[([^\]\n]*)\]\(([^)\s]+)\)/g, (_whole, alt) =>
+    alt ? `<span class="md-image-alt">${alt}</span>` : ""
+  );
+
+  // Links, on already-escaped text. Only schemes that are safe to hand to
+  // the OS become one: `javascript:` and `data:` stay the literal text they
+  // were, as does a relative path, which has nothing to open.
+  text = text.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (whole, label, url) =>
+    /^(https?:\/\/|mailto:)/i.test(url) ? `<a href="${escapeAttr(url)}">${label}</a>` : whole
+  );
 
   text = renderBlocks(text);
 

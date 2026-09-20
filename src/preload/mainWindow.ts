@@ -116,12 +116,22 @@ contextBridge.exposeInMainWorld("clanceApp", {
   // ---- git (see docs/design.md's "Changes pane") ----
   gitStatus: (dir: string) => ipcRenderer.invoke("git:status", dir),
   gitFileDiff: (dir: string, path: string) => ipcRenderer.invoke("git:file-diff", dir, path),
-  gitFileView: (dir: string, path: string) => ipcRenderer.invoke("git:file-view", dir, path),
+  openFileView: (dir: string, path: string) => ipcRenderer.invoke("file:open", dir, path),
+  openExternalUrl: (url: string) => ipcRenderer.invoke("shell:open-external", url),
   gitListFiles: (dir: string) => ipcRenderer.invoke("git:list-files", dir),
   gitLog: (dir: string, limit?: number) => ipcRenderer.invoke("git:log", dir, limit),
   gitBranches: (dir: string) => ipcRenderer.invoke("git:branches", dir),
   gitRemote: (dir: string) => ipcRenderer.invoke("git:remote", dir),
   gitOpenRemote: (dir: string) => ipcRenderer.invoke("git:open-remote", dir),
+
+  // ---- files explorer (see docs/design.md's "Files explorer") ----
+  filesListFolders: () => ipcRenderer.invoke("files:list-folders"),
+  filesGetLastFolder: () => ipcRenderer.invoke("files:get-last-folder"),
+  filesSetLastFolder: (dir: string) => ipcRenderer.invoke("files:set-last-folder", dir),
+  filesListDirectory: (root: string, path: string, showIgnored: boolean) =>
+    ipcRenderer.invoke("files:list-directory", root, path, showIgnored),
+  filesResolveFile: (root: string, path: string) => ipcRenderer.invoke("files:resolve-file", root, path),
+  filesFolderRepo: (root: string) => ipcRenderer.invoke("files:folder-repo", root),
   gitStage: (dir: string, paths: string[]) => ipcRenderer.invoke("git:stage", dir, paths),
   gitUnstage: (dir: string, paths: string[]) => ipcRenderer.invoke("git:unstage", dir, paths),
   gitDiscard: (dir: string, paths: string[]) => ipcRenderer.invoke("git:discard", dir, paths),

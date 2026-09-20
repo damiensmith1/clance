@@ -1,5 +1,6 @@
 import { html, useEffect, useLayoutEffect, useMemo, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
 import { highlightLine } from "../../shared/syntax.js";
+import { renderMarkdown, attachCopyHandler } from "../../shared/markdown.js";
 
 // A file tab: the whole file, with its changes in place, and a button that
 // turns the change marks off. Read-only — Clance never edits a file; the
@@ -27,28 +28,73 @@ function lineClass(kind, showDiff) {
   return "fileline";
 }
 
+/** Bytes as something a person reads, for a file no reader claimed. */
+function formatBytes(bytes) {
+  if (bytes === null || bytes === undefined) return null;
+  if (bytes < 1024) return `${bytes} bytes`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
 export function FileSection({ repoRoot, path }) {
   const [view, setView] = useState(null);
+  // Set when no reader claimed the file. Not an error — the fallback says
+  // what it can about it instead of apologising.
+  const [fallback, setFallback] = useState(null);
+  const [image, setImage] = useState(null);
   const [error, setError] = useState(null);
   const [showDiff, setShowDiff] = useState(true);
+  // Which of the reader's views is on screen. A file that has only one — most
+  // source files — never shows the choice.
+  const [rendered, setRendered] = useState(true);
   const [scrollTop, setScrollTop] = useState(0);
   const [height, setHeight] = useState(600);
   const bodyRef = useRef(null);
 
+  // One read, through whichever reader the main process picked for this file
+  // (git.ts's `openFileView`). The tab draws the payload it was handed rather
+  // than assuming every file is text with a diff.
   async function load() {
-    const next = await window.clanceApp.gitFileView(repoRoot, path);
+    const next = await window.clanceApp.openFileView(repoRoot, path);
     if (!next) {
-      setError("That file isn't in this repository any more.");
+      setError("That file isn't there any more.");
       setView(null);
+      setFallback(null);
+      setImage(null);
       return;
     }
     setError(null);
-    setView(next);
+    if (next.reader === "text") {
+      setFallback(null);
+      setImage(null);
+      setView(next.view);
+      return;
+    }
+    if (next.reader === "image") {
+      setFallback(null);
+      setView(null);
+      setImage(next);
+      return;
+    }
+    setView(null);
+    setImage(null);
+    setFallback(next);
   }
 
   useEffect(() => {
     setView(null);
+    setFallback(null);
+    setImage(null);
     setScrollTop(0);
+    // A new file gets its reader's own default view rather than whatever the
+    // last file was left on.
+    setRendered(true);
     load();
   }, [repoRoot, path]);
 
@@ -143,6 +189,23 @@ export function FileSection({ repoRoot, path }) {
   if (error) {
     return html`<div class="file-section"><div class="file-empty"><p>${error}</p></div></div>`;
   }
+  if (image) {
+    return html`<${ImageView} path=${path} image=${image} rendered=${rendered} setRendered=${setRendered} />`;
+  }
+  if (view && view.renders === "markdown" && rendered && !view.omitted) {
+    return html`<${MarkdownView} path=${path} view=${view} rendered=${rendered} setRendered=${setRendered} />`;
+  }
+  if (fallback) {
+    const size = formatBytes(fallback.bytes);
+    return html`
+      <div class="file-section">
+        <div class="file-empty">
+          <p>${fallback.reason}</p>
+          ${size && html`<p class="file-empty-detail">${size}</p>`}
+        </div>
+      </div>
+    `;
+  }
   if (!view) {
     return html`<div class="file-section"><div class="file-empty"><p>Reading ${path}…</p></div></div>`;
   }
@@ -178,6 +241,8 @@ export function FileSection({ repoRoot, path }) {
         setShowDiff=${setShowDiff}
         changeCount=${changeRows.length}
         jump=${jump}
+        rendered=${rendered}
+        setRendered=${setRendered}
       />
       <div class="file-body" ref=${bodyRef} onScroll=${(e) => setScrollTop(e.currentTarget.scrollTop)}>
         <div class="file-lines" style=${`height:${lines.length * ROW_HEIGHT}px`}>
@@ -213,7 +278,115 @@ export function FileSection({ repoRoot, path }) {
   `;
 }
 
-function FileHeader({ path, view, counts, showDiff, setShowDiff, changeCount, jump }) {
+/**
+ * The choice between a reader's two views. A value choice, not an action, so
+ * it's a segmented pill like Diff / Clean rather than a button. It appears
+ * only when there is something to choose between: a .md has a rendered form
+ * and a source, an SVG has a picture and a source, a .ts has only itself.
+ */
+function ViewToggle({ rendered, setRendered, renderedLabel = "Rendered" }) {
+  return html`
+    <span class="segmented" role="tablist">
+      <button
+        class="segmented-item ${rendered ? "segmented-item-active" : ""}"
+        role="tab"
+        aria-selected=${rendered}
+        onClick=${() => setRendered(true)}
+      >
+        ${renderedLabel}
+      </button>
+      <button
+        class="segmented-item ${!rendered ? "segmented-item-active" : ""}"
+        role="tab"
+        aria-selected=${!rendered}
+        onClick=${() => setRendered(false)}
+      >
+        Raw
+      </button>
+    </span>
+  `;
+}
+
+/**
+ * An image. Drawn through an `<img>` with a data URL rather than by putting
+ * the file's own markup on the page: an SVG loaded as an image can't run the
+ * script SVG is allowed to carry, and Files browses any folder on the machine.
+ * Only a format with a text source worth reading offers Raw.
+ */
+function ImageView({ path, image, rendered, setRendered }) {
+  const hasSource = image.source !== null;
+  return html`
+    <div class="file-section">
+      <header class="file-head">
+        <span class="file-path" title=${path}>${path}</span>
+        <span class="file-image-size">${formatBytes(image.bytes)}</span>
+        <span class="file-head-spacer"></span>
+        ${hasSource && html`<${ViewToggle} rendered=${rendered} setRendered=${setRendered} renderedLabel="Image" />`}
+      </header>
+      ${rendered || !hasSource
+        ? html`<div class="file-image-body"><img class="file-image" src=${image.dataUrl} alt=${path} /></div>`
+        : html`<div class="file-body"><pre class="file-source">${image.source}</pre></div>`}
+    </div>
+  `;
+}
+
+/**
+ * A rendered .md. `renderMarkdown` escapes every character of the file before
+ * it introduces a tag of its own, so a document holding `<script>` renders
+ * those characters instead of running them, and only http/https/mailto links
+ * become links at all. The main process re-parses the URL before opening it.
+ */
+function MarkdownView({ path, view, rendered, setRendered }) {
+  const bodyRef = useRef(null);
+  const source = useMemo(
+    () =>
+      (view.lines ?? [])
+        .filter((line) => line.kind !== "del" && line.kind !== "hunk")
+        .map((line) => line.text)
+        .join("\n"),
+    [view]
+  );
+  const rendering = useMemo(() => renderMarkdown(source), [source]);
+
+  useEffect(() => {
+    const element = bodyRef.current;
+    if (!element) return;
+    attachCopyHandler(element);
+  }, []);
+
+  // A link in a file is a link to somewhere else, not a way to navigate this
+  // window. It goes to the browser, and the main process decides whether the
+  // scheme is one worth opening at all.
+  function onClick(event) {
+    const link = event.target.closest("a[href]");
+    if (!link) return;
+    event.preventDefault();
+    window.clanceApp.openExternalUrl(link.getAttribute("href"));
+  }
+
+  return html`
+    <div class="file-section">
+      <header class="file-head">
+        <span class="file-path" title=${path}>${path}</span>
+        ${view.changed
+          ? html`<span class="file-counts"><span class="change-ins">changed</span></span>`
+          : html`<span class="file-unchanged">unchanged</span>`}
+        <span class="file-head-spacer"></span>
+        <${ViewToggle} rendered=${rendered} setRendered=${setRendered} />
+      </header>
+      <div class="file-body">
+        <div
+          class="file-markdown"
+          ref=${bodyRef}
+          onClick=${onClick}
+          dangerouslySetInnerHTML=${{ __html: rendering }}
+        ></div>
+      </div>
+    </div>
+  `;
+}
+
+function FileHeader({ path, view, counts, showDiff, setShowDiff, changeCount, jump, rendered, setRendered }) {
   return html`
     <header class="file-head">
       <span class="file-path" title=${path}>${path}</span>
@@ -226,6 +399,7 @@ function FileHeader({ path, view, counts, showDiff, setShowDiff, changeCount, ju
           `
         : html`<span class="file-unchanged">unchanged</span>`}
       <span class="file-head-spacer"></span>
+      ${view.renders && html`<${ViewToggle} rendered=${rendered} setRendered=${setRendered} />`}
       ${view.changed &&
       changeCount > 0 &&
       showDiff &&

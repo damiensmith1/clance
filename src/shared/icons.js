@@ -182,6 +182,16 @@ export const Icon = {
         <path d="M14 3v5h5" />`
     ),
 
+  folder: (size = 16) =>
+    svg(size, html`<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />`),
+
+  folderOpen: (size = 16) =>
+    svg(
+      size,
+      html`<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H3z" />
+        <path d="M3 10h18l-2 8a2 2 0 0 1-2 1.5H5A2 2 0 0 1 3 18z" />`
+    ),
+
   check: (size = 16) => svg(size, html`<path d="M5 12.5l4.5 4.5L19 7" />`),
 
   arrowUp: (size = 16) => svg(size, html`<path d="M12 19V5M5 12l7-7 7 7" />`),

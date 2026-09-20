@@ -21,8 +21,7 @@ import {
   getDefaultDirectory,
   addRecentDirectory,
   setLastGitRepo,
-  DEFAULT_VOCABULARY,
-} from "./config";
+  DEFAULT_VOCABULARY, setLastFolder } from "./config";
 import { pickDirectory } from "./directoryPicker";
 import { connectClaude, disconnectClaude, openInstallDocs } from "./claudeAuth";
 import {
@@ -62,8 +61,8 @@ import { copyDroppedFile } from "./dropFiles";
 import {
   getStatus as getGitStatus,
   getFileDiff,
-  getFileView,
   listFiles,
+  openFileView,
   listCommits,
   listBranches,
   getRemote,
@@ -78,6 +77,7 @@ import {
   listRepos,
   watchRepo,
 } from "./git";
+import { listFolders, resolveFolder, listDirectory, resolveFile, folderRepo } from "./files";
 import { readWindowLayout, writeWindowLayout } from "./windowLayout";
 import { getHud } from "./dictationWindow";
 import {
@@ -474,7 +474,6 @@ ipcMain.handle("git:status", (_event, dir: unknown) => getGitStatus(dir));
 
 ipcMain.handle("git:file-diff", (_event, dir: unknown, path: unknown) => getFileDiff(dir, path));
 
-ipcMain.handle("git:file-view", (_event, dir: unknown, path: unknown) => getFileView(dir, path));
 
 ipcMain.handle("git:list-files", (_event, dir: unknown) => listFiles(dir));
 
@@ -532,6 +531,59 @@ ipcMain.handle("git:set-last-repo", async (_event, dir: unknown) => {
   const root = await findRepoRoot(dir);
   if (root) setLastGitRepo(root);
   return root;
+});
+
+// ---- files explorer --------------------------------------------------------
+// The same candidate folders the repo switcher offers, without the repository
+// test: Files browses anything, which is the point of it.
+ipcMain.handle("files:list-folders", async () => {
+  const config = readConfig();
+  const agents = await listAgents({ all: true }).catch(() => []);
+  return listFolders([
+    getDefaultDirectory(),
+    ...config.recentDirectories,
+    ...agents.map((agent) => agent.cwd).filter((cwd): cwd is string => typeof cwd === "string"),
+  ]);
+});
+
+// Resolved rather than trusted, so a folder since moved or deleted falls back
+// to the switcher's first choice instead of an empty tree.
+ipcMain.handle("files:get-last-folder", () => resolveFolder(readConfig().lastFolder));
+
+ipcMain.handle("files:set-last-folder", (_event, dir: unknown) => {
+  const root = resolveFolder(dir);
+  if (root) setLastFolder(root);
+  return root;
+});
+
+ipcMain.handle("files:list-directory", (_event, root: unknown, path: unknown, showIgnored: unknown) =>
+  listDirectory(root, path, showIgnored)
+);
+
+ipcMain.handle("files:resolve-file", (_event, root: unknown, path: unknown) => resolveFile(root, path));
+
+ipcMain.handle("files:folder-repo", (_event, root: unknown) => folderRepo(root));
+
+// A file tab's one read. The reader is picked here, beside the containment
+// check and the size limit, so a path is checked in one place rather than
+// once per reader.
+ipcMain.handle("file:open", (_event, dir: unknown, path: unknown) => openFileView(dir, path));
+
+// A link clicked in a rendered markdown file. The URL arrives from a file
+// that may have been cloned a minute ago, so it is parsed and rebuilt here
+// rather than handed to the OS as it came — the same care git:open-remote
+// takes, for the same reason. Only schemes worth opening are opened.
+ipcMain.handle("shell:open-external", async (_event, url: unknown) => {
+  if (typeof url !== "string" || url.length > 2048) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (!["http:", "https:", "mailto:"].includes(parsed.protocol)) return false;
+  await shell.openExternal(parsed.toString());
+  return true;
 });
 
 // One subscription per (window, repo). Keyed by the sender's id so a reload —

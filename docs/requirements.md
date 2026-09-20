@@ -197,9 +197,9 @@ Sessions Clance starts get these tools when Accessibility is granted:
 
 ## Files
 
-- Any file in the current repository can be opened as a tab and read — Clance
-  is a read-only viewer over the code a session is writing. It never edits a
-  file.
+- Any file in the current repository, or in the folder the Files explorer is
+  pointed at, can be opened as a tab and read — Clance is a read-only viewer
+  over the code a session is writing. It never edits a file.
 - ⌘P opens a file by name from anywhere in the main window, matching on any
   subsequence of its path, over every tracked file and every untracked one git
   isn't ignoring.
@@ -214,18 +214,79 @@ Sessions Clance starts get these tools when Accessibility is granted:
   what's shown.
 - One tab per file — opening the same file again focuses the tab that's
   already there. Files open beside the Changes pane rather than over it.
-- A file too large to show, or a binary one, says so rather than trying.
+- A file is drawn by a **reader** chosen from its path: text with syntax
+  highlighting, images, or markdown. A table over a CSV or a JSON tree would
+  each be another. A reader returns its own payload, so a file view is not a
+  list of lines with a diff on it, and whether a file has a Diff / Clean
+  choice at all is something its reader says.
+- An image opens in a tab of its own and is shown at its size, fit to the
+  pane, with its file size in the header. A transparent one reads as
+  transparent rather than as whatever colour the page happens to be.
+- A markdown file opens rendered, with a **Rendered / Raw** choice. Raw is
+  the source with its changes marked in place, so a changed document can
+  still be read as a diff. A file whose reader has only one view never shows
+  the choice — an SVG offers Image / Raw, a PNG offers nothing, a `.ts` is
+  only itself.
+- Nothing is loaded to render a document. A picture referenced inside a
+  markdown file shows as its alt text; opening a file never reads other
+  files, and never fetches anything from whoever wrote it. An image is looked
+  at by opening it, which is its own tab.
+- A link in a rendered document opens in the browser, and only if it is
+  http, https or mailto. The URL is re-parsed before it is opened rather than
+  handed over as it was written.
+- A file no reader claims says what it can about itself — its name, its size —
+  rather than apologising. So does one larger than its reader will open.
+- A reader never executes what it reads. File content is drawn, never turned
+  into markup, because a folder being browsed may have been cloned a minute
+  ago and SVG and HTML both carry script.
+- Readers are added in the codebase. Clance loads nothing from a user's disk
+  to render a file, and this isn't a plugin surface.
 - A file tab open when the branch changes under it follows the branch. If the
   file doesn't exist on the new branch it says so, which is different from
   saying the file is gone — a file git has never heard of says that instead.
+
+## Files explorer
+
+- A **Files** section browses any folder on the Mac, not only a git
+  repository — a scratch directory, a folder of notes, a repository that
+  isn't the one Changes is pointed at. ⌘P needs a filename already; looking
+  around a project is a different act from recalling a file in it.
+- One folder at a time, from a switcher offering the same places the Changes
+  switcher does: the default session directory, recently used directories,
+  wherever running agents are working, and any other folder. It reopens on
+  the folder it was last pointed at, independently of the Changes repository.
+- Directories expand and collapse, one level read at a time. Which are open
+  is remembered per folder for as long as the app is running.
+- Files git is ignoring are hidden, with a toggle to show them — the same set
+  ⌘P searches, so the two can't disagree about what is in the project.
+  Outside a repository nothing is ignored and the toggle is absent. Dotfiles
+  are always shown.
+- When git can't say what a repository ignores, the tree lists everything and
+  says so. Silently showing node_modules looks exactly like a project that
+  ignores nothing.
+- Clicking a file opens it as a file tab beside the sidecar. A file inside a
+  repository opens against that repository, so it arrives with its changes
+  marked in place and is the same tab the Changes pane would have opened.
+- Arrows move through the tree, → opens a directory and ← closes it or moves
+  to the parent, ↩ opens the selected file.
+- Symbolic links are listed and never followed. A file outside the chosen
+  folder is never readable through Files, including through a link inside it:
+  paths are resolved before they are checked, because a link pointing at
+  `~/.ssh/id_rsa` passes every test made on a path as text.
+- Files never writes. Moving, renaming or creating a file is a capability the
+  model may be given later, and it would arrive as a local MCP tool gated by
+  Claude Code's own approval prompt — not as a button in the tree.
 
 ## Main window
 
 - Opens from the Dock icon or the menu-bar menu. While setup is incomplete it
   opens on launch.
-- A launcher opens Sessions, Changes, Dictation, Settings, or a
-  plain shell terminal. Changes opens in a pane of its own on the right when
-  the window can take one; files open as tabs beside it. Sections open as tabs; reopening one focuses it.
+- A launcher opens Sessions, Changes, Files, Dictation, Settings, or a
+  plain shell terminal. Changes and Files are sidecars: they open in a pane
+  of its own on the right when the window can take one, and files open as
+  tabs beside it. The second sidecar to open joins the first's pane as a tab
+  rather than taking another quarter of the window. Sections open as tabs;
+  reopening one focuses it.
 - Tabs can be split into up to four panes by dragging to an edge (at most a
   2×2 grid), resized by dragging dividers, and reordered. The layout is
   restored on launch.
@@ -336,8 +397,12 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - A full git client: history and graph views, branching, merging, rebasing,
   stashing, conflict resolution or anything that rewrites history.
 - Editing files. Clance reads code; the session writes it.
-- A file tree, cross-file search, or anything else an editor does beyond
-  opening a file by name and reading it.
+- Cross-file search. The Files explorer reaches a file you can see; search
+  is a second navigation model with its own ranking and result UI, and a tree
+  doesn't imply one.
+- Anything else an editor does beyond opening a file and reading it: editing,
+  creating, renaming, moving or deleting, a preview that isn't a file tab,
+  drag and drop between folders, or more than one folder open at once.
 - A plugin marketplace or installer.
 - Self-updating.
 - For dictation: speaking responses aloud, non-English-first transcription,

@@ -973,6 +973,63 @@ full paths inside pushed it past the pane's right edge, where it was clipped —
 and it closes on a click outside or Escape, since a menu that only closes by
 pressing the thing that opened it is a trap.
 
+### Files explorer
+
+`sections/FilesSection.js` over `src/main/files.ts`. A sidecar like Changes,
+and read-only like it, but pointed at a *folder* rather than a repository:
+⌘P is a recall tool that needs a filename already, and looking around a
+project is a different act from remembering a file in it.
+
+**Why it isn't part of the Changes pane.** It was going to be, swapped with
+the recent-commits strip. That strip is sized to whatever height the file
+list doesn't want and never scrolls, which works because commits there are
+status rather than content — showing three instead of eight loses nothing. A
+tree has real content height and must scroll, and at "whatever's left over"
+it gets two rows on a dirty repo. A pane of its own costs a launcher entry
+and gains a layout that doesn't fight itself.
+
+**Sidecars.** `SIDECARS` in `Shell.js` is the set of sections that open
+beside the work instead of over it, and `openSection` treats them alike: a
+quarter of the window (`SIDECAR_PANE_PCT`), only when there's a pane to split
+from and the window isn't at `MAX_PANES`, and only on the split that created
+it, so a width the user has dragged survives. The second sidecar to open
+joins the first's pane as a tab rather than taking another quarter — both are
+read alongside the work, and two quarter-width columns leave half a window to
+work in. `paneForFileTabs` asks the same question, so a file opened from
+either one lands beside both.
+
+**Containment.** Inside a repository `ls-files` is what keeps a file tab in
+the tree: git will not name a path outside it, so escaping is structurally
+impossible. A chosen folder has no such authority, so `files.ts` checks
+every path itself — and checks it *after* `realpathSync`, not before. A
+symbolic link sitting inside the folder and pointing at `~/.ssh/id_rsa`
+passes every test that can be made on a path as text. Links are listed and
+never walked into, which also stops a link pointing at its own ancestor from
+becoming an infinite tree.
+
+**Listing.** One directory per call, never a walk: a folder nobody has
+expanded costs nothing. Inside a repository the entries go through
+`checkIgnore`, which is `git check-ignore -z --stdin` — `-z` is what keeps a
+newline inside a filename from splitting one path into two, and git only
+accepts it with `--stdin`, so this is the one git call here that needs a
+child's stdin and the one that spawns rather than `execFile`s. It returns
+null rather than an empty set when git fails, because "git could not tell"
+and "nothing is ignored" are indistinguishable to a caller that can't tell
+them apart, and the second one quietly puts `node_modules` on screen. The
+tree then lists everything and says why.
+
+**Opening a file.** `resolveFile` returns the `(root, path)` a file tab opens
+with, and a file inside a repository resolves against the *repository* rather
+than the chosen folder. So a file reached from Files and the same file
+reached from Changes are one tab rather than two, and it arrives with its
+changes marked in place whichever side it came from.
+
+**Truncation.** A row shows a basename and truncates at the end. Truncating
+at the start reads better for a long name and is one line of CSS
+(`direction: rtl`), but it hands the line to the bidi algorithm, and a
+leading dot is a neutral character: `.gitignore` renders as `gitignore.`.
+Dotfiles are the one thing a file tree must not misspell.
+
 ### File tabs
 
 `sections/FileSection.js`. Clance is a read-only viewer over the code its
@@ -981,6 +1038,56 @@ reading the code around it, which a diff alone can't give. So a file opens as
 an ordinary tab — draggable into a split, one per file, keyed
 `file:<root>:<path>` so opening the same file twice focuses the tab that is
 already there.
+
+**Readers.** A tab draws whatever `openFileView` hands it, not a file it
+assumes is text. There are three: text with syntax highlighting and diff
+marks, images, and markdown. The envelope is a union, so a table over a CSV
+or a JSON tree is a new arm of it rather than a rework of file tabs. The
+shape had to change before the second reader could exist at all: a file view
+was a list of `DiffLine`s with a binary flag and a 20,000-line ceiling, none
+of which an image has an answer for.
+
+Markdown is the cheap case and shows why the split is where it is. It isn't
+a separate payload — it is the text reader with `renders: "markdown"` set, so
+Raw keeps the diff marks and Rendered is a second view over the same read,
+the way Diff / Clean already was. `shared/markdown.js`, written for the old
+chat UI and dead ever since, does the rendering: it escapes every character
+before it introduces a tag, which is exactly the property a reader needs when
+the document may have been cloned a minute ago. Reviving it needed three
+fixes, all from its old caller being chat rather than documents — a
+hard-wrapped paragraph now flows instead of breaking at every newline, an
+indented line under a bullet continues that bullet instead of becoming a
+stray paragraph, and links exist (http, https and mailto only; anything else
+stays the text it was, and the main process re-parses the URL before opening
+it).
+
+Nothing is fetched or read to render a document: a picture referenced inside
+a markdown file renders as its alt text. Resolving those references would
+mean one file's contents deciding what other files get read, and a remote one
+would mean opening a document quietly calls out to whoever wrote it. An image
+is looked at by opening it, which is its own tab.
+
+The image reader reads bytes and hands over a `data:` URL, drawn by an
+`<img>`. That is the safe way round: an SVG loaded as an image cannot run the
+script SVG is allowed to carry, where the same bytes inlined as markup can.
+SVG is also the one image format with a source worth reading, so it is the
+one that offers Raw — the toggle appears when a reader has two views, not on
+a schedule.
+
+Three things follow. *Diff is a capability, not a universal*: the change
+count, the jump controls and the Diff / Clean choice hang off `view.changed`,
+which is false for every file outside a repository, so the toggle is absent
+there for the same reason it would be absent on a photograph rather than as a
+special case. *Limits belong to a reader*: 16 MB and 20,000 lines are right
+for text and wrong for a 20 MB photograph. And *"binary" stops being a
+verdict* — it is now just a file no reader claimed, and the fallback says its
+name and size instead of the words "Binary file".
+
+The reader is picked in the main process, next to the containment check and
+the size limit, so a path is checked in one place rather than once per
+reader. A reader never executes what it reads: content is drawn, never turned
+into markup. SVG and HTML are the two formats that look like the easiest win
+and both carry script, and Files browses any folder on the machine.
 
 **One payload, two views.** The Diff / Clean segmented control picks between
 them. `getFileView` runs `diff -U<20000>`, a context
@@ -1495,8 +1602,16 @@ on errors.
   inside a `.tsx` file. It fails by leaving a word uncoloured, which is the
   right failure, but if it starts looking wrong on real files the answer is a
   vendored highlighter rather than more special cases.
-- **No file tree or cross-file search.** ⌘P is the only way to reach a file
-  that isn't in the Changes list. Whether that's enough isn't known yet.
+- **No cross-file search.** The Files explorer answers the tree half of this;
+  search is still out of scope, and a tree doesn't imply one. Whether ⌘P plus
+  a tree is enough to never want grep isn't known yet.
+- **Expanded directories don't survive a relaunch.** `FilesSection.js` keeps
+  them in a module-level cache, so closing the tab and reopening it lands
+  where it was left, but quitting forgets. Persisting them means a new store
+  or a new shape in `config.json`, and it isn't clear the tree is worth one.
+- **Large directories aren't costed.** A folder with ten thousand entries in
+  one level renders ten thousand rows; the tree doesn't virtualise. Changes
+  has the same shape and hasn't needed it.
 - **Sending a diff back into a session.** The Changes pane knows the repo and
   the file; the pane next to it may hold a session working in that same
   directory. Handing a selected file or hunk to that session as context is
@@ -1511,5 +1626,6 @@ on errors.
   each session's `gitBranch`; a count of uncommitted files per project would
   be the same data the Changes pane reads, but polling it for every row in
   the list has not been costed.
-- **Dead code.** `src/shared/markdown.js` and the `chatHistory:get-session`
-  handler are left over from the old chat UI and have no callers.
+- **Dead code.** The `chatHistory:get-session` handler is left over from the
+  old chat UI and has no callers. (`src/shared/markdown.js` was too, until a
+  markdown file tab started rendering with it.)

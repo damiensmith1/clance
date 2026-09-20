@@ -31,10 +31,11 @@ the text at your cursor.
   `claude --resume` in a terminal.
 - **Read the code your sessions write.** A Changes pane shows what has moved
   in a git repository and updates as files change on disk, so a session
-  working in it is watched rather than checked on. Open any file as a tab to
-  read it whole, syntax highlighted, with its changes marked in place, then
-  stage, commit and push from the same pane. Clance never edits a file — the
-  session does that.
+  working in it is watched rather than checked on. A Files explorer browses
+  any folder on your Mac, repository or not. Open any file as a tab to read
+  it whole, syntax highlighted, with its changes marked in place, then stage,
+  commit and push from the same pane. Clance never edits a file — the session
+  does that.
 - **On-device dictation.** Works in any app, powered by
   [whisper.cpp](https://github.com/ggml-org/whisper.cpp). Clance recommends a
   speech model for your Mac, and keeps a searchable history of everything
@@ -103,8 +104,9 @@ session still running, or **Close** it. Drop a file onto any terminal to
 paste its path.
 
 Open the main window from the Dock icon or the menu-bar icon. It opens
-Sessions, Changes, Dictation and Settings as tabs, which you can split into
-panes by dragging one to an edge.
+Sessions, Changes, Files, Dictation and Settings as tabs, which you can split
+into panes by dragging one to an edge. Changes and Files open in a pane
+beside your work rather than over it.
 
 | Shortcut | Action |
 |---|---|
