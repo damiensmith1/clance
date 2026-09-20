@@ -63,6 +63,15 @@ function findSplitContainingTab(node, tabId) {
 // sidecar all want every pixel.
 const FLUSH_TAB_TYPES = new Set(["terminal", "file", "changes", "files"]);
 
+// Below this much room per tab, a label can only be shown as a few clipped
+// letters, which says less than the icon does on its own. Measured against
+// the row and the tab count rather than the rendered tabs: deciding from
+// content width would feed the result back into what is being measured.
+const TAB_LABEL_MIN_PX = 92;
+// How long a tab has to be hovered before it says its full name. Long enough
+// that moving across the row doesn't trail tooltips behind it.
+const TAB_TOOLTIP_DELAY_MS = 2000;
+
 const EDGES = ["top", "right", "bottom", "left"];
 const MIN_PANE_PCT = 15;
 const PREVIEW_FRACTION = 0.32;
@@ -136,6 +145,18 @@ function isUnnamedSessionTab(tab) {
 // tab, so a layout persisted before a section was renamed shows the new name.
 function tabLabel(tab) {
   return LAUNCHER_ITEMS.find((item) => item.id === tab.type)?.label ?? tab.label;
+}
+
+// What a tab calls itself in full, for the hover tooltip and for when the
+// pane is too narrow to show a label at all. A file tab gives its whole
+// path — the label is only a basename, and two tabs called `index.ts` are
+// otherwise indistinguishable.
+function tabTitle(tab) {
+  if (tab.type === "file") {
+    const full = tab.repoRoot ? `${tab.repoRoot}/${tab.path}` : tab.path;
+    return full.replace(/^\/Users\/[^/]+/, "~");
+  }
+  return tabLabel(tab);
 }
 
 // An attached session is live by definition (the tab is an `attach` client
@@ -380,6 +401,45 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
     : [];
   const showLauncher = node.id === launcher.topRightPaneId;
   const tabListRef = useRef(null);
+  // Labels come off when there isn't room for them, rather than being cut
+  // to two letters and an ellipsis.
+  const [compact, setCompact] = useState(false);
+  // { text, x, y } once a tab has been hovered long enough to earn it.
+  const [tip, setTip] = useState(null);
+  const tipTimer = useRef(null);
+
+  useEffect(() => {
+    const element = tabListRef.current;
+    if (!element) return;
+    const measure = () => setCompact(element.clientWidth / Math.max(node.tabs.length, 1) < TAB_LABEL_MIN_PX);
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    measure();
+    return () => observer.disconnect();
+  }, [node.tabs.length]);
+
+  function hideTip() {
+    clearTimeout(tipTimer.current);
+    setTip(null);
+  }
+
+  function armTip(event, tab) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    clearTimeout(tipTimer.current);
+    tipTimer.current = setTimeout(
+      () =>
+        setTip({
+          text: tabTitle(tab),
+          // Kept off the right edge of the window; the tooltip is fixed, so
+          // these are viewport coordinates.
+          x: Math.max(8, Math.min(rect.left, window.innerWidth - 328)),
+          y: rect.bottom + 4,
+        }),
+      TAB_TOOLTIP_DELAY_MS
+    );
+  }
+
+  useEffect(() => () => clearTimeout(tipTimer.current), []);
 
   // The tab row has no scrollbar (see .tab-list in index.html), so keep the
   // active tab in view and let a mouse wheel scroll it sideways.
@@ -409,8 +469,13 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
             (tab, i) => html`
               <button
                 key=${tab.id}
-                class="tab ${tab.id === node.activeTabId ? "tab-active" : ""}"
-                onPointerDown=${(e) => startDrag(e, tab, node.id)}
+                class="tab ${tab.id === node.activeTabId ? "tab-active" : ""} ${compact ? "tab-compact" : ""}"
+                onPointerDown=${(e) => {
+                  hideTip();
+                  startDrag(e, tab, node.id);
+                }}
+                onMouseEnter=${(e) => armTip(e, tab)}
+                onMouseLeave=${hideTip}
               >
                 <span class="tab-icon">${tabIcon(tab)}</span>
                 <span class="tab-label">${tabLabel(tab)}</span>
@@ -434,6 +499,8 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
             `
           )}
         </div>
+        ${tip &&
+        html`<div class="tab-tip" style=${`left:${tip.x}px; top:${tip.y}px`}>${tip.text}</div>`}
         ${showLauncher &&
         html`
           <div class="launcher-cluster">

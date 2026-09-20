@@ -296,6 +296,10 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - Terminal tabs survive tab switches and window reloads. A session tab shows
   a live dot and a status line with its folder and start time, and can be
   popped out into the widget.
+- A tab too narrow to show its name shows only its icon, rather than a
+  clipped word. Hovering any tab for two seconds gives its full name — for a
+  file tab, its whole path, since the label is only a basename and two tabs
+  called `index.ts` are otherwise the same tab twice.
 - Tabs are driven from the keyboard the way they are in any macOS app: ⌘W
   closes the active tab (and the window once its last tab goes), ⇧⌘W closes
   the window, and ⌃⇥ / ⇧⌃⇥ move between the tabs of the pane in focus. The

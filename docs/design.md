@@ -773,6 +773,36 @@ which `Shell.js` applies to the pane that has focus.
   widget's own window is never destroyed — its live session and xterm state
   are what make the next hotkey press instant. Tab commands elsewhere no-op.
 
+### Tab labels and names
+
+A pane can be a quarter of the window, which is not enough for a tab to say
+"Changes" — it says "Cha". `PaneLeaf` drops the labels instead, leaving the
+icons, and the full name moves to a tooltip after two seconds.
+
+The decision is made from the tab row's own width divided by the number of
+tabs, never from how wide the rendered tabs turned out to be. A
+`ResizeObserver` that measured its own content would feed the result back
+into what it was measuring, which is the same trap the Changes history strip
+had to avoid. The row's width already excludes the launcher cluster, so the
+number being divided is the room tabs actually have.
+
+The label is hidden in CSS rather than left unrendered, so the measurement
+doesn't change when the answer does. The close ✕ keeps its reserved space
+(`visibility`, not `display`), so a tab doesn't change width under the
+pointer.
+
+The tooltip is `position: fixed`: the tab row scrolls and clips its own
+overflow, so anything inside it would be cut off. Nothing between a pane and
+the window has a transform, which would otherwise make `fixed` position
+against that ancestor instead of the viewport. It is clamped off the right
+edge of the window, and its timer is cleared on leave and on pointer-down, so
+skimming across a row leaves no trail of tooltips behind it and starting a
+drag doesn't strand one.
+
+A file tab's name is its whole path, home-shortened. Its label is a basename,
+and a window holding two files called `index.ts` otherwise shows the same tab
+twice.
+
 ### Panes
 
 `state/layoutStore.js` is a small hand-rolled store (state, subscribe,

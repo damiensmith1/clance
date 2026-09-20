@@ -162,6 +162,38 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      /* Too little room for a label: the icon says more than two letters and
+         an ellipsis would, and the full name is a hover away. The close ✕
+         keeps its reserved space (visibility, not display), so a tab doesn't
+         change width under the pointer. */
+      .tab-compact {
+        max-width: none;
+        padding: 0 var(--space-2);
+      }
+      .tab-compact .tab-label {
+        display: none;
+      }
+      /* Fixed, so the tab row's own overflow can't clip it. Nothing between
+         here and the window has a transform, which would make `fixed`
+         position against that ancestor instead of the viewport. */
+      .tab-tip {
+        position: fixed;
+        z-index: 60;
+        max-width: 320px;
+        padding: var(--space-1) var(--space-2);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-sm);
+        background: var(--surface-card);
+        box-shadow: var(--shadow-menu);
+        color: var(--text-primary);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        line-height: 1.5;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        pointer-events: none;
+      }
       .tab-close {
         display: flex;
         visibility: hidden;
