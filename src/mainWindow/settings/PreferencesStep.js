@@ -66,3 +66,52 @@ export function DefaultDirectoryRow({ prefs, setPrefs }) {
     </div>
   `;
 }
+
+// The assistant's decision service, and the only setting on this page that
+// changes what leaves the Mac.
+//
+// Off doesn't mean broken: ⌥A still works, on the commands Clance can match
+// locally, and hands everything else to a Claude Code session. What's said
+// here is what's actually sent — the command, the app's name and window
+// title, and the list of things that could be done. Never a document, a
+// field's contents, or anything dictated.
+export function AssistantDeciderRow({ prefs, setPrefs }) {
+  const assistant = prefs && prefs.assistant;
+
+  function handleChange(enabled) {
+    const decider = enabled ? "jev" : "local";
+    setPrefs({ ...prefs, assistant: { ...assistant, decider } });
+    window.clanceApp.setAssistantDecider(decider);
+  }
+
+  // On, but not actually running: no key is configured, so the assistant is
+  // quietly on local matching. Said out loud here, because the toggle alone
+  // would claim otherwise and the difference is the whole feature.
+  const askedForJev = assistant && assistant.decider === "jev";
+  const usingJev = assistant && assistant.active === "Jev";
+
+  return html`
+    <div class="preference-row">
+      <div>
+        <div class="preference-title">Understand commands with Jev</div>
+        <div class="preference-description">
+          Sends what you said, the app you're in and what it can do to TypeSafe AI. Never your
+          documents, what's in a field, or anything you dictate. Off, Clance matches commands on
+          this Mac and hands the rest to Claude.
+          ${askedForJev && !usingJev
+            ? html`<strong>
+                ${" "}No API key, so commands are being matched on this Mac. Put
+                TYPESAFE_API_KEY in a .env file next to Clance and restart it.
+              </strong>`
+            : null}
+        </div>
+      </div>
+      ${assistant &&
+      html`<${Toggle}
+        checked=${assistant.decider === "jev"}
+        label="Understand commands with Jev"
+        onChange=${handleChange}
+      />`}
+    </div>
+  `;
+}

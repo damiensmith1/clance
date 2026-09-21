@@ -1,5 +1,10 @@
 import { html, useEffect, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
-import { LaunchAtLoginRow, DefaultDirectoryRow, usePreferences } from "../settings/PreferencesStep.js";
+import {
+  LaunchAtLoginRow,
+  DefaultDirectoryRow,
+  AssistantDeciderRow,
+  usePreferences,
+} from "../settings/PreferencesStep.js";
 import { ConnectClaudeStep } from "../setup/ConnectClaudeStep.js";
 import { PermissionsStep } from "../setup/PermissionsStep.js";
 import { ShortcutsStep } from "../setup/ShortcutsStep.js";
@@ -236,6 +241,11 @@ export function SettingsSection() {
       <section class="extension-group">
         <h2 class="group-title">dictation</h2>
         <${DictationStep} onReady=${ready("dictation")} />
+      </section>
+
+      <section class="extension-group">
+        <h2 class="group-title">assistant</h2>
+        <${AssistantDeciderRow} prefs=${prefs} setPrefs=${setPrefs} />
       </section>
 
       <footer class="settings-footer">

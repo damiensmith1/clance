@@ -25,9 +25,34 @@ export const SAMPLE_RATE = 16000;
 
 export type DictationState = "idle" | "recording" | "transcribing";
 
+/**
+ * Who the transcript is for.
+ *
+ * "insert" is ⌥D: the words are the point, and they're typed into whatever
+ * the user was in. "assistant" is ⌥A: the words are a command, and they go
+ * to assistant/session.ts to be decided on instead of being pasted
+ * anywhere. Same microphone, same on-device whisper, same HUD — the only
+ * thing that differs is where the text lands, which is why this is a flag
+ * rather than a second recorder.
+ */
+export type DictationPurpose = "insert" | "assistant";
+
 type Listener = (transcript: Transcript) => void;
 
 let state: DictationState = "idle";
+let purpose: DictationPurpose = "insert";
+// Set by the assistant at startup; nothing else ever calls it.
+let assistantSink: ((text: string) => Promise<void>) | undefined;
+// Resolved when a dictateOnce() run finishes, however it finished.
+let dictationFinished: (() => void) | undefined;
+
+export function setAssistantSink(sink: (text: string) => Promise<void>): void {
+  assistantSink = sink;
+}
+
+export function getDictationPurpose(): DictationPurpose {
+  return purpose;
+}
 // Captured at recording start so history can say where a transcript went,
 // and so the HUD can show it. Read via readFrontmostTitle, never
 // captureFrontmostWindow — see the comment on that function.
@@ -144,7 +169,7 @@ export async function checkAvailability(): Promise<DictationAvailability> {
  * globalShortcut delivers no key-up event — genuine push-to-talk needs a
  * native key listener (see docs/design.md's open questions).
  */
-export async function toggleDictation(): Promise<void> {
+export async function toggleDictation(next: DictationPurpose = "insert"): Promise<void> {
   if (state === "recording") {
     await stopRecording();
     return;
@@ -169,7 +194,39 @@ export async function toggleDictation(): Promise<void> {
     return;
   }
 
+  purpose = next;
   await startRecording();
+}
+
+/**
+ * One dictation, awaited to the end.
+ *
+ * The assistant needs this: "dictate into the subject field" focuses the
+ * field and then hands over, and until the words have landed the assistant
+ * must not take the microphone back. Without it the assistant's own
+ * re-arm — which fires the moment the action it queued returns — would see
+ * a live recording and stop it, and the user would get no dictation at all.
+ *
+ * Resolves however the dictation ended: text inserted, nothing heard, or
+ * cancelled. It never rejects; a dictation that couldn't start resolves
+ * immediately, having already said why in the HUD.
+ */
+export async function dictateOnce(): Promise<void> {
+  if (state !== "idle") await cancelDictation();
+  // Armed before the start, not after: startRecording can reach an error
+  // path and settle straight back to idle, and a listener registered
+  // afterwards would then wait for something that already happened.
+  const finished = new Promise<void>((resolve) => {
+    dictationFinished = resolve;
+  });
+  await toggleDictation("insert");
+  if (state === "idle") {
+    // Never started — no model, no microphone, no permission. settleToIdle
+    // didn't run, so release the waiter here.
+    dictationFinished = undefined;
+    return;
+  }
+  await finished;
 }
 
 async function startRecording(): Promise<void> {
@@ -241,6 +298,13 @@ export async function cancelDictation(): Promise<void> {
 // can leave one of them dangling.
 function settleToIdle(): void {
   state = "idle";
+  purpose = "insert";
+  // The one place the state machine returns to idle is the one place that
+  // can honestly say a dictateOnce() is over — inserted, empty or
+  // cancelled alike. See dictateOnce.
+  const finished = dictationFinished;
+  dictationFinished = undefined;
+  finished?.();
   cancelEscapeHotkey?.();
   cancelEscapeHotkey = undefined;
   if (maxDurationTimer) clearTimeout(maxDurationTimer);
@@ -285,6 +349,11 @@ export async function handleAudio(samples: Float32Array): Promise<void> {
     if (state !== "transcribing") return;
 
     if (!text) {
+      if (purpose === "assistant") {
+        settleToIdle();
+        await assistantSink?.("");
+        return;
+      }
       sendToHud("dictation:empty");
       setTimeout(() => {
         if (state === "transcribing") {
@@ -292,6 +361,16 @@ export async function handleAudio(samples: Float32Array): Promise<void> {
           hideHud();
         }
       }, 1800);
+      return;
+    }
+
+    // A command, not content: hand it to the assistant and insert nothing.
+    // Deliberately not recorded in dictation history either — "open Mail"
+    // is not something the user dictated, and a history of commands is a
+    // log of what they did, which is a different feature.
+    if (purpose === "assistant") {
+      settleToIdle();
+      await assistantSink?.(text);
       return;
     }
 

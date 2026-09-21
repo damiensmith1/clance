@@ -4,6 +4,7 @@ import { join } from "path";
 export type TrayActions = {
   onTogglePopup: () => void;
   onDictate: () => void;
+  onAssist: () => void;
   onOpenMainWindow: () => void;
 };
 
@@ -58,6 +59,12 @@ function rebuildMenu(): void {
       accelerator: state.shortcuts.dictate ?? "Alt+D",
       registerAccelerator: false,
       click: actions.onDictate,
+    },
+    {
+      label: "Assistant",
+      accelerator: state.shortcuts.assist ?? "Alt+A",
+      registerAccelerator: false,
+      click: actions.onAssist,
     },
     { label: "Open Dashboard", click: actions.onOpenMainWindow },
     { type: "separator" },

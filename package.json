@@ -2,7 +2,7 @@
   "name": "clance",
   "version": "0.4.0",
   "license": "MIT",
-  "description": "Claude Code, one hotkey away, anywhere on your Mac \u2014 a screen-aware menu-bar app with on-device dictation",
+  "description": "Claude Code, one hotkey away, anywhere on your Mac — a screen-aware menu-bar app with on-device dictation",
   "main": "dist/main/index.js",
   "private": true,
   "scripts": {
@@ -44,6 +44,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@nut-tree-fork/nut-js": "^4.2.6",
+    "@typesafe-ai/sdk": "^0.6.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "node-pty": "^1.1.0",

@@ -1,5 +1,4 @@
 import { app } from "electron";
-import { checkPermissions } from "./permissions";
 import { createServer, type Server } from "http";
 import type { AddressInfo } from "net";
 import { randomBytes, timingSafeEqual } from "crypto";
@@ -9,19 +8,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
-import {
-  typeIntoCapturedWindow,
-  listOpenWindows,
-  clearFocusedField,
-  replaceFocusedField,
-  activateApp,
-  clickAtNormalized,
-  capturedAppInfo,
-  clickAtScreenPoint,
-  screenPointForNormalized,
-} from "./frontApp";
-import { captureActiveDisplay } from "./screenCapture";
-import * as ax from "./ax";
+import * as capabilities from "./capabilities";
 import { readConfig, writeConfig } from "./config";
 import { SESSION_CWD } from "./paths";
 
@@ -49,31 +36,6 @@ export const LOCAL_TOOLS: LocalToolInfo[] = [
   { name: "write_field", tier: "approval", description: "Write text into a field in another app." },
   { name: "activate_app", tier: "approval", description: "Bring a different app to the front." },
 ];
-
-// Roles click_element will press. Deliberately a list rather than "anything
-// with an AXPress action": a web page marks whole groups and rows pressable,
-// and clicking a container because its text happened to match is exactly the
-// wrong-thing-clicked this tool exists to avoid.
-// "an AXWebArea", not "a AXWebArea" — these strings are read by a model and
-// then often repeated to the user.
-function article(word: string): string {
-  return /^[aeiou]/i.test(word) ? `an ${word}` : `a ${word}`;
-}
-
-const CLICKABLE_ROLES = new Set([
-  "AXButton",
-  "AXLink",
-  "AXMenuItem",
-  "AXMenuButton",
-  "AXCheckBox",
-  "AXRadioButton",
-  "AXPopUpButton",
-  "AXTabButton",
-  "AXToolbarButton",
-  "AXDisclosureTriangle",
-  "AXIncrementor",
-  "AXSwitch",
-]);
 
 export type LocalToolStatus = LocalToolInfo & { enabled: boolean };
 
@@ -323,6 +285,32 @@ function withLogging<A extends unknown[], R>(
   };
 }
 
+// Capabilities answer with an Outcome — prose (or a screenshot) plus
+// whether it worked. MCP wants content blocks and an isError flag, and the
+// assistant wants the same prose in its HUD, so the translation lives here
+// rather than in the capability.
+function toMcp(outcome: capabilities.Outcome): {
+  content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[];
+  isError?: boolean;
+} {
+  if (capabilities.isImage(outcome)) {
+    return { content: [{ type: "image" as const, data: outcome.image.data, mimeType: outcome.image.mimeType }] };
+  }
+  return { content: [{ type: "text" as const, text: outcome.text }], isError: outcome.ok ? undefined : true };
+}
+
+const appParameter = z
+  .string()
+  .optional()
+  .describe(
+    "Case-insensitive app name to read, e.g. \"Obsidian\". Omit to read the app the user was in " +
+      "when they opened Clance — which is what they almost always mean."
+  );
+
+// The MCP face of `capabilities/`: a description and an input schema per
+// tool, and nothing else. Everything a tool actually *does* lives in
+// capabilities/, because the assistant (⌥A) performs the same things
+// without an MCP session in sight — see docs/design.md §"Assistant".
 function createMcpServer(): McpServer {
   const server = new McpServer({ name: "clance-tools", version: "1.0.0" });
 
@@ -335,26 +323,7 @@ function createMcpServer(): McpServer {
         "activate_app tools when you want one other than the app the user came from.",
       inputSchema: {},
     },
-    withLogging("list_open_windows", async () => {
-      const apps = await ax.windows();
-      if (apps.length > 0) {
-        const lines = apps.map((entry) => {
-          const heading = `${entry.name}${entry.frontmost ? " (frontmost)" : ""}`;
-          return entry.windows.length > 0
-            ? `${heading}\n${entry.windows.map((title) => `  ${title}`).join("\n")}`
-            : `${heading}\n  (no open windows)`;
-        });
-        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
-      }
-      // Without the accessibility reader there are still window titles to be
-      // had from the window server, which is enough to name an app.
-      const titles = await listOpenWindows();
-      return {
-        content: [
-          { type: "text" as const, text: titles.length > 0 ? titles.join("\n") : "No open windows found." },
-        ],
-      };
-    })
+    withLogging("list_open_windows", async () => toMcp(await capabilities.listOpenWindows()))
   );
 
   server.registerTool(
@@ -367,97 +336,8 @@ function createMcpServer(): McpServer {
         "(the user switched apps, scrolled, something loaded) and it matters to what they're asking.",
       inputSchema: {},
     },
-    withLogging("look_at_screen", async () => {
-      // Screen Recording is optional, so a user declining it is a supported
-      // state rather than a misconfiguration — say so plainly, in words the
-      // model can pass on, instead of a guess.
-      if (!checkPermissions().screenRecording) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text:
-                "Screen Recording isn't enabled for Clance, so the screen can't be read. " +
-                "The user can turn it on in System Settings → Privacy & Security → Screen Recording " +
-                "(Clance needs a restart after enabling it).",
-            },
-          ],
-          isError: true,
-        };
-      }
-      const base64 = await captureActiveDisplay();
-      if (!base64) {
-        return {
-          content: [{ type: "text" as const, text: "Couldn't capture the screen." }],
-          isError: true,
-        };
-      }
-      return { content: [{ type: "image" as const, data: base64, mimeType: "image/png" }] };
-    })
+    withLogging("look_at_screen", async () => toMcp(await capabilities.lookAtScreen()))
   );
-
-  // Which app a read should be about. Almost always "the one the user was in
-  // when they asked", which is *not* the frontmost app: Clance is frontmost
-  // while they type to Claude. So an explicit hint wins, then the app
-  // recorded when the widget took focus, then whatever is in front.
-  async function resolveReadTarget(
-    appHint?: string
-  ): Promise<{ pid?: number; label: string } | { error: string }> {
-    if (!ax.isAvailable()) {
-      return {
-        error:
-          "Clance's accessibility reader isn't available in this build, so the screen can't be read as text. " +
-          "look_at_screen still works.",
-      };
-    }
-    if (!ax.isTrusted()) {
-      return {
-        error:
-          "Accessibility isn't enabled for Clance, so other apps' text can't be read. " +
-          "The user can turn it on in System Settings → Privacy & Security → Accessibility.",
-      };
-    }
-    if (appHint) {
-      const matches = await ax.appByName(appHint);
-      if (matches.length === 0) return { error: `No running app matches "${appHint}".` };
-      const match = matches[0];
-      return { pid: match.pid, label: match.name ?? appHint };
-    }
-    const front = await ax.frontmostApp();
-    if (front && !front.ours) return { pid: front.pid, label: front.name ?? "the frontmost app" };
-    const captured = capturedAppInfo();
-    if (captured) return { pid: captured.pid, label: captured.name ?? "the app you came from" };
-    return {
-      error:
-        "Clance is the frontmost app and there's no record of which app the user came from, " +
-        "so there's nothing to read. Pass `app` to name one.",
-    };
-  }
-
-  // Said whenever an app offered its window frame and nothing inside it.
-  // Chromium apps — Chrome, and equally Electron ones like Slack, VS Code
-  // or Obsidian — build no accessibility tree for their content until they
-  // decide something is listening, and until then a read of them is empty
-  // through no fault of the window's. Clance asks them to (see
-  // EnableWebAccessibility in native/ax/ax.mm) but can't make them, so the
-  // honest answer names the cause and points at the tool that does work,
-  // rather than reporting an empty window as fact.
-  function unpublishedMessage(name: string): string {
-    return (
-      `${name} isn't publishing its window contents to macOS's accessibility API, so there's ` +
-      "nothing to read as text — only its window frame came back. Chromium-based apps often do " +
-      "this until something has been reading them for a while; trying once more sometimes works. " +
-      "look_at_screen can see the window regardless."
-    );
-  }
-
-  const appParameter = z
-    .string()
-    .optional()
-    .describe(
-      "Case-insensitive app name to read, e.g. \"Obsidian\". Omit to read the app the user was in " +
-        "when they opened Clance — which is what they almost always mean."
-    );
 
   server.registerTool(
     "read_focused_field",
@@ -469,47 +349,7 @@ function createMcpServer(): McpServer {
         "made against what is actually there. Reads the app the user came from, not Clance.",
       inputSchema: { app: appParameter },
     },
-    withLogging("read_focused_field", async ({ app }) => {
-      const target = await resolveReadTarget(app);
-      if ("error" in target) {
-        return { content: [{ type: "text" as const, text: target.error }], isError: true };
-      }
-      const { element, via } = await ax.focusedField(target.pid);
-      if (!element) {
-        return {
-          content: [
-            { type: "text" as const, text: `Nothing is focused in ${target.label} that can be read as text.` },
-          ],
-        };
-      }
-      if (element.secure) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text:
-                `A password field is focused in ${element.app?.name ?? target.label}. Its contents are ` +
-                "never readable through Clance, deliberately — ask the user if you need what's in it.",
-            },
-          ],
-        };
-      }
-      const value = typeof element.value === "string" ? element.value : "";
-      const lines = [
-        `Field in ${element.app?.name ?? target.label}: ${element.role ?? "unknown role"}` +
-          (element.editable === false ? " (read-only)" : ""),
-      ];
-      if (element.placeholder) lines.push(`Placeholder: ${element.placeholder}`);
-      if (element.selectedRange) {
-        const { location, length } = element.selectedRange;
-        lines.push(length > 0 ? `Selected: characters ${location}–${location + length}` : `Cursor at character ${location}`);
-      }
-      // "marked" means the app wasn't active and this is the field it would
-      // return to — worth saying, since it's a claim about a moment ago.
-      if (via === "marked-container") lines.push("(no text field was focused; this is the focused element)");
-      lines.push("", value.length > 0 ? value : "(the field is empty)");
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
-    })
+    withLogging("read_focused_field", async ({ app }) => toMcp(await capabilities.readFocusedField(app)))
   );
 
   server.registerTool(
@@ -528,37 +368,9 @@ function createMcpServer(): McpServer {
           .describe("Stop after roughly this many characters (default 8000)."),
       },
     },
-    withLogging("read_window_text", async ({ app, maxChars }) => {
-      const target = await resolveReadTarget(app);
-      if ("error" in target) {
-        return { content: [{ type: "text" as const, text: target.error }], isError: true };
-      }
-      const { text, truncated, publishedNothing } = await ax.windowText({
-        pid: target.pid,
-        maxChars: maxChars ?? 8000,
-      });
-      // Not `!text`: an app that published nothing still answers with its
-      // window title, which reads like content and would be passed on as if
-      // the window really did say only that.
-      if (publishedNothing) {
-        return { content: [{ type: "text" as const, text: unpublishedMessage(target.label) }] };
-      }
-      if (!text) {
-        return {
-          content: [
-            { type: "text" as const, text: `${target.label}'s window has no readable text in it.` },
-          ],
-        };
-      }
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: truncated ? `${text}\n\n(truncated)` : text,
-          },
-        ],
-      };
-    })
+    withLogging("read_window_text", async ({ app, maxChars }) =>
+      toMcp(await capabilities.readWindowText(app, maxChars))
+    )
   );
 
   server.registerTool(
@@ -573,41 +385,7 @@ function createMcpServer(): McpServer {
         "saying what.",
       inputSchema: { app: appParameter },
     },
-    withLogging("read_selection", async ({ app }) => {
-      const target = await resolveReadTarget(app);
-      if ("error" in target) {
-        return { content: [{ type: "text" as const, text: target.error }], isError: true };
-      }
-      const { element, via } = await ax.selection(target.pid);
-      const name = element?.app?.name ?? target.label;
-      if (via === "secure") {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `The selection in ${name} is inside a password field, so its contents aren't readable.`,
-            },
-          ],
-        };
-      }
-      const selected = element?.selectedText ?? "";
-      if (!selected.trim()) {
-        // Checked rather than assumed: an app that published nothing looks
-        // exactly like one with nothing selected, and saying "nothing is
-        // selected" when the truth is "this app told us nothing" sends the
-        // model off to answer a question it could still have answered.
-        const { publishedNothing } = await ax.windowText({ pid: target.pid, maxChars: 200 });
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: publishedNothing ? unpublishedMessage(name) : `Nothing is selected in ${name}.`,
-            },
-          ],
-        };
-      }
-      return { content: [{ type: "text" as const, text: selected }] };
-    })
+    withLogging("read_selection", async ({ app }) => toMcp(await capabilities.readSelection(app)))
   );
 
   server.registerTool(
@@ -621,15 +399,7 @@ function createMcpServer(): McpServer {
         app: z.string().describe("Case-insensitive substring to match against open window titles."),
       },
     },
-    withLogging("activate_app", async ({ app }) => {
-      const ok = await activateApp(app);
-      return {
-        content: [
-          { type: "text" as const, text: ok ? `Activated "${app}".` : `No open window matching "${app}".` },
-        ],
-        isError: !ok,
-      };
-    })
+    withLogging("activate_app", async ({ app }) => toMcp(await capabilities.activateApp(app)))
   );
 
   server.registerTool(
@@ -646,35 +416,7 @@ function createMcpServer(): McpServer {
         y: z.number().min(0).max(1).describe("Vertical position, as a fraction of the display's height."),
       },
     },
-    withLogging("click_at", async ({ x, y }) => {
-      try {
-        // What's actually there, read before the click lands: a coordinate
-        // guessed off a screenshot is the one action here with no way to
-        // tell afterwards whether it hit what was intended.
-        const point = await screenPointForNormalized(x, y);
-        const under = point ? await ax.elementAt(point.x, point.y) : null;
-        await clickAtNormalized(x, y);
-        const what = under
-          ? `${under.role ?? "element"}${under.title ? ` "${under.title}"` : ""}` +
-            `${under.app?.name ? ` in ${under.app.name}` : ""}`
-          : null;
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: what
-                ? `Clicked at (${x}, ${y}) — on ${what}. click_element is surer when the target has a name.`
-                : `Clicked at (${x}, ${y}).`,
-            },
-          ],
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text" as const, text: `Failed to click: ${(error as Error).message}` }],
-          isError: true,
-        };
-      }
-    })
+    withLogging("click_at", async ({ x, y }) => toMcp(await capabilities.clickAt(x, y)))
   );
 
   server.registerTool(
@@ -699,119 +441,9 @@ function createMcpServer(): McpServer {
         app: appParameter,
       },
     },
-    withLogging("write_field", async ({ text, mode, app }) => {
-      const action = mode ?? "replace";
-      const value = action === "clear" ? "" : (text ?? "");
-      if (action !== "clear" && !text) {
-        return {
-          content: [{ type: "text" as const, text: "Nothing to write — pass `text`, or use mode \"clear\"." }],
-          isError: true,
-        };
-      }
-
-      const target = await resolveReadTarget(app);
-      if ("error" in target) {
-        return { content: [{ type: "text" as const, text: target.error }], isError: true };
-      }
-      const { element } = await ax.focusedField(target.pid);
-      if (!element) {
-        return {
-          content: [
-            { type: "text" as const, text: `No field is focused in ${target.label}, so there's nothing to write into.` },
-          ],
-          isError: true,
-        };
-      }
-      if (element.editable === false) {
-        // Reported rather than attempted: the write would "succeed" against
-        // something that can't hold text and only the read-back afterwards
-        // would notice, which reads like a mysterious failure.
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text:
-                `The focused element in ${target.label} is ${article(element.role ?? "control")}` +
-                `${element.title ? ` ("${element.title}")` : ""}, not an editable field. ` +
-                "Click into the field first, or name the app whose field you mean.",
-            },
-          ],
-          isError: true,
-        };
-      }
-      if (element.secure) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text:
-                "The focused field is a password field. Clance won't write into one — ask the user to " +
-                "type it themselves.",
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      const before = typeof element.value === "string" ? element.value : "";
-      const expected = action === "insert" ? null : value;
-
-      // The accessibility route first: it needs no focus, no clipboard and
-      // no keystrokes, so it can't disturb what the user is doing.
-      let wrote =
-        action === "insert"
-          ? await ax.setSelectedText(element.handle, value)
-          : await ax.setValue(element.handle, value);
-
-      // Some apps accept the write and ignore it — Chromium reports success
-      // on a text field it never changes — so trust the field, not the
-      // return code.
-      const afterAx = await ax.describe(element.handle);
-      const axValue = typeof afterAx?.value === "string" ? afterAx.value : "";
-      const axWorked = wrote && (expected === null ? axValue !== before : axValue === expected);
-
-      if (!axWorked) {
-        // Fall back to driving the keyboard, which is what this tool used to
-        // do exclusively: focus the app, select all where the whole field is
-        // being replaced, and paste.
-        try {
-          if (action === "clear") await clearFocusedField(app);
-          else if (action === "replace") await replaceFocusedField(value, app);
-          else await typeIntoCapturedWindow(value, app);
-          wrote = true;
-        } catch (error) {
-          return {
-            content: [
-              { type: "text" as const, text: `Couldn't write to the field: ${(error as Error).message}` },
-            ],
-            isError: true,
-          };
-        }
-      }
-
-      const after = await ax.describe(element.handle);
-      const afterValue = typeof after?.value === "string" ? after.value : null;
-      const via = axWorked ? "accessibility" : "keystrokes";
-      if (afterValue === null) {
-        return {
-          content: [
-            { type: "text" as const, text: `Wrote to the field via ${via}, but couldn't read it back to confirm.` },
-          ],
-        };
-      }
-      const changed = afterValue !== before;
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: changed
-              ? `Field now contains (via ${via}):\n${afterValue || "(empty)"}`
-              : `The field still contains what it did before, so the write didn't take:\n${afterValue || "(empty)"}`,
-          },
-        ],
-        isError: !changed,
-      };
-    })
+    withLogging("write_field", async ({ text, mode, app }) =>
+      toMcp(await capabilities.writeField({ text, mode, app }))
+    )
   );
 
   server.registerTool(
@@ -829,89 +461,7 @@ function createMcpServer(): McpServer {
         app: appParameter,
       },
     },
-    withLogging("click_element", async ({ target, app }) => {
-      const resolved = await resolveReadTarget(app);
-      if ("error" in resolved) {
-        return { content: [{ type: "text" as const, text: resolved.error }], isError: true };
-      }
-      const { nodes } = await ax.tree({ pid: resolved.pid, maxNodes: 1200, maxDepth: 25 });
-      const labelOf = (node: ax.AxNode) =>
-        [node.title, node.label, typeof node.value === "string" ? node.value : ""]
-          .filter(Boolean)
-          .join(" ")
-          .trim();
-
-      const clickable = nodes.filter((node) => CLICKABLE_ROLES.has(node.role ?? "") && labelOf(node));
-      const needle = target.trim().toLowerCase();
-      const exact = clickable.filter((node) => labelOf(node).toLowerCase() === needle);
-      const partial = clickable.filter((node) => labelOf(node).toLowerCase().includes(needle));
-      const matches = exact.length > 0 ? exact : partial;
-
-      if (matches.length === 0) {
-        const nearby = clickable.slice(0, 12).map((node) => `"${labelOf(node)}"`).join(", ");
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text:
-                `Nothing clickable called "${target}" in ${resolved.label}.` +
-                (nearby ? ` What's there: ${nearby}.` : " Nothing clickable was found at all."),
-            },
-          ],
-          isError: true,
-        };
-      }
-      if (matches.length > 1) {
-        const options = matches
-          .slice(0, 8)
-          .map((node) => `"${labelOf(node)}" (${node.role})`)
-          .join(", ");
-        return {
-          content: [
-            { type: "text" as const, text: `"${target}" matches more than one control: ${options}. Be more specific.` },
-          ],
-          isError: true,
-        };
-      }
-
-      const node = matches[0];
-      const label = labelOf(node);
-      // AXPress where the control offers it — it needs no focus and can't
-      // land on whatever happens to be under a coordinate. Otherwise click
-      // the middle of the element's own frame, which is still better aimed
-      // than a guess off a screenshot.
-      const described = await ax.describe(node.handle);
-      if (described?.actions?.includes("AXPress")) {
-        const pressed = await ax.performAction(node.handle, "AXPress");
-        if (pressed) {
-          return {
-            content: [{ type: "text" as const, text: `Pressed "${label}" (${node.role}) in ${resolved.label}.` }],
-          };
-        }
-      }
-      const frame = described?.frame ?? node.frame;
-      if (!frame || frame.width <= 0 || frame.height <= 0) {
-        return {
-          content: [
-            { type: "text" as const, text: `Found "${label}" but it can't be pressed and has no position to click.` },
-          ],
-          isError: true,
-        };
-      }
-      try {
-        await clickAtScreenPoint(frame.x + frame.width / 2, frame.y + frame.height / 2);
-        return {
-          content: [
-            { type: "text" as const, text: `Clicked "${label}" (${node.role}) in ${resolved.label} at its centre.` },
-          ],
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text" as const, text: `Failed to click "${label}": ${(error as Error).message}` }],
-          isError: true,
-        };
-      }
-    })
+    withLogging("click_element", async ({ target, app }) => toMcp(await capabilities.clickElement(target, app)))
   );
 
   return server;

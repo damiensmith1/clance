@@ -56,6 +56,10 @@ export type AxElement = {
   selectedRange?: AxRange;
   frame?: AxFrame;
   editable?: boolean;
+  // Only populated by a tree() walk asked for it. A menu item that is
+  // greyed out is `false`, which is the difference between "this app has no
+  // such command" and "it has it but not right now".
+  enabled?: boolean;
   // A password field. Its contents are never returned by any read here —
   // the element is reported so a caller can say one is there, and say
   // nothing about what's in it (see ax.mm's IsSecureElement).
@@ -230,10 +234,11 @@ export type AxTree = { nodes: AxNode[]; truncated: boolean };
 export async function tree(options: {
   handle?: number;
   pid?: number;
-  root?: "focusedWindow" | "focusedElement";
+  root?: "focusedWindow" | "focusedElement" | "menuBar";
   maxDepth?: number;
   maxNodes?: number;
   includeFrames?: boolean;
+  includeEnabled?: boolean;
 } = {}): Promise<AxTree> {
   const result = await call({ op: "tree", root: "focusedWindow", ...options });
   return {
@@ -263,6 +268,17 @@ export async function windowText(
 /** Replaces an element's whole value. Fails when the app won't allow it. */
 export async function setValue(handle: number, value: string): Promise<boolean> {
   return (await call({ op: "setValue", handle, value })).ok === true;
+}
+
+/**
+ * Moves and/or resizes a window. Position and size are set independently —
+ * pass both halves of either pair, or neither.
+ */
+export async function setFrame(
+  handle: number,
+  frame: { x?: number; y?: number; width?: number; height?: number }
+): Promise<boolean> {
+  return (await call({ op: "setFrame", handle, ...frame })).ok === true;
 }
 
 /** Replaces just the selected range of a text element. */

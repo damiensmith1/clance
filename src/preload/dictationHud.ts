@@ -8,6 +8,13 @@ function on<T>(channel: string, callback: (payload: T) => void): Unsubscribe {
   return () => ipcRenderer.removeListener(channel, listener);
 }
 
+export type AssistantView =
+  | { state: "listening"; heard: string }
+  | { state: "thinking"; heard: string }
+  | { state: "asking"; question: string; options: string[] }
+  | { state: "acting"; label: string }
+  | { state: "said"; message: string; ok: boolean };
+
 export type DictationStartPayload = {
   sampleRate: number;
   autoStopSilenceMs: number;
@@ -39,4 +46,11 @@ contextBridge.exposeInMainWorld("clanceDictation", {
   onEmpty: (cb: () => void) => on("dictation:empty", cb),
   onError: (cb: (p: { message: string }) => void) => on("dictation:error", cb),
   onUnavailable: (cb: (p: { reason?: string; message?: string }) => void) => on("dictation:unavailable", cb),
+
+  // The assistant (⌥A) shares this window: same microphone, same pill, same
+  // never-take-focus rules. Only what's drawn in it differs, so these ride
+  // alongside the dictation channels rather than in a second preload.
+  onAssistantOpen: (cb: () => void) => on("assistant:open", cb),
+  onAssistantClose: (cb: () => void) => on("assistant:close", cb),
+  onAssistantView: (cb: (view: AssistantView) => void) => on("assistant:view", cb),
 });

@@ -104,6 +104,8 @@ contextBridge.exposeInMainWorld("clanceApp", {
     ipcRenderer.invoke("settings:set-launch-on-login", enabled),
   setDefaultDirectory: (dir: string | null) =>
     ipcRenderer.invoke("settings:set-default-directory", dir),
+  setAssistantDecider: (decider: "jev" | "local") =>
+    ipcRenderer.invoke("settings:set-assistant-decider", decider),
   pickDirectory: () => ipcRenderer.invoke("dialog:pick-directory"),
   listLocalTools: () => ipcRenderer.invoke("extensibility:list-local-tools"),
   setLocalToolEnabled: (name: string, enabled: boolean) =>

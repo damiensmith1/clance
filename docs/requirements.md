@@ -348,6 +348,27 @@ Sessions Clance starts get these tools when Accessibility is granted:
   behind a confirmation.
 - Dictation works without Claude being set up.
 
+## Assistant
+
+The assistant's own requirements are in `assistant.md`, which is written in
+the user's terms rather than Clance's. What belongs here is where it meets
+the rest of the app:
+
+- A global shortcut (⌥A by default) opens a listening session from any app.
+  It is claimed on the same condition as ⌥D — a speech model is installed —
+  and needs no Claude setup, since handing a request to a session is one of
+  the things it does, not the only one.
+- Listening reuses dictation: the same on-device whisper, the same
+  microphone, the same silence detection, and the same HUD, which is why the
+  two can never run at once. Only where the words land differs.
+- Nothing the assistant hears is written to dictation history. "Open Mail"
+  is not something the user dictated.
+- Settings → assistant names the service that decides what a command meant
+  and lets the user switch it off. Off, ⌥A still works on what Clance can
+  match locally.
+- The decision service's key lives in a gitignored `.env`, never in
+  `config.json`.
+
 ## First-run setup
 
 - Until setup is complete, the main window shows a wizard and the popup
