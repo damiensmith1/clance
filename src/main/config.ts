@@ -31,6 +31,7 @@ export type ClanceConfig = {
   // into what's already there.
   enabledLocalTools: string[] | "all";
   dictation: DictationConfig;
+  assistant: AssistantConfig;
 };
 
 // Dictation settings (see docs/design.md's "Dictation"). `activeModel` null means no
@@ -75,8 +76,36 @@ const DEFAULT_DICTATION: DictationConfig = {
   inputDevice: null,
 };
 
+// The assistant (⌥A). `decider` is the one privacy-visible setting here:
+// "local" keeps every decision on the Mac at the cost of only recognising
+// what can be matched locally (docs/assistant.md, "Privacy").
+export type AssistantConfig = {
+  decider: "jev" | "local";
+  // Confidence floors live in assistant/thresholds.ts, not here: they are
+  // only meaningful against a particular model version, they are tuned
+  // together, and a settings file is the wrong place to drift them apart.
+
+  // Risky actions the user has said "always allow" to, as
+  // "<intent>:<label>". Grown one at a time, never widened automatically.
+  alwaysAllow: string[];
+  // Named snippets the assistant can insert: an email address, a phone
+  // number. Empty until the user adds some — there is nothing sensible to
+  // guess here.
+  values: Record<string, string>;
+  // How long an unfinished command is held before it's discarded rather
+  // than guessed at.
+  holdMs: number;
+};
+
+const DEFAULT_ASSISTANT: AssistantConfig = {
+  decider: "jev",
+  alwaysAllow: [],
+  values: {},
+  holdMs: 2500,
+};
+
 const DEFAULT_CONFIG: ClanceConfig = {
-  shortcuts: { togglePopup: "Alt+Space", dictate: "Alt+D" },
+  shortcuts: { togglePopup: "Alt+Space", dictate: "Alt+D", assist: "Alt+A" },
   shortcutsConfigured: false,
   defaultDirectory: null,
   recentDirectories: [],
@@ -84,6 +113,7 @@ const DEFAULT_CONFIG: ClanceConfig = {
   lastFolder: null,
   enabledLocalTools: "all",
   dictation: DEFAULT_DICTATION,
+  assistant: DEFAULT_ASSISTANT,
 };
 
 export function readConfig(): ClanceConfig {
@@ -103,6 +133,8 @@ export function readConfig(): ClanceConfig {
       // before a dictation setting existed would otherwise replace the
       // whole object and drop the new key's default.
       dictation: { ...DEFAULT_DICTATION, ...stored.dictation },
+      // Same shallow-merge hazard again.
+      assistant: { ...DEFAULT_ASSISTANT, ...stored.assistant },
     };
   } catch {
     return DEFAULT_CONFIG;

@@ -18,4 +18,10 @@ export const SHORTCUT_ACTIONS: ShortcutAction[] = [
     description: "Talk anywhere; Clance types it.",
     defaultAccelerator: "Alt+D",
   },
+  {
+    id: "assist",
+    label: "Assistant",
+    description: "Tell Clance to do something.",
+    defaultAccelerator: "Alt+A",
+  },
 ];

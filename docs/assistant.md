@@ -51,6 +51,9 @@ Three hotkeys, three jobs, no overlap:
 - Clance acts on a command as soon as the command is complete, not when the
   user stops speaking. "Open Mail, new message" performs two things in the
   order they were said.
+- A command that needs several steps is carried out as several steps.
+  Clance looks at the screen between each one, so what it does next is
+  decided against what actually happened rather than what it expected.
 - A partial command is held until it is complete or abandoned. Silence long
   enough after an incomplete phrase discards it rather than guessing.
 - Commands are carried out in the order spoken, one at a time. A command
@@ -64,13 +67,15 @@ Three hotkeys, three jobs, no overlap:
 
 ## What it can do
 
-The assistant's repertoire is everything below. Items marked *(new)* are
-capabilities Clance does not have today.
+The assistant's repertoire is everything below. Items marked *(not yet)*
+don't work today.
 
 **Applications**
 - Launch an app by name, whether or not it's running.
-- Switch to a running app, or to a specific window of one.
-- Quit or hide an app. *(new: quit)*
+- Switch to a running app, or to a specific window of one. *(not yet: a
+  specific window — switching goes to the app, and its Window menu goes to
+  the window)*
+- Quit or hide an app.
 
 **An app's own commands**
 - Run any command the frontmost app publishes in its menus — "new note",
@@ -81,29 +86,50 @@ capabilities Clance does not have today.
   wrong context — rather than appearing to succeed.
 
 **Moving around**
-- Scroll, page and jump to top or bottom of what's in front. *(new)*
-- Move between tabs and windows. *(new)*
-- Move, resize, fullscreen and arrange windows. *(new)*
+- Scroll, page and jump to top or bottom of what's in front.
+- Move between tabs and windows.
+- Move, resize and arrange windows. Fullscreen and minimise come from the
+  app's own View and Window menus rather than being separate verbs, because
+  that is where every app already puts them. Some apps refuse to be moved
+  at all, and that is reported rather than retried.
 
 **Pointing at things**
 - Focus a named control — a field, a button, a link.
 - Press a named control.
-- Press a thing described by where it is, when it has no name ("the button
-  at the bottom right"). *(new)*
+- Press a thing described by where it is, when its name is no help: "the
+  first link", "the last button". Counted within the page rather than the
+  window, so the browser's own toolbar is never "the first button".
+  Only things actually on screen are counted, so a hidden
+  skip-to-content link is never "the first".
+  *(not yet: "the first result" — a heading, link and snippet read as one
+  thing — is not grouped, so "the first link" means the topmost link rather
+  than the first result.)*
 
 **Putting text somewhere**
+- Write words that were part of the command itself: "type see you at five",
+  "search for Jon Stewart", "find revenue on this page". The words are taken
+  from what the user actually said, never composed, so what lands is what
+  they spoke.
 - Dictate into a field the user names, in one movement: "click the subject
-  and dictate".
+  and dictate". This is for the words that *haven't* been said yet. The
+  listening session stays open but stands aside for the length of the
+  dictation — one microphone, so the assistant stops listening for commands
+  until the words have landed, then picks up where it left off.
 - Insert a stored value — email address, phone number, a saved snippet.
-  *(new)*
+  *(not yet: a way to add one. The assistant inserts any value that exists;
+  nothing in Settings creates them.)*
 - Insert text a Claude session produced.
 - Replace a selection, insert at the cursor, or clear a field.
 
 **Clance itself**
 - Start a Claude Code session, in the widget or a tab, in a named folder.
+  *(not yet: in a named folder — a session starts in the default one)*
 - Open a section of the main window.
-- Start or stop dictation.
 - Repeat, undo or cancel what it just did.
+
+Starting dictation is listed under "Putting text somewhere" rather than
+here: the user isn't asking for a Clance feature, they're asking for words
+to end up somewhere.
 
 **Asking Claude**
 - Anything that needs reasoning, reading, writing or judgement is handed to
@@ -205,7 +231,9 @@ capabilities Clance does not have today.
 
 - **Fast enough to talk to.** An action begins within a few hundred
   milliseconds of the command being finished. The assistant must never be
-  the reason a user slows down their speech.
+  the reason a user slows down their speech. *Not met today: measured
+  580–1250 ms end to end, most of it the decision call. See the latency
+  budget in `design.md`.*
 - **Never surprising.** A command that was not given is never carried out. A
   command that was given is either carried out, refused with a reason, or
   queried.
@@ -230,16 +258,31 @@ capabilities Clance does not have today.
 
 ## Open
 
-- **Compound commands in one breath.** "Open Mail and start a new message
-  to Sarah" is one utterance and several actions. Sequential commands in one
-  listening session are committed; splitting a single sentence is not.
+- **Where an argument stops and starts.** A command that carries its own
+  content now works — "search for Jon Stewart" finds the name in the
+  sentence and searches for it. What is unproven is the boundary: the
+  candidate spans are generated by trimming function words, and a phrase
+  that leans on one of them ("look up how to tie a bowline") may be cut
+  short. A span that is never generated can never be chosen, and nothing
+  tells the user their search was trimmed.
+- **How far a goal should be pursued.** "Open Mail and start a new message
+  to Sarah" is now attempted as several steps towards one goal rather than
+  refused, but the stopping rule is a guess: six steps, or the moment the
+  decider judges the goal reached. Whether that judgement is reliable enough
+  to act on, and whether six is the right number, is unmeasured.
 - **Carrying context between commands.** "Open Notes. Now make a new one."
   needs the second command to know about the first. How far that memory
   should reach inside a session is undecided.
-- **Stored values.** Inserting an email address or a snippet implies a place
-  to keep them and a way to name them by voice. Neither is specified.
-- **Positional targeting.** Pressing something by where it is, rather than
-  what it's called, is the fallback when a control has no label. Whether it
-  can be made reliable enough to offer is unknown.
+- **Stored values.** Inserting a value works and reads from config; adding
+  one has no interface. What is still unspecified is how a user names a
+  value by voice so that "insert my work email" finds it reliably.
+- **Positional targeting beyond an ordinal.** "The first link" works.
+  "The button at the bottom right" does not, and would need every control's
+  frame read on every command, which the latency budget has no room for.
 - **Undo beyond one step.** Single-step undo is committed. A history the
   user can walk back through is not.
+- **Which commands to confirm.** Anything the assistant can't classify is
+  confirmed, and the destructive lexicon that classifies the rest is a
+  guess. Whether the result is too noisy to live with, and whether the
+  confidence threshold below which even a safe action is queried is
+  anywhere near right, are both unmeasured against real speech.

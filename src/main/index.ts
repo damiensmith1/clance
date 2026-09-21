@@ -11,6 +11,8 @@ import {
   sessionMintArgs,
 } from "./popupWindow";
 import { openMainWindow, openMainWindowSection, openSessionInMainWindow } from "./mainWindow";
+import { deciderName, resetDecider, setUpAssistant, toggleAssistant } from "./assistant";
+import { loadEnvFile } from "./env";
 import { checkForUpdates, openReleasePage } from "./updates";
 import { createAppMenu } from "./appMenu";
 import { ensureSessionCwd, SESSION_CWD } from "./paths";
@@ -143,6 +145,11 @@ function registerAllHotkeys(shortcuts: Record<string, string>, claudeReady: bool
   // installed model rather than the active one, so it can't race
   // reconcileActiveModel, which settles the active model asynchronously.
   if (dictationHotkeyReady()) registerHotkey(() => void toggleDictation(), shortcuts.dictate);
+  // The assistant listens through the same on-device whisper dictation
+  // uses, so it's gated on the same thing: no speech model, nothing to
+  // listen with. It does *not* need Claude — handing off to a session is
+  // one of the things it does, not the only one.
+  if (dictationHotkeyReady()) registerHotkey(() => void toggleAssistant(), shortcuts.assist);
 }
 
 let capturingShortcut = false;
@@ -160,6 +167,12 @@ async function refreshHotkeys(): Promise<void> {
 
 app.whenReady().then(async () => {
   ensureSessionCwd();
+  // Before anything reads process.env — the assistant's decision service
+  // takes its key from there (see env.ts and .env.example).
+  loadEnvFile();
+  // Connects dictation, the widget and the main window to the assistant.
+  // Cheap and import-only; the assistant does nothing until ⌥A.
+  setUpAssistant();
   // Resolves and caches the login-shell PATH `claude --bg` needs (see
   // ptyManager.ts) well before the popup widget's hotkey ever fires it on
   // demand — that resolution can itself be slow (an interactive login
@@ -178,6 +191,7 @@ app.whenReady().then(async () => {
   createTray({
     onTogglePopup: handleTrayPopupClick,
     onDictate: () => void toggleDictation(),
+    onAssist: () => void toggleAssistant(),
     onOpenMainWindow: openMainWindow,
   });
   updateTrayState({ shortcuts: readConfig().shortcuts });
@@ -649,7 +663,25 @@ ipcMain.handle("settings:get-preferences", () => ({
   // The *configured* accelerators, so UI that shows a hotkey hint (the
   // Dictation tab) can't drift from what the user actually rebound it to.
   shortcuts: readConfig().shortcuts,
+  assistant: {
+    ...readConfig().assistant,
+    // What's actually running, which is not the same as what's configured
+    // when the toggle is on and no key is set.
+    active: deciderName(),
+  },
 }));
+
+// The assistant's one privacy-visible setting. Switching the decision
+// service off doesn't disable ⌥A — it falls back to what Clance can
+// recognise locally (docs/assistant.md, "Privacy").
+ipcMain.handle("settings:set-assistant-decider", (_event, decider: unknown) => {
+  if (decider !== "jev" && decider !== "local") return readConfig().assistant;
+  const config = readConfig();
+  config.assistant = { ...config.assistant, decider };
+  writeConfig(config);
+  resetDecider();
+  return { ...config.assistant, active: deciderName() };
+});
 
 ipcMain.handle("settings:set-launch-on-login", (_event, enabled: boolean) => {
   setLaunchOnLogin(enabled);

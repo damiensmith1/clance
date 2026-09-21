@@ -532,8 +532,24 @@ static AXUIElementRef CopyFocusedWindowElement(pid_t pid) {
   return NULL;
 }
 
+// An app's whole menu bar. Every macOS app publishes its commands here, so
+// this is how Clance's assistant learns what an app can do rather than being
+// taught it per app (see docs/design.md, "The menu resolver").
+static AXUIElementRef CopyMenuBarElement(pid_t pid) {
+  AXUIElementRef app = CopyApplicationElement(pid);
+  if (app == NULL) return NULL;
+  ApplyTimeout(app);
+  CFTypeRef menuBar = CopyAttribute(app, kAXMenuBarAttribute);
+  CFRelease(app);
+  if (menuBar != NULL && CFGetTypeID(menuBar) == AXUIElementGetTypeID()) {
+    return (AXUIElementRef)menuBar;
+  }
+  if (menuBar != NULL) CFRelease(menuBar);
+  return NULL;
+}
+
 // Resolves whichever root an operation asked for: an explicit handle, the
-// focused window, or the focused element.
+// focused window, the focused element, or the menu bar.
 static AXUIElementRef CopyRootForRequest(NSDictionary *op, BOOL *needsRelease) {
   *needsRelease = NO;
   id handle = op[@"handle"];
@@ -543,8 +559,9 @@ static AXUIElementRef CopyRootForRequest(NSDictionary *op, BOOL *needsRelease) {
   }
   NSString *root = op[@"root"];
   pid_t pid = RequestedPid(op);
-  AXUIElementRef element = [root isEqualToString:@"focusedElement"] ? CopyFocusedElement(pid)
-                                                                   : CopyFocusedWindowElement(pid);
+  AXUIElementRef element = [root isEqualToString:@"focusedElement"]  ? CopyFocusedElement(pid)
+                           : [root isEqualToString:@"menuBar"]       ? CopyMenuBarElement(pid)
+                                                                     : CopyFocusedWindowElement(pid);
   *needsRelease = element != NULL;
   return element;
 }
@@ -572,6 +589,10 @@ typedef struct {
   int maxDepth;
   int maxNodes;
   BOOL includeFrames;
+  // Opt-in: one more AX round trip per node, which a 1200-node window walk
+  // doesn't want to pay. A menu walk does — a greyed-out command has to be
+  // reported as unavailable rather than pressed (docs/assistant.md).
+  BOOL includeEnabled;
   BOOL truncated;
   int visited;
 } WalkState;
@@ -602,6 +623,16 @@ static void WalkElement(AXUIElementRef element, int depth, int parentIndex,
   } else {
     NSString *value = CopyStringAttribute(element, kAXValueAttribute);
     if (value.length) node[@"value"] = value;
+  }
+
+  if (state->includeEnabled) {
+    CFTypeRef enabled = CopyAttribute(element, kAXEnabledAttribute);
+    if (enabled != NULL) {
+      if (CFGetTypeID(enabled) == CFBooleanGetTypeID()) {
+        node[@"enabled"] = CFBooleanGetValue((CFBooleanRef)enabled) ? @YES : @NO;
+      }
+      CFRelease(enabled);
+    }
   }
 
   if (state->includeFrames) {
@@ -1029,6 +1060,7 @@ static NSDictionary *RunOperation(NSDictionary *op) {
       .maxDepth = ClampedInt(op[@"maxDepth"], kDefaultMaxDepth, 60),
       .maxNodes = ClampedInt(op[@"maxNodes"], kDefaultMaxNodes, kHardMaxNodes),
       .includeFrames = [op[@"includeFrames"] boolValue],
+      .includeEnabled = [op[@"includeEnabled"] boolValue],
       .truncated = NO,
       .visited = 0,
     };
@@ -1046,6 +1078,37 @@ static NSDictionary *RunOperation(NSDictionary *op) {
     ApplyTimeout(element);
     AXError error = AXUIElementSetAttributeValue(element, kAXValueAttribute, (__bridge CFTypeRef)value);
     return @{@"ok" : error == kAXErrorSuccess ? @YES : @NO, @"axError" : @((int)error)};
+  }
+
+  // Moving and resizing a window. Position and size are separate AX
+  // attributes and each is an AXValue box rather than a plain number, which
+  // is why this can't go through setValue — and why a half-applied result
+  // (moved but not resized) is reported as a failure rather than silently.
+  if ([name isEqualToString:@"setFrame"]) {
+    AXUIElementRef element = ElementForHandle([op[@"handle"] unsignedLongLongValue]);
+    if (element == NULL) return @{@"ok" : @NO, @"error" : @"unknown handle"};
+    if (IsOwnProcess(element)) return @{@"ok" : @NO, @"error" : @"self-target"};
+    ApplyTimeout(element);
+
+    AXError positionError = kAXErrorSuccess;
+    AXError sizeError = kAXErrorSuccess;
+    if ([op[@"x"] isKindOfClass:[NSNumber class]] && [op[@"y"] isKindOfClass:[NSNumber class]]) {
+      CGPoint point = CGPointMake([op[@"x"] doubleValue], [op[@"y"] doubleValue]);
+      AXValueRef value = AXValueCreate(kAXValueTypeCGPoint, &point);
+      positionError = AXUIElementSetAttributeValue(element, kAXPositionAttribute, value);
+      CFRelease(value);
+    }
+    if ([op[@"width"] isKindOfClass:[NSNumber class]] && [op[@"height"] isKindOfClass:[NSNumber class]]) {
+      CGSize size = CGSizeMake([op[@"width"] doubleValue], [op[@"height"] doubleValue]);
+      AXValueRef value = AXValueCreate(kAXValueTypeCGSize, &size);
+      sizeError = AXUIElementSetAttributeValue(element, kAXSizeAttribute, value);
+      CFRelease(value);
+    }
+    BOOL succeeded = positionError == kAXErrorSuccess && sizeError == kAXErrorSuccess;
+    return @{
+      @"ok" : succeeded ? @YES : @NO,
+      @"axError" : @((int)(positionError != kAXErrorSuccess ? positionError : sizeError))
+    };
   }
 
   if ([name isEqualToString:@"setSelectedText"]) {

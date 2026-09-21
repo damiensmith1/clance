@@ -48,6 +48,12 @@ const RECORDING_WIDTH_PX = 210;
 let actionHandler = null;
 actionEl.addEventListener("click", () => actionHandler?.());
 
+// The assistant (⌥A) borrows this window. While it's up, the dictation
+// chrome's labels are wrong — the user isn't dictating, they're giving a
+// command — so the assistant's own view drives the pill instead. Capture
+// itself is unchanged: it's the same microphone recorded the same way.
+let assistantMode = false;
+
 // One text slot. While recording it's hidden entirely and the meter does
 // the talking; every other state gets a short phrase, and the states that
 // need the user to fix something get an action. After each change main is
@@ -291,7 +297,43 @@ window.clanceDictation.onCancel(() => {
 
 window.clanceDictation.onState((payload) => {
   if (payload && payload.state === "transcribing") {
-    setState("transcribing", "Transcribing…");
+    setState("transcribing", assistantMode ? "Working out what you meant…" : "Transcribing…");
+  }
+});
+
+window.clanceDictation.onAssistantOpen(() => {
+  assistantMode = true;
+});
+
+window.clanceDictation.onAssistantClose(() => {
+  assistantMode = false;
+});
+
+// One line, always: the indicator has to be legible without looking away
+// from the work, so a long transcript is never shown — what was understood
+// is (docs/assistant.md, "What the user sees and hears").
+window.clanceDictation.onAssistantView((view) => {
+  if (!view) return;
+  assistantMode = true;
+  switch (view.state) {
+    case "listening":
+      // Nothing heard yet keeps the recording pill and its meter; once
+      // there are words, they replace it so the user can see what landed.
+      if (view.heard) setState("transcribing", view.heard);
+      else setState("recording", "Listening…");
+      return;
+    case "thinking":
+      setState("transcribing", view.heard);
+      return;
+    case "asking":
+      setState("unavailable", `${view.question}  ${view.options.join(" · ")}`);
+      return;
+    case "acting":
+      setState("transcribing", view.label);
+      return;
+    case "said":
+      setState(view.ok ? "done" : "failed", view.message);
+      return;
   }
 });
 

@@ -17,6 +17,11 @@ into the app you were in, and click.
 Press ⌥D anywhere to dictate. Clance transcribes on the Mac and types the
 text wherever your cursor was.
 
+Press ⌥A and talk to the Mac instead of typing to it. Clance works out what
+each command meant and carries it out — opening apps, running their own menu
+commands, moving around, arranging windows — and hands anything that needs
+thinking to a Claude Code session. See `assistant.md`.
+
 A main window holds the rest: every Claude Code session on the machine,
 openable as terminal tabs; a view of what those sessions have changed in a
 git repository; dictation history; installed skills and MCP servers; and
@@ -58,7 +63,14 @@ settings.
 ## Principles
 
 - **On demand, never ambient.** Nothing on screen is captured unless the
-  model calls a screen tool. The microphone is only open while dictating.
+  model calls a screen tool. The microphone is only open while dictating or
+  while the assistant is listening — there is no wake word. The assistant
+  does make model calls of its own, continuously, while a listening session
+  is open; a classifier that answers in 100ms for a fraction of a cent is
+  cheap enough to run on every phrase, which is what makes speaking to the
+  Mac feel like speaking rather than like submitting. What it is given is
+  the command, the app's name and the list of things that could be done —
+  never a document, a field's contents, or anything dictated.
 - **Local-first.** Config, history and transcripts stay on the Mac, and
   speech is transcribed on-device. The network is used for Claude itself (by
   the CLI), speech model downloads and a user-triggered update check. No
@@ -66,6 +78,11 @@ settings.
 - **The CLI is the engine.** Clance starts and connects sessions; the model
   decides what to do. New capabilities are MCP tools the CLI calls, gated by
   the CLI's own permission prompts rather than a Clance-built approval UI.
+- **Decide, never write.** Where Clance calls a model itself, it is only to
+  classify — to pick one of the things Clance already knows how to do. No
+  model output is ever shown to the user as prose. Anything open-ended is a
+  session's job, which is why the assistant's way out is to hand over rather
+  than to try.
 - **Extend through Claude Code.** Skills, MCP servers, hooks and plugins set
   up for Claude Code work in Clance unchanged. Clance doesn't define its own
   plugin format.

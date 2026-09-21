@@ -1522,19 +1522,139 @@ type Situation = {
 
 type Decision =
   | { kind: "wait" }
-  | { kind: "resolved"; resolution: Resolution; confidence: number }
-  | { kind: "ambiguous"; among: Candidate[] }
+  | { kind: "resolved"; intent: IntentId; candidateId: string; confidence: number }
+  | { kind: "ambiguous"; intent: IntentId; among: Candidate[] }
   | { kind: "escalate"; prompt: string }
   | { kind: "none" };
 
 interface Decider { decide(s: Situation): Promise<Decision>; }
 ```
 
+A decision **names** an intent and a candidate; it never builds the action.
+Turning a candidate into something performable is the resolver's job, one
+step later, in the session. That seam is what lets a decider be swapped
+without knowing how anything is performed — and it is why no `Decider` ever
+holds a function that could act.
+
+**Candidates are ids; their text lives in the state.** The obvious encoding
+— the label as the option key, its detail as the description — sends every
+candidate's words twice and makes two controls called "Send" impossible to
+tell apart. Instead each candidate gets a short id, the options are bare ids
+with no description, and one table in the state says what each id is:
+
+```
+e12 menu "New Tab" · File > New Tab
+e13 target "Jon Stewart - Wikipedia" · AXLink, scrolled out of view
+```
+
+Measured on a live window, that took the target questions from carrying
+their own prose to 0.2–1.1 kB each.
+
+**The request has an element budget, not just a per-question one.** A dozen
+questions each comfortably under the per-question cap still produced a
+219-line, 10 kB table for "quit Discord" — most of it the Apple menu's
+Recent Items and every installed app. A global cap of 120 fixed that: 19.1
+kB to 8.7 kB, table 10.0 kB to 2.3 kB. When the budget runs out, **whole
+questions are dropped rather than lists truncated**, so every question that
+is asked offers a complete set and a missing answer means "not asked" rather
+than "silently unavailable".
+
+**Every question offers a way out.** `None of these` is an option on the
+intent question and on every target question, because the user can always
+name an app that isn't installed or a button that isn't on screen. Without
+it a `choice` is a forced choice and the model has to name *something* —
+which is precisely how "quit Discord", with Discord absent, becomes a press
+of whatever was nearest.
+
+**A list too big for one question becomes two.** `choice` takes at most 255
+labels and a large menu bar passes that alone (Chrome offers 292). Trimming
+the list to fit is the obvious fix and the wrong one: a target that was
+never offered is indistinguishable, from the answer, from one that was
+offered and rejected — which is why "omit candidate values that the model
+cannot choose" is on TypeSafe's own list of things not to do. A menu bar is
+already a tree, so it is asked as one: which menu, then which command in it,
+with the commands of the two likeliest menus riding along speculatively.
+Measured against a synthetic 401-command menu bar, every command stays
+reachable and the largest single question drops to 42 options.
+
 `JevDecider` is one implementation. `KeywordDecider` — string matching over
 the same candidate lists — is the other, and is not a toy: it is the test
 double, it is what runs with the decision service switched off in Settings,
 and it is the fallback when Jev is unreachable. The assistant degrades to
 "the commands it can recognise locally" rather than to nothing.
+
+A phrase whose verb named an intent is answered **only** from that intent.
+Several cues can legitimately fire on one phrase — "go to the top" is both a
+`switch` and a `navigate` — so a cue that finds nothing hands on to the next
+one, but none of them hand on to the uncued menu search. That rule exists
+because its absence was caught in a log: "quit Discord", with Discord
+momentarily missing from the running-app list, fell through to a Recent
+Items entry called "Discord" and *pressed* it — `safe` risk, no
+confirmation. Having understood the verb, the honest answers are "that isn't
+here" or "ask Claude"; never "here is something with a similar name".
+
+### Pursuing a goal, not performing a command
+
+The assistant does not decide once and act once. It **perceives, decides,
+acts, and looks again**:
+
+```
+goal = "search for Jon Stewart and open the first result"
+
+┌─► read the window (AX + frames)     ~200 ms
+│   one batched call:                 ~400 ms
+│     • has the goal been reached?          (noul)
+│     • what kind of thing is the next step? (choice)
+│     • which target / which span?          (choice)
+│   perform one step                  ~100 ms
+└── not finished? go again
+```
+
+~700 ms a step, so a two- or three-step task lands inside two seconds. That
+is only possible because a batch of typed judgements costs about what one
+costs — a planner would be slower *and* more brittle.
+
+Nothing is planned in advance, and that is the point: every turn decides
+against what is **actually on screen now**. If a page loads differently, a
+click misses, or a dialog appears, the next turn simply sees it. A plan made
+up front would have to be repaired; a loop has nothing to repair.
+
+**The goal lives in code**, in a `Pursuit`, alongside the steps taken so
+far. The decider is handed both fresh every turn and never needs memory of
+its own — which is what keeps it a pure function of what it is shown, and
+keeps `KeywordDecider` a viable substitute.
+
+Three things bound it, because a loop is the one failure mode here that
+could act on the user's machine indefinitely:
+
+| | |
+|---|---|
+| A step cap | six, ending loudly and saying how far it got |
+| Repeat detection | the same step twice running means it is already done |
+| Escape | breaks out at any point, mid-step included |
+
+A question — a confirmation or an ambiguity — carries the `Pursuit` with it,
+so answering "yes" halfway through resumes the task rather than ending it.
+
+Choosing the same step twice is read as **success**, not failure. It was
+briefly reported as "didn't seem to change anything", which was alarming and
+wrong: the click had worked and the page had navigated, and the only thing
+that hadn't kept up was the `finished` judgement, which sits at 0.41–0.53
+immediately after a click while the page is still settling. Re-deciding the
+same action is the clearest evidence there is nothing left to do.
+
+**"Has it finished?" is its own call**, asked between steps before the
+screen is read at all. It needs the goal and what has been done and none of
+the hundred-odd candidates that deciding a *next* step requires — one noul,
+about three hundred tokens. Folded into the main fan-out, as it first was,
+every single-step command paid a full window read and a five-thousand-token
+call to be told it had already finished: measured at ~200 ms of model time
+on top of ~300 ms of reading, on every command.
+
+`KeywordDecider` cannot judge progress: comparing a screen against an
+intention is exactly what string matching can't do. It reports the goal
+finished after its single step, so with the decision service off the
+assistant degrades to the voice command line it was before the loop existed.
 
 ### Intents and resolvers
 
@@ -1563,8 +1683,10 @@ interface Resolver {
 | `menu` | The frontmost app's menu tree | The reason this generalises — see below |
 | `navigate` | A fixed verb set | Scroll, page, top, bottom, back, tabs *(new)* |
 | `window` | The app's windows | Move, resize, fullscreen, arrange *(new)* |
-| `target` | The window's controls | Focus or press, by label |
-| `text` | Stored values, selection, dictation | *(new: stored values)* |
+| `target` | The window's controls | Focus or press, by label or by position |
+| `site` | Known websites, plus any domain actually spoken | "Open YouTube", "go to github dot com" |
+| `search` / `find` / `type` | **Spans of the utterance itself** | See "Filling an argument" |
+| `text` | Stored values, dictation | Hands the microphone over; the words aren't said yet |
 | `clance` | Clance's own verbs | New session, open a section, start dictation |
 | `claude` | — | Always available; see "Handing off" |
 
@@ -1572,12 +1694,190 @@ Adding a capability is adding a resolver. The session, the decider and the
 actuator don't change, which is what keeps the *(new)* list in
 `assistant.md` a matter of work rather than redesign.
 
+### Filling an argument
+
+"Search for Jon Stewart" is a verb and an argument, and the argument is in
+no list of things that exist on the Mac. It is in the sentence the user just
+said. That is the whole gap between an assistant that picks nouns and one
+you can talk to.
+
+Jev cannot write text, and that is the feature rather than the obstacle.
+Code over-generates every plausible slice of the utterance, Jev picks one,
+and code copies it **verbatim**:
+
+```
+"search for Jon Stewart."  →  ["Jon Stewart", "Stewart", "Jon"]
+                               ↑ Jev picks; code copies
+```
+
+The value that comes back is a substring of the transcript. It cannot be an
+invented name, a dropped word or a transposed digit — TypeSafe's find-and-pick
+guarantee, and the reason this is safer than asking a generative model to
+extract the same thing.
+
+**It needed no new machinery.** A span *is* a candidate: `candidates()`
+builds the list, the decider names one by id, a resolver turns it into a
+`Resolution`. The only addition was `utterance` on `Context`, so a resolver
+whose candidates are slices of the sentence can see the sentence.
+`spans.ts` generates them longest-first — a complete phrase is nearly always
+the intended argument where a fragment of it is not — trimming leading and
+trailing function words and whisper's trailing full stop, which would
+otherwise be searched for along with the name.
+
+**A command often carries its own destination, and the destination is not
+part of the argument.** "Type hello world *into the search box*" ranked
+`"hello world into the search box"` top, because it was the longest, so the
+assistant would have typed the instruction along with the text. Spans from
+the payload alone now rank above spans from the whole sentence — both stay
+available, since the phrase might genuinely have been meant, but the shorter
+one leads. Only trailing, and only before a word that names a destination,
+so an argument containing "in" or "on" in the middle is untouched.
+
+**`type` and `text` are separate intents on purpose.** They look alike and
+are opposites: `type` writes words the user has *already said*, `text` hands
+the microphone over so they can say them *next*. Live traffic showed what
+merging them costs — "Type John Stewart" landed on "Dictate into Address and
+search bar" at p=0.49 with the no-match outcome right behind at 0.29, which
+is the model saying the right option was not on the menu. It wasn't.
+
+**The site resolver** exists because "open YouTube" is not a launch.
+YouTube is not an application, and the assistant used to search all
+seventy-nine installed apps, find nothing, and hand the request to Claude.
+Code owns every URL and the decider only picks a *name*: a model that cannot
+type a URL cannot mistype one. A domain is only offered when it was actually
+spoken — "github dot com" is rewritten, never invented — and it has to end
+in a known suffix, not merely letters after a dot, or "search dot something"
+navigates to a word somebody was using as a word.
+
 **The menu resolver** is what lets the assistant work in apps Clance has
 never seen. macOS apps publish their whole menu bar through the
-accessibility API, so an app's commands are read rather than taught, and
-include whether each is currently enabled. It is cached per bundle id and
-invalidated on focus change and on window change — a menu is a function of
-the app's state, and a stale one offers commands that fail.
+accessibility API (`ax.tree({ root: "menuBar", includeEnabled: true })`), so
+an app's commands are read rather than taught, and include whether each is
+currently enabled. It is cached per bundle id and window title and
+invalidated when either moves — a menu is a function of the app's state, and
+a stale one offers commands that fail.
+
+The *first* read of an app's menu bar is slow: ~4.4s measured against Finder
+cold, against ~60ms for every read afterwards, because macOS populates the
+menus on first access. That is far outside the latency budget, so the warm-up
+runs on the ⌥A press itself, unawaited, overlapping the second or two of
+speech that follows. It stays "on demand, never ambient" — the user has just
+asked for the assistant. Nothing is read before they do.
+
+An item that owns a submenu is a heading, not a command; its children are the
+commands. A greyed-out item is reported as unavailable rather than pressed,
+because `AXPress` on a disabled item succeeds and does nothing, which is the
+worst possible answer.
+
+Some apps refuse `AXPress` on an item they will happily run from the
+keyboard — Chrome rejected Close Tab twice while accepting New Tab from the
+same menu. Every item with a shortcut publishes it, so the shortcut is the
+fallback: `AXMenuItemCmdModifiers` is a bitmask of what to add to Command,
+with one inversion — bit 3 means there is no Command key at all, so 0 is a
+bare ⌘, 1 is ⇧⌘, and 8 is the key on its own.
+
+### Naming a thing on screen
+
+A control's accessibility label is not what a person would call it. A search
+result's runs to the headline, the full URL and the breadcrumb together —
+`"John Stewart (character) Wikipedia https://en.wikipedia.org › wiki ›
+John_Stewart_(charact…"` — and a hundred and thirty-nine of those made a
+7,000-token question nobody could answer: the model picked between
+near-identical walls of URL at p=0.31. Labels are now the first line, up to
+the URL, capped at sixty characters, which is both what the user would have
+said out loud and a 40% smaller question.
+
+### One tree per command
+
+Walking a window's accessibility tree costs ~300 ms on a large page, and the
+resolvers that need it — press, focus, dictate-into — each used to ask for
+their own, so a single spoken command paid for the same tree three times.
+It is now walked once per gather and shared, by memoizing the *promise*
+rather than the result, which is what makes sharing work when
+`gatherCandidates` fires every resolver in parallel: the first caller starts
+the walk and the rest wait on it. Measured: the second reader went from
+334 ms to 0.
+
+There is deliberately no expiry on that cache. It is dropped explicitly at
+the start of each gather, so the tree is always exactly as old as the
+command being decided — which matters much more in a loop, where the screen
+has changed between one step and the next.
+
+### Reading a web page
+
+For every app but one, macOS's accessibility tree is the right source. For a
+browser it is a lossy projection of something far better, and that is why
+the assistant was worst at exactly the thing people use most:
+
+| The DOM has | The accessibility tree gives |
+|---|---|
+| `getComputedStyle`, `checkVisibility()` | nothing — a hidden skip-link looks like the first real link |
+| `href` | nothing — a link is only its text |
+| `aria-label`, then `innerText`, then `value`, in order | all of them concatenated into one string |
+| ids written into the page, surviving a re-render | handles that go stale |
+| `element.click()` | a click at a coordinate |
+
+That concatenation is what produced labels like `"John Stewart (character)
+Wikipedia https://en.wikipedia.org › wiki › John_Stewart_(charact…"`, and a
+hundred and thirty-nine of those is a question nobody could answer.
+
+`capabilities/browser.ts` reaches the DOM of the browser the user already
+has open, through AppleScript — no relaunch with a debugging port, no
+extension to install. It runs a collector inside the page that applies the
+checks above, writes a `data-clance-id` onto each element so it can be acted
+on later even if the page has re-flowed, and returns them in reading order
+with the page's own search box identified. Acting goes back the same way, by
+id: `scrollIntoView` then `click()`, and typing uses the native value setter
+plus `input`/`change` events, because a framework ignores a value assigned
+behind its back.
+
+It costs the user one switch — **View → Developer → Allow JavaScript from
+Apple Events** — which Clance reports once per listening session rather than
+silently degrading. Without it, browsers fall back to the accessibility
+tree and behave as they did before.
+
+### Describing a window, not a document
+
+The accessibility tree is the whole document. The user is looking at one
+screenful of it. Measured on a real page: **23 links in the tree, 3 on
+screen.** Everything the assistant got wrong about "the first link" comes
+from that gap — it was answering questions about a document while the
+person asking was looking at a window.
+
+Reading every control's frame closes it, and costs **+45 ms on a 666-node
+tree**, measured. An earlier version of this document asserted the latency
+budget had no room for that. It was wrong, and wrong in the direction that
+mattered: this is the single cheapest thing that makes the assistant
+understand what the user can see.
+
+So controls are now **sorted the way a person reads** — visible first, then
+the page's own content, then down and across it — rather than in document
+order, which on a web page is often nothing like it.
+
+Content before chrome matters as much as visible before hidden. Measured on
+a real results page, the first eighteen controls in reading order were ten
+tab-strip buttons followed by New Tab, Ask Gemini, Tab Search, Close, Back,
+Forward and Reload, while only twenty-two of the page's own links were on
+screen at all. A list capped for size then keeps the tab bar and drops the
+page, which is exactly backwards: a command spoken at a browser is almost
+always about the page. Off-screen controls are kept rather than
+dropped, because "click Send" should still work when Send is just below the
+fold; they sort last, and their description says they're scrolled out of
+view, so that fact reaches the decider rather than being filtered out behind
+its back.
+
+Ordinal candidates — "the first link", "the last button" — ride alongside
+the named ones carrying the same ids, so either route resolves to the same
+control. They count only what is **visible**, and only what is **inside the
+page**: a browser's Back and Reload sit outside the `AXWebArea`, and nobody
+counting links on a results page starts at the toolbar.
+
+What remains is the gap between *visible* and *meant*. "The first link" now
+resolves to the topmost link the user can see, which is a good deal better
+than a hidden skip-navigation link, but a human saying "the first link" on a
+results page means the first **result** — a heading, a link and a snippet
+read as one thing. Nothing here groups controls into results, and doing so
+is app-specific in a way the rest of this design avoids.
 
 ### Risk and confirmation
 
@@ -1595,9 +1895,41 @@ place is confirmed, which is noisy and correct; the noise is answered by a
 per-app allow list the user grows by saying "always allow this", not by
 loosening the default.
 
-Separately, confidence below a threshold asks even for a `safe` action. The
-threshold is per intent — mishearing a scroll is cheaper than mishearing an
-app switch — and is the single number this feature lives or dies by.
+Separately, confidence below a threshold asks even for a `safe` action, and
+a third signal can raise risk: a `destructive` noul asked in the same call —
+*would carrying this out delete, send or spend something?* It can only ever
+**raise** risk, never lower it. Asking the component you don't fully trust
+whether it should be trusted is not a gate; letting it raise an alarm over a
+floor set elsewhere costs nothing.
+
+Every number lives in `thresholds.ts`, in one file, because they are only
+meaningful together and against a particular model version:
+
+| | |
+|---|---|
+| `intent` 0.55 | confidence needed to act at all |
+| `target` 0.45 | below this, ask which one rather than press a guess |
+| `targetTopProb` 0.35 | and the winner must hold at least this much |
+| `isCommand` 0.5 | were they addressing Clance at all? |
+| `destructive` 0.5 | above this, confirm whatever the intent says |
+| `quit` 0.8, `type`/`text` 0.65 | the only intents needing more than `intent` |
+
+These replace a set roughly twice as high — `target` was 0.85, `menu` 0.8 —
+derived by reasoning from TypeSafe's generic guidance, which is written
+around decisions like approving a bank transfer. A floor of 0.9 is right for
+moving money and wrong for clicking a link, and the result was an assistant
+that asked permission while being perfectly certain. The values here are
+still not measured; they are at least in the range that working
+implementations of this exact task use.
+
+**The model is pinned** to `jev-1.13.0`. Aliases move on release and every
+number above is meaningful only against one version, so `jev-latest` meant
+tuning against a moving target.
+
+Where a decision came from two questions — an intent and a target — the
+confidence the gate reads is the **weaker of the two**, not their product:
+one wrong half is enough to spoil the result, which is the rule TypeSafe's
+function-calling cookbook arrives at for the same reason.
 
 ### Acting
 
@@ -1607,9 +1939,16 @@ waits rather than racing it. Every outcome is reported — performed, refused
 with the app's own words, or unavailable.
 
 Undo has three tiers, tried in order: a `Resolution`'s own inverse where it
-has one (switch back, refocus the previous field); the app's own undo where
-the app accepts it; otherwise Clance says it can't, which is precisely the
-set of things that were `confirm`-risk on the way in.
+has one (switch back, refocus the previous field, put the window back); the
+app's own undo where the app accepts it; otherwise Clance says it can't,
+which is precisely the set of things that were `confirm`-risk on the way in.
+
+Moving a window is **position, then size, then position again**. macOS clamps
+a window's size to what fits on screen *from its current origin*, so growing
+a window that is sitting low down silently comes back short — measured, a
+request for 1470×923 landed as 1470×671 because the origin was still at
+y=285. Some apps refuse outright (Chrome), which is reported rather than
+retried.
 
 ### Handing off
 
@@ -1627,6 +1966,35 @@ solved, escalation always mints.
 
 ### What leaves the Mac
 
+The key lives in a gitignored `.env` read once at startup (`env.ts`,
+`.env.example`), under the name the TypeSafe SDK reads anyway —
+`TYPESAFE_API_KEY`. Deliberately not in `config.json`: that is the file a
+user copies between machines or pastes into a bug report.
+
+Settings shows what is *actually* deciding, not what is configured. The two
+come apart on every fresh install — the toggle defaults to Jev, no key
+exists, and local matching runs — and a toggle that silently means the
+opposite of what it says is worse than no toggle.
+
+State is kept to the three fields that bear on the decision — the utterance,
+the app's name, and its window title truncated to 80 characters. "Large
+state with irrelevant detail" is a documented Jev failure mode, and a
+browser tab title routinely runs to a hundred characters of site name,
+section and "Audio playing", none of which helps decide what was just said.
+
+Questions are written for a **literal reader**, and each one has to carry
+its whole meaning: a question's id is for code and is never sent to the
+model. So each target question is a plain sentence that names the state it
+is about and states its own premise — "If `utterance` is asking to open an
+application, which one?" — rather than using Clance's vocabulary or relying
+on a key called `target_launch` to supply the context. Most of these
+premises are false on any given call, which is the point of asking them all
+at once; saying so in the question is what stops a false premise being
+answered as if it were true. The intent options carry `what`/`not_for`
+pairs, structured criteria being TypeSafe's advice for exactly the case
+here: options that genuinely risk being confused with each other, launch
+against switch, menu against target.
+
 The `Situation` type carries the command buffer, the app's identity and the
 candidate labels. It has no field for document text, field contents or
 anything dictated, and dictated content lives in a buffer no `Decider` is
@@ -1637,36 +2005,161 @@ the decider at all.
 
 ### Surface
 
-The HUD follows `dictationWindow.ts` exactly — `focusable: false`,
-`showInactive()`, always on top, excluded from Clance's own screenshots —
-because the assistant's whole premise is that the app the user was in keeps
-focus. It shows what is being heard, what is about to happen, and what just
-happened; questions and confirmations render there and are answerable by
-voice or Escape.
+The HUD *is* `dictationWindow.ts`, not a copy of it — `focusable: false`,
+`showInactive()`, always on top, pre-warmed at launch, excluded from Clance's
+own screenshots — because the assistant's whole premise is that the app the
+user was in keeps focus, which is the same premise dictation already has. Two
+of them can never be up at once anyway: they are the same microphone. The
+renderer keeps its capture code unchanged and swaps only what is drawn, on an
+`assistant:view` message. It shows what is being heard, what is about to
+happen, and what just happened; questions and confirmations render there and
+are answerable by voice or Escape.
+
+Listening is dictation with a `purpose`. ⌥D transcribes and inserts; ⌥A
+transcribes and hands the text to the session instead of pasting it — same
+whisper, same HUD, same silence detection, one flag deciding where the words
+land. Until streaming lands (step 5), the session re-arms listening after
+each utterance, which is what makes one ⌥A press hold a conversation rather
+than take one command. With streaming the re-arm goes away: the microphone
+simply never closes, and nothing above it changes.
+
+**Dictating into a field** is where those two uses of one microphone meet.
+"Dictate into the subject" focuses the field and hands over to the ordinary
+⌥D path; the words the user then says are transcribed on the Mac and
+inserted by `dictation.ts`, and never pass through a decider at all — which
+is what keeps dictated content off the network by construction rather than
+by policy.
+
+The handoff is **awaited**: `dictateOnce()` resolves only when the dictation
+has ended, however it ended. That is not incidental. The assistant re-arms
+its own listening the moment a queued action returns, so a fire-and-forget
+handoff means the session takes the microphone back milliseconds after
+handing it over — `toggleDictation` sees a live recording, reads it as the
+user pressing the key again, and stops it. The user gets no dictation at
+all. Holding the assistant's turn open for the length of the dictation is
+the fix, and it falls out of the serial queue for free: nothing else runs
+while a command is still running.
+
+The decision service is a single toggle in Settings → assistant, which says
+in the UI exactly what is sent. Off, the assistant runs on `KeywordDecider`
+and still works.
 
 ### Latency budget
 
-| | |
-|---|---|
-| Partial to stable prefix | ~200 ms (inherent to streaming ASR) |
-| Decide, one fan-out call | ~100 ms |
-| Dispatch through AX | ~50 ms |
-| **Command complete to action begun** | **~350 ms** |
+Measured against live traffic through `jev-1.13.0`, not estimated:
 
-A speculation miss adds one more decide. The budget has no room for walking
-a menu tree inline, which is why menus are cached, nor for a second ASR
-pass, which is why deciding runs on the stable prefix rather than on a final
-transcript.
+| | | |
+|---|---|---|
+| Partial to stable prefix | ~200 ms | inherent to streaming ASR; not built yet |
+| Gather every intent's candidates | 97–463 ms | measured |
+| Decide — one fan-out call | 406–623 ms | measured |
+| Dispatch through AX | 27–283 ms | measured; a launch costs the most |
+| **Command complete to action begun** | **580–1250 ms** | measured |
+
+The earlier version of this table guessed ~100 ms for the decide and ~350 ms
+in total. Both were wrong by a factor of four or so. The decide is the whole
+budget: Jev's published range is 70–500 ms and these calls sit at the top of
+it, because a fan-out over an app's whole menu bar runs to four to six
+thousand input tokens.
+
+A speculation miss adds a second round trip of 330–480 ms, which is why the
+fan-out is rationed by **cost rather than relevance**: every candidate list
+of fifteen or fewer is asked about unconditionally, and only the large lists
+— installed apps, on-screen controls, the menu bar — compete for the two
+remaining slots. Live traffic made the case: `text`, four candidates, was
+twice ranked out by word overlap and twice cost a full second pass, while
+`menu_in:Apple` — sixty-one options of Recent Items — was sent five times
+and used never.
+
+The budget still has no room for walking a menu tree inline, which is why
+menus are cached and warmed on the ⌥A press, nor for a second ASR pass,
+which is why deciding runs on the stable prefix rather than a final
+transcript. The local decider costs ~0 ms, so everything here is the network.
+
+### What the log says
+
+The assistant logs to the main process's stdout, in the same shape as
+`localToolsServer.ts`, so a session's tool calls and a spoken command read
+as one timeline. One command is one block:
+
+```
+[assistant …] listening — deciding with Jev
+[assistant …] heard "quit Discord" in Electron — candidates in 579ms:
+              launch 79, switch 11, quit 11, menu 97, …, target 135
+[assistant …] asking about "quit Discord" in Electron — quit 11, menu 200 of 292
+[assistant …] answered in 118ms (2104 in, 0 out, jev-1)
+[assistant …] intent: quit (0.94) [then menu 0.04]
+[assistant …] target: "Discord" (0.91) [then Code 0.03] → confidence 0.91
+[assistant …] decided resolved in 121ms (712ms total)
+[assistant …] asking before "Quit Discord" — quit is confirm and not on the allow list
+```
+
+`p=` is the chosen option's share of the distribution and `conf=` is how
+concentrated that distribution was. Both are shown, and both are labelled,
+because they are different scales: an earlier version printed confidence
+bare next to the runners-up's probabilities and produced lines like
+`"Dictate into Address and search bar" (0.17) [then Dictate here 0.23]`,
+which reads as the model picking a less likely option and was nothing of
+the kind.
+
+One line in there is a diagnosis rather than a fact:
+
+```
+menu was certain but no candidate fitted — best "…" p=0.49, none p=0.29. Missing skill?
+```
+
+High intent confidence, low target confidence, and the no-match outcome
+close behind is a signature worth naming. It is not the model being unsure
+what the user meant; it is the model saying the right option was never
+offered — a gap in the skill list, not a tuning problem, and the two have
+opposite fixes. It is how `type` was found.
+
+A low target confidence is now a **question, not a refusal**: the top few
+candidates by probability become "which one?", answerable by voice. That is
+where most of the old confirmation noise went — the assistant was treating
+"several of these look alike" as a reason to stop rather than as the
+obvious thing to ask about.
+
+Three things it is built to answer:
+
+- **What was asked.** The candidate counts per intent, and `200 of 292`
+  where a list was trimmed for Jev's 255-label cap — so a target that was
+  never offered is distinguishable from one that was offered and not picked.
+- **What it nearly said.** The runners-up beside each choice. A confidence
+  alone can't tell "the labels are ambiguous" from "the question is wrong",
+  and those need opposite fixes.
+- **Why it stopped.** A confirmation names which of the two reasons applied
+  — a confidence below the floor, or an intent's risk — because one is tuned
+  and the other is allowed.
+
+API failures are one line carrying the status, the parsed body and the
+request id, rather than a stack trace through the SDK's internals: a 401
+means the key is wrong and a 400 means the *request* is wrong, and the body
+is the only thing that says which.
+
+The utterance is logged in full. It is by construction a command addressed
+to Clance, and when the decision service is on it is already leaving the
+Mac. What can never appear is a field's contents or anything dictated —
+neither reaches this layer at all.
 
 ### Build order
 
-1. Extract `capabilities/` from `localToolsServer.ts` — pure refactor.
-2. Intents, resolvers and the actuator, exercised by `KeywordDecider` over
-   whole utterances from today's stop-then-transcribe flow. The assistant
-   works end to end here, without streaming and without Jev.
-3. The HUD, risk gating, confirmation and undo.
-4. `JevDecider` behind the same interface.
-5. Streaming partials and the commit-point buffer.
+1. **Done.** Extract `capabilities/` from `localToolsServer.ts` — pure
+   refactor — plus the capabilities the assistant needs that Clance didn't
+   have: menu commands, launch and quit, navigation, window arrangement,
+   focusing a field.
+2. **Done.** Intents, resolvers and the actuator, exercised by
+   `KeywordDecider` over whole utterances from today's stop-then-transcribe
+   flow. The assistant works end to end here, without streaming and without
+   Jev.
+3. **Done.** The HUD, risk gating, confirmation and undo.
+4. **Written, unproven.** `JevDecider` behind the same interface. It has
+   never run against the live API — there is no key on this machine — so it
+   is the one part of this whose behaviour is a claim rather than a
+   measurement.
+5. **Not started.** Streaming partials and the commit-point buffer.
+   `TranscriptBuffer` is built and unit-tested for revision, stability and
+   commit points; nothing feeds it partials yet.
 
 Steps 1–3 are shippable on their own as a push-to-talk assistant. Streaming
 is what makes it feel alive, and it is deliberately last because it is the
@@ -1835,23 +2328,62 @@ on errors.
   keeps deciding to one round trip. How often the speculation misses — and
   therefore what the real latency distribution looks like rather than its
   best case — can only be measured against real commands.
+- **The per-intent confidence floors are guesses.** They follow TypeSafe's
+  shape — a 0.6 universal floor, raised by what acting wrongly costs — but
+  the numbers above it are reasoned, not measured, and the docs are explicit
+  that cookbook thresholds are not universal rules. They need real
+  utterances by a real voice.
+- **The decision timeout is a ceiling, not a measurement.** Jev gets 1500 ms
+  and no retries, because the local decider answers in under a millisecond
+  and retrying a classifier the user is waiting on mid-sentence is strictly
+  worse than falling back. The SDK's own defaults — two retries with
+  backoff — measured at 13.4 s against an unreachable host, which is not
+  degrading, it's breaking. Whether 1500 ms is the right ceiling depends on
+  what the fan-out actually costs, which is still unmeasured.
+- **A cold accessibility read returns an empty list, not a slow one.**
+  Caught in a log: the same `quit` candidates came back as 10 on the first
+  command after ⌥A and 11 a second later, and `target` as 0 then 135. The
+  warm-up on the ⌥A press is what this is for, and it usually wins because
+  the user then speaks for a second or two — but a fast speaker can still
+  be decided against a short list, and nothing currently notices that the
+  list was short.
 - **The 200 ms stability window is a guess.** Too short and the decider runs
   on transcripts whisper is about to revise; too long and the assistant
   feels laggy. It likely depends on the speech model.
-- **Jev is new, waitlisted and unproven.** It launched in September 2026,
-  access is granted by request, and its calibration is attested only by its
-  own vendor. `KeywordDecider` and the `Decider` interface exist so the
-  assistant degrades rather than dies, but how useful that fallback actually
-  is at the moment it's needed hasn't been tested.
+- **Jev's own documented weak spots are only partly designed around.**
+  Literal reading, indirection and distraction by irrelevant state are
+  handled — plain instructions, filtered state, structured criteria. Two
+  are not: the assistant never asks Jev to count or compare anything
+  numeric (fine), but it does rely on `confidence` being comparable *across
+  question types* when it takes the minimum of an intent and a target
+  answer, and "don't transfer thresholds across question types" is on the
+  known-limitations list. Both are `choice` questions, which is the
+  charitable reading, but it is an assumption.
+- **Jev is new, waitlisted and unproven, and `JevDecider` has never run.**
+  Jev launched in September 2026, access is granted by request, and its
+  calibration is attested only by its own vendor. `JevDecider` is written
+  against the published SDK types and typechecks, but no call has been made:
+  every claim in "Deciding, in one round trip" — the fan-out's cost, the
+  ~100 ms, the confidence numbers the risk gate reads — is the vendor's or
+  the design's, not a measurement. `KeywordDecider` is measured, works, and
+  is what runs until a key is in place.
+- **Two labels the same.** A window routinely has several controls reading
+  the same word (Chrome offered "pause" twice). The decider is handed
+  disambiguated labels and near-ties become a question rather than a coin
+  toss, but whether a spoken answer — "the second one" — picks what the user
+  meant depends on the order the accessibility tree happens to be walked in,
+  which is not an order the user can see.
 - **Streaming partial transcription doesn't exist yet.** The dictation engine
   spawns `whisper-cli` per utterance and reads the result from a file; the
   assistant wants partials mid-sentence. Whether `whisper.cpp` gives that
   cheaply enough on the recommended model is unknown. Until it does, ⌥A works
   on whole utterances, which the build order treats as shippable.
-- **Menu-tree cache invalidation.** Cached per bundle id, invalidated on
-  focus and window change. Whether that is enough is untested: menus also
-  change with selection, document state and dynamic window lists, and a stale
-  cache offers commands that fail.
+- **Menu-tree cache invalidation.** Keyed on bundle id *and* window title,
+  thrown away when either moves. Whether that is enough is untested: menus
+  also change with the selection and with document state, neither of which
+  changes the window title, and a stale cache offers commands that fail. The
+  failure is visible rather than silent — a command that has gone stale is
+  refused by the app — but it is still a failure the user has to interpret.
 - **⌥A and the Option key.** ⌥+letter produces a diacritic on macOS (⌥A is
   "å"). `globalShortcut` should intercept before the character is composed,
   but this needs verifying against a live text field — a failed registration
