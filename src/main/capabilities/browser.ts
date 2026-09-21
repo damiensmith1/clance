@@ -124,8 +124,11 @@ const COLLECT = `(function () {
     if (st.visibility === 'hidden' || st.display === 'none' || Number(st.opacity) === 0) continue;
     if (el.getAttribute('aria-hidden') === 'true') continue;
     if (typeof el.checkVisibility === 'function' && !el.checkVisibility()) continue;
-    var id = el.getAttribute('data-clance-id');
-    if (!id) { id = 'd' + (window.__clanceId++); el.setAttribute('data-clance-id', id); }
+    // Always minted here, never read back from the page. An id read from
+    // the DOM is attacker-controlled: a page can pre-set data-clance-id
+    // and have it interpolated into the script we later run in a tab.
+    var id = 'd' + (window.__clanceId++);
+    el.setAttribute('data-clance-id', id);
     var tag = el.tagName.toLowerCase();
     var type = (el.getAttribute('type') || '').toLowerCase();
     var role = el.getAttribute('role') || '';
@@ -184,12 +187,34 @@ export async function readPage(bundleId: string): Promise<Page | BrowserBlocked>
 // Acting happens by id, on the element itself — not at a coordinate. The id
 // was written into the DOM when the page was read, so it still refers to
 // the same element even if the page has re-flowed since.
-function byId(id: string): string {
+//
+// The shape of an id Clance minted, and the only shape it will act on.
+const CLANCE_ID = /^d[0-9]{1,9}$/;
+
+/**
+ * A selector for one element Clance itself tagged.
+ *
+ * This string is executed as JavaScript inside a page, so anything
+ * interpolated into it is code. The id reaches here from `readPage`, which
+ * reads the DOM — so until the collector was changed to mint every id
+ * rather than read one back, a page could set
+ * `data-clance-id='x"]);…;//'` and break out of the selector into
+ * arbitrary script. Worse than it sounds: AppleScript targets *the active
+ * tab*, so a tab switch between reading and clicking runs that script in
+ * another site's origin.
+ *
+ * Minting ids closes that. This is the second lock: an id that isn't one
+ * Clance could have produced never becomes code at all.
+ */
+function byId(id: string): string | null {
+  if (!CLANCE_ID.test(id)) return null;
   return `document.querySelector('[data-clance-id="${id}"]')`;
 }
 
 export async function clickElementInPage(bundleId: string, id: string, label: string): Promise<Outcome> {
-  const source = `(function(){var el=${byId(id)};if(!el)return 'gone';` +
+  const selector = byId(id);
+  if (!selector) return fail(`"${label}" doesn't have an id Clance issued, so it won't be clicked.`);
+  const source = `(function(){var el=${selector};if(!el)return 'gone';` +
     `el.scrollIntoView({block:'center'});el.click();return 'ok';})()`;
   const result = await evaluate(bundleId, source);
   if (typeof result !== "string") return fail(result.blocked);
@@ -204,10 +229,12 @@ export async function typeInPage(
   submit: boolean,
   label: string
 ): Promise<Outcome> {
+  const selector = byId(id);
+  if (!selector) return fail(`"${label}" doesn't have an id Clance issued, so it won't be typed into.`);
   // Set the value, then fire the events a framework listens for — React and
   // friends ignore a value assigned behind their back.
   const source =
-    `(function(){var el=${byId(id)};if(!el)return 'gone';el.scrollIntoView({block:'center'});el.focus();` +
+    `(function(){var el=${selector};if(!el)return 'gone';el.scrollIntoView({block:'center'});el.focus();` +
     `var v=${JSON.stringify(text)};` +
     `if('value' in el){var set=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el),'value');` +
     `if(set&&set.set)set.set.call(el,v);else el.value=v;}else{el.textContent=v;}` +
