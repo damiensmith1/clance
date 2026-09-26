@@ -1,6 +1,6 @@
 import { html, useEffect, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
 import { Icon } from "../../shared/icons.js";
-import { renderMarkdown, attachCopyHandler } from "../../shared/markdown.js";
+import { renderMarkdown, attachCopyHandler, loadMarkdownImages } from "../../shared/markdown.js";
 
 // Quick Look for a session: what was said, without attaching a terminal to
 // it. Reads the parsed transcript from chatHistory.ts's peekSession — a
@@ -72,15 +72,19 @@ function groupBlocks(blocks) {
 // typed, since a person's prompt is plain text they wrote, not a document
 // to re-format.
 //
-// renderMarkdown HTML-escapes every character of its input before it
-// introduces a single tag of its own (see markdown.js), so a transcript
-// that happens to contain markup renders as the text it is rather than as
-// DOM — which is what makes setting this innerHTML safe.
+// renderMarkdown escapes raw HTML here (no `html` option) and sanitizes what
+// it returns (see markdown.js), so a transcript that happens to contain
+// markup renders as the text it is rather than as DOM — which is what makes
+// setting this innerHTML safe. Images aren't read for a peek; they show as
+// their alt text.
 function TextBlock({ text, role }) {
   const ref = useRef(null);
   useEffect(() => {
     if (role === "assistant" && ref.current) attachCopyHandler(ref.current);
   }, [role]);
+  useEffect(() => {
+    if (role === "assistant" && ref.current) loadMarkdownImages(ref.current, null);
+  }, [role, text]);
   if (role === "user") return html`<div class="peek-text peek-text-plain">${text}</div>`;
   return html`<div
     class="peek-text peek-md"

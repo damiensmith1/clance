@@ -6,3 +6,6 @@ native/**/build/
 .DS_Store
 .env
 .claude/settings.local.json
+
+# Scratch file for eyeballing the markdown viewer
+testmarkdown.md

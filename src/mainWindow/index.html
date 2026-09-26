@@ -1946,80 +1946,350 @@
         margin: 0 auto;
         padding: var(--space-5) var(--space-5) 64px;
         font-family: var(--font-sans);
-        font-size: var(--text-md);
+        font-size: var(--text-base);
         line-height: 1.65;
         color: var(--text-primary);
+        /* A long URL or an unbroken token wraps rather than widening the
+           page; code blocks and tables scroll inside their own boxes. */
+        overflow-wrap: anywhere;
+      }
+      .file-markdown > :first-child {
+        margin-top: 0;
       }
       .file-markdown h1,
       .file-markdown h2,
-      .file-markdown h3 {
+      .file-markdown h3,
+      .file-markdown h4,
+      .file-markdown h5,
+      .file-markdown h6 {
         font-weight: var(--weight-semibold);
-        letter-spacing: -0.03em;
-        margin: var(--space-5) 0 var(--space-3);
+        line-height: 1.3;
+        margin: var(--space-6) 0 var(--space-3);
+        scroll-margin-top: var(--space-4);
       }
       .file-markdown h1 {
         font-size: var(--text-2xl);
+        letter-spacing: -0.03em;
+        padding-bottom: var(--space-2);
+        border-bottom: 1px solid var(--surface-border);
       }
       .file-markdown h2 {
         font-size: var(--text-xl);
+        letter-spacing: -0.03em;
+        padding-bottom: var(--space-2);
+        border-bottom: 1px solid var(--surface-border);
       }
       .file-markdown h3 {
         font-size: var(--text-lg);
       }
-      .file-markdown p {
-        margin: 0 0 var(--space-3);
+      .file-markdown h4 {
+        font-size: var(--text-base);
+      }
+      .file-markdown h5 {
+        font-size: var(--text-md);
+      }
+      .file-markdown h6 {
+        font-size: var(--text-md);
+        color: var(--text-secondary);
+      }
+      .file-markdown p,
+      .file-markdown ul,
+      .file-markdown ol,
+      .file-markdown dl,
+      .file-markdown blockquote,
+      .file-markdown details,
+      .file-markdown .code-block,
+      .file-markdown .md-table-wrap,
+      .file-markdown .md-callout {
+        margin: 0 0 var(--space-4);
       }
       .file-markdown ul,
       .file-markdown ol {
-        margin: 0 0 var(--space-3);
         padding-left: var(--space-5);
       }
       .file-markdown li {
         margin-bottom: var(--space-1);
       }
-      .file-markdown code {
-        font-family: var(--font-mono);
-        font-size: var(--text-sm);
-        background: var(--surface-bg);
-        border-radius: var(--radius-sm);
-        padding: 1px 4px;
+      .file-markdown li > ul,
+      .file-markdown li > ol {
+        margin: var(--space-1) 0 0;
       }
-      .file-markdown pre code {
-        background: none;
-        padding: 0;
+      .file-markdown li > p {
+        margin: 0 0 var(--space-2);
+      }
+      .file-markdown li.md-task-item {
+        list-style: none;
+        margin-left: calc(-1 * var(--space-4));
+      }
+      .file-markdown .md-task {
+        margin: 0 var(--space-2) 0 0;
+        vertical-align: -1px;
+        accent-color: var(--accent);
+      }
+      .file-markdown hr {
+        border: none;
+        border-top: 1px solid var(--divider-strong);
+        margin: var(--space-6) 0;
       }
       .file-markdown a {
         color: var(--text-primary);
         text-decoration: underline;
+        text-decoration-color: var(--divider-strong);
         text-underline-offset: 2px;
+        cursor: pointer;
+      }
+      .file-markdown a:hover {
+        text-decoration-color: currentColor;
+      }
+      .file-markdown strong {
+        font-weight: var(--weight-semibold);
+      }
+      .file-markdown code {
+        font-family: var(--font-mono);
+        font-size: 0.88em;
+        background: var(--surface-bg);
+        border-radius: var(--radius-sm);
+        padding: 1px 5px;
+      }
+      .file-markdown kbd {
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        padding: 1px 6px;
+        border: 1px solid var(--surface-border);
+        border-bottom-width: 2px;
+        border-radius: var(--radius-sm);
+        background: var(--surface-card);
+      }
+      .file-markdown mark {
+        background: var(--warning-bg);
+        color: inherit;
+        padding: 0 2px;
+        border-radius: 2px;
+      }
+      .file-markdown sub,
+      .file-markdown sup {
+        font-size: 0.75em;
+        line-height: 0;
+      }
+      .file-markdown abbr[title] {
+        text-decoration: underline dotted;
+        cursor: help;
+      }
+      .file-markdown img {
+        max-width: 100%;
+        height: auto;
+        border-radius: var(--radius-sm);
+        vertical-align: middle;
+      }
+      /* Where a picture couldn't be shown: a missing file, or a remote one,
+         which is never fetched. */
+      .file-markdown .md-image-missing,
+      .md-image-missing {
+        font-style: italic;
+        color: var(--text-tertiary);
+      }
+      .file-markdown blockquote {
+        padding: 0 0 0 var(--space-4);
+        border-left: 3px solid var(--divider-strong);
+        color: var(--text-secondary);
+      }
+      .file-markdown blockquote > :last-child {
+        margin-bottom: 0;
+      }
+
+      /* Callouts: GitHub's > [!NOTE] and Obsidian's > [!info] Title. */
+      .file-markdown .md-callout {
+        --callout: var(--tok-number);
+        --callout-bg: var(--diff-hunk-bg);
+        padding: var(--space-3) var(--space-4);
+        border-left: 3px solid var(--callout);
+        border-radius: 0 var(--radius-md) var(--radius-md) 0;
+        background: var(--callout-bg);
+        color: var(--text-primary);
+      }
+      .file-markdown .md-callout-tip {
+        --callout: var(--success);
+        --callout-bg: var(--success-bg);
+      }
+      .file-markdown .md-callout-important {
+        --callout: var(--tok-keyword);
+        --callout-bg: var(--accent-soft);
+      }
+      .file-markdown .md-callout-warning {
+        --callout: var(--warning);
+        --callout-bg: var(--warning-bg);
+      }
+      .file-markdown .md-callout-caution {
+        --callout: var(--danger);
+        --callout-bg: var(--diff-del-bg);
+      }
+      .file-markdown .md-callout-title {
+        margin-bottom: var(--space-1);
+        font-weight: var(--weight-semibold);
+        color: var(--callout);
+      }
+
+      /* Code blocks: a header with the language and Copy, then the code. */
+      .file-markdown .code-block {
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-md);
+        background: var(--surface-card);
+        overflow: hidden;
+      }
+      .file-markdown .code-block-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+        border-bottom: 1px solid var(--surface-border);
+        background: var(--surface-bg);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .file-markdown .code-copy-btn {
+        padding: 2px var(--space-2);
+        border: none;
+        border-radius: var(--radius-sm);
+        background: none;
+        font-family: var(--font-sans);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        cursor: pointer;
+      }
+      .file-markdown .code-copy-btn:hover {
+        background: var(--surface-hover);
+        color: var(--text-primary);
+      }
+      .file-markdown .code-copy-btn.code-copy-done {
+        color: var(--success);
+      }
+      .file-markdown .code-block pre {
+        margin: 0;
+        padding: var(--space-3);
+        overflow-x: auto;
+        overflow-wrap: normal;
+      }
+      .file-markdown .code-block code {
+        display: block;
+        padding: 0;
+        background: none;
+        font-size: var(--text-sm);
+        line-height: 1.6;
+        white-space: pre;
+      }
+      .file-markdown .md-diff-ins,
+      .file-markdown .md-diff-del,
+      .file-markdown .md-diff-hunk,
+      .file-markdown .md-diff-ctx {
+        display: block;
+        margin: 0 calc(-1 * var(--space-3));
+        padding: 0 var(--space-3);
+      }
+      .file-markdown .md-diff-ins {
+        background: var(--diff-add-bg);
+        color: var(--diff-add-mark);
+      }
+      .file-markdown .md-diff-del {
+        background: var(--diff-del-bg);
+        color: var(--diff-del-mark);
+      }
+      .file-markdown .md-diff-hunk {
+        background: var(--diff-hunk-bg);
+        color: var(--text-tertiary);
+      }
+
+      /* Tables scroll inside their own box rather than widening the page. */
+      .file-markdown .md-table-wrap {
+        overflow-x: auto;
       }
       .file-markdown table {
-        width: 100%;
         border-collapse: collapse;
-        margin: 0 0 var(--space-4);
-        font-size: var(--text-sm);
+        font-size: var(--text-md);
+        overflow-wrap: normal;
       }
       .file-markdown th,
       .file-markdown td {
         border: 1px solid var(--surface-border);
         padding: var(--space-2) var(--space-3);
-        text-align: left;
         vertical-align: top;
       }
       .file-markdown th {
         background: var(--surface-bg);
         font-weight: var(--weight-medium);
+        white-space: nowrap;
       }
-      /* Where a picture would be. Nothing is loaded to render a document. */
-      .md-image-alt {
-        font-style: italic;
+      .file-markdown tbody tr:nth-child(even) {
+        background: var(--surface-hover);
+      }
+
+      /* Definition lists. */
+      .file-markdown dt {
+        font-weight: var(--weight-semibold);
+      }
+      .file-markdown dd {
+        margin: 0 0 var(--space-2) var(--space-4);
+      }
+
+      .file-markdown details {
+        padding: var(--space-2) var(--space-3);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-md);
+      }
+      .file-markdown summary {
+        cursor: pointer;
+        font-weight: var(--weight-medium);
+      }
+      .file-markdown details[open] > summary {
+        margin-bottom: var(--space-2);
+      }
+
+      /* Front matter: the YAML block at the top, shown as its source. */
+      .file-markdown .md-frontmatter {
+        margin: 0 0 var(--space-5);
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        line-height: 1.7;
+        color: var(--tok-keyword);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .file-markdown .md-frontmatter .md-fm-key,
+      .file-markdown .md-frontmatter .md-fm-fence {
         color: var(--text-tertiary);
       }
-      .file-markdown blockquote {
-        margin: 0 0 var(--space-3);
-        padding-left: var(--space-3);
-        border-left: 2px solid var(--surface-border);
+      .file-markdown .md-tag {
+        display: inline-block;
+        padding: 0 var(--space-2);
+        border-radius: 999px;
+        background: var(--surface-bg);
+        font-size: var(--text-sm);
+        line-height: 1.7;
         color: var(--text-secondary);
+      }
+      .file-markdown .md-wikilink {
+        color: var(--tok-number);
+        border-bottom: 1px dashed currentColor;
+      }
+      .file-markdown .md-wikilink-embed::before {
+        content: "↳ ";
+      }
+
+      /* Footnotes (markdown-it-footnote's own markup). */
+      .file-markdown .footnote-ref a,
+      .file-markdown .footnote-backref {
+        text-decoration: none;
+      }
+      .file-markdown .footnotes-sep {
+        margin: var(--space-6) 0 var(--space-3);
+      }
+      .file-markdown .footnotes {
+        font-size: var(--text-md);
+        color: var(--text-secondary);
+      }
+      .file-markdown .footnotes p {
+        margin: 0;
       }
       /* A checkerboard, so a transparent PNG reads as transparent rather
          than as whatever colour the page happens to be. */

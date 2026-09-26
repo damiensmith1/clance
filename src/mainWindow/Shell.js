@@ -296,7 +296,7 @@ function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut, openSectio
     case "files":
       return html`<${FilesSection} onOpenFile=${openFileTab} />`;
     case "file":
-      return html`<${FileSection} repoRoot=${tab.repoRoot} path=${tab.path} />`;
+      return html`<${FileSection} repoRoot=${tab.repoRoot} path=${tab.path} onOpenFile=${openFileTab} />`;
     case "settings":
       return html`<${SettingsSection} />`;
     case "dictation":

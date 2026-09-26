@@ -1022,6 +1022,12 @@ export async function getFileView(dir: unknown, path: unknown): Promise<FileView
   if (!file) {
     const known = await git(root, ["--no-optional-locks", "ls-files", "--error-unmatch", "-z", "--", path], 64 * 1024);
     if (known.code !== 0) {
+      // A file git ignores (the Files tree lists those) isn't in `ls-files`
+      // either. It has no diff, so it reads like a file outside any
+      // repository — with the same resolved-path containment check that
+      // stands in for `ls-files` there.
+      const ignored = readPlainFileView(root, path);
+      if (ignored) return ignored;
       // Not in this tree. A file tab open across a branch switch lands here,
       // and "isn't in this repository any more" would be a lie — the file is
       // fine, it just doesn't exist on the branch now checked out.

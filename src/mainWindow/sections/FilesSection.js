@@ -36,7 +36,10 @@ export function FilesSection({ onOpenFile }) {
   const [dirs, setDirs] = useState(() => new Map());
   const [expanded, setExpanded] = useState(() => new Set());
   const [selected, setSelected] = useState(null);
-  const [showIgnored, setShowIgnored] = useState(false);
+  // On by default: the tree is for looking around a folder, and a build
+  // output or a local scratch file is as much in it as a tracked one.
+  // Ignored rows are dimmed rather than hidden, and the toggle hides them.
+  const [showIgnored, setShowIgnored] = useState(true);
   const [menu, setMenu] = useState(false);
   const [repo, setRepo] = useState(null);
   const [loaded, setLoaded] = useState(false);

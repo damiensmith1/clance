@@ -1,6 +1,6 @@
 import { html, useEffect, useLayoutEffect, useMemo, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
 import { highlightLine } from "../../shared/syntax.js";
-import { renderMarkdown, attachCopyHandler } from "../../shared/markdown.js";
+import { renderMarkdown, attachCopyHandler, loadMarkdownImages, resolveDocumentPath } from "../../shared/markdown.js";
 
 // A file tab: the whole file, with its changes in place, and a button that
 // turns the change marks off. Read-only — Clance never edits a file; the
@@ -42,7 +42,7 @@ function formatBytes(bytes) {
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }
 
-export function FileSection({ repoRoot, path }) {
+export function FileSection({ repoRoot, path, onOpenFile }) {
   const [view, setView] = useState(null);
   // Set when no reader claimed the file. Not an error — the fallback says
   // what it can about it instead of apologising.
@@ -193,7 +193,14 @@ export function FileSection({ repoRoot, path }) {
     return html`<${ImageView} path=${path} image=${image} rendered=${rendered} setRendered=${setRendered} />`;
   }
   if (view && view.renders === "markdown" && rendered && !view.omitted) {
-    return html`<${MarkdownView} path=${path} view=${view} rendered=${rendered} setRendered=${setRendered} />`;
+    return html`<${MarkdownView}
+      repoRoot=${repoRoot}
+      path=${path}
+      view=${view}
+      rendered=${rendered}
+      setRendered=${setRendered}
+      onOpenFile=${onOpenFile}
+    />`;
   }
   if (fallback) {
     const size = formatBytes(fallback.bytes);
@@ -331,12 +338,12 @@ function ImageView({ path, image, rendered, setRendered }) {
 }
 
 /**
- * A rendered .md. `renderMarkdown` escapes every character of the file before
- * it introduces a tag of its own, so a document holding `<script>` renders
- * those characters instead of running them, and only http/https/mailto links
- * become links at all. The main process re-parses the URL before opening it.
+ * A rendered .md. `renderMarkdown` sanitizes everything it returns (see
+ * shared/markdown.js), so raw HTML in the file renders without anything in it
+ * being able to run. Images are read here, relative to this file, through the
+ * same containment check any file tab gets; nothing remote is fetched.
  */
-function MarkdownView({ path, view, rendered, setRendered }) {
+function MarkdownView({ repoRoot, path, view, rendered, setRendered, onOpenFile }) {
   const bodyRef = useRef(null);
   const source = useMemo(
     () =>
@@ -346,7 +353,7 @@ function MarkdownView({ path, view, rendered, setRendered }) {
         .join("\n"),
     [view]
   );
-  const rendering = useMemo(() => renderMarkdown(source), [source]);
+  const rendering = useMemo(() => renderMarkdown(source, { html: true, frontMatter: true }), [source]);
 
   useEffect(() => {
     const element = bodyRef.current;
@@ -354,14 +361,39 @@ function MarkdownView({ path, view, rendered, setRendered }) {
     attachCopyHandler(element);
   }, []);
 
-  // A link in a file is a link to somewhere else, not a way to navigate this
-  // window. It goes to the browser, and the main process decides whether the
-  // scheme is one worth opening at all.
+  useEffect(() => {
+    const element = bodyRef.current;
+    if (!element) return;
+    loadMarkdownImages(element, async (src) => {
+      const target = resolveDocumentPath(path, src);
+      if (!target) return null;
+      const opened = await window.clanceApp.openFileView(repoRoot, target);
+      return opened?.reader === "image" ? opened.dataUrl : null;
+    });
+  }, [rendering, repoRoot, path]);
+
+  // A link never navigates this window. `#section` scrolls to that heading
+  // (ids carry an `md-` prefix, footnotes don't); a relative path opens that
+  // file in a tab; anything else goes to the browser, and the main process
+  // decides whether its scheme is one worth opening at all.
   function onClick(event) {
     const link = event.target.closest("a[href]");
     if (!link) return;
     event.preventDefault();
-    window.clanceApp.openExternalUrl(link.getAttribute("href"));
+    const href = link.getAttribute("href");
+    if (href.startsWith("#")) {
+      const id = decodeURIComponent(href.slice(1));
+      const target =
+        bodyRef.current?.querySelector(`#${CSS.escape(`md-${id}`)}`) ?? bodyRef.current?.querySelector(`#${CSS.escape(id)}`);
+      target?.scrollIntoView({ block: "start" });
+      return;
+    }
+    const relative = resolveDocumentPath(path, href);
+    if (relative !== null && onOpenFile) {
+      onOpenFile(repoRoot, relative);
+      return;
+    }
+    window.clanceApp.openExternalUrl(href);
   }
 
   return html`

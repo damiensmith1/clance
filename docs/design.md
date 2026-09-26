@@ -42,6 +42,7 @@ anything open-ended is handed to a Claude Code session. See "Assistant".
 | Reasoning, tools, session storage | The `claude` CLI, as background agents | See "Sessions" |
 | Terminal | `node-pty` + `xterm.js` (vendored under `src/shared/vendor/xterm/`) | |
 | Main window UI | Preact + htm, vendored as one standalone module | No CDN, no build step |
+| Markdown | `markdown-it` + five of its plugins, and `DOMPurify` (vendored as ES modules under `src/shared/vendor/markdown/`) | See "Readers" |
 | Hotkeys | Electron `globalShortcut` | No key-up events, hence press-to-toggle dictation |
 | Keyboard/mouse/window access | `@nut-tree-fork/nut-js` | Needs Accessibility |
 | Screenshots | Electron `desktopCapturer` | Needs Screen Recording |
@@ -280,8 +281,8 @@ a log to show.
 The header prefers the CLI's own `ai-title` over the first message's opening
 words, and carries the project, git branch (unless it is a detached `HEAD`),
 model, message count, how long the conversation ran and when it last moved.
-Claude's replies render through `markdown.js`, which escapes its input before
-introducing any tag of its own; the user's own messages are shown as typed.
+Claude's replies render through `markdown.js` with raw HTML escaped and the
+output sanitized (see "Readers"); the user's own messages are shown as typed.
 
 ## Terminals
 
@@ -1076,6 +1077,13 @@ and "nothing is ignored" are indistinguishable to a caller that can't tell
 them apart, and the second one quietly puts `node_modules` on screen. The
 tree then lists everything and says why.
 
+**Ignored files.** The tree lists them by default (dimmed), since it's for
+looking around a folder, not recalling a tracked file. Opening one can't go
+through `ls-files`, which doesn't name ignored paths, so `getFileView` falls
+back to `readPlainFileView` against the repository root — the same
+`realpath` containment check a non-repository folder gets — before deciding
+the path is missing or only in history.
+
 **Opening a file.** `resolveFile` returns the `(root, path)` a file tab opens
 with, and a file inside a repository resolves against the *repository* rather
 than the chosen folder. So a file reached from Files and the same file
@@ -1108,22 +1116,47 @@ of which an image has an answer for.
 Markdown is the cheap case and shows why the split is where it is. It isn't
 a separate payload — it is the text reader with `renders: "markdown"` set, so
 Raw keeps the diff marks and Rendered is a second view over the same read,
-the way Diff / Clean already was. `shared/markdown.js`, written for the old
-chat UI and dead ever since, does the rendering: it escapes every character
-before it introduces a tag, which is exactly the property a reader needs when
-the document may have been cloned a minute ago. Reviving it needed three
-fixes, all from its old caller being chat rather than documents — a
-hard-wrapped paragraph now flows instead of breaking at every newline, an
-indented line under a bullet continues that bullet instead of becoming a
-stray paragraph, and links exist (http, https and mailto only; anything else
-stays the text it was, and the main process re-parses the URL before opening
-it).
+the way Diff / Clean already was. `shared/markdown.js` does the rendering, on **markdown-it** with its
+footnote, deflist, mark, sub and sup plugins, all vendored as dependency-free
+ES modules. It replaced a hand-rolled renderer from the old chat UI, and the
+reason is the opposite of `syntax.js`'s: highlighting is allowed to be wrong
+(an uncoloured word), but a markdown parser that is wrong loses structure —
+nested lists flattened into one line, a blockquote shown as `>` characters.
+CommonMark's edge cases are the whole job, and a tested parser has them.
+What markdown-it doesn't do are small rules in `markdown.js`: front matter
+(shown as its own source with keys picked out, never evaluated as YAML), callouts
+(`> [!NOTE]`, Obsidian's `> [!info] Title`), task-list checkboxes, GitHub
+heading ids, and Obsidian's `[[wikilinks]]` (shown, not followed — they name
+a note in a vault, not a path), `#tags` and `%%comments%%`. Code blocks go
+through `syntax.js`, with fence names mapped onto its extensions; a `diff`
+block is coloured by its first column instead.
 
-Nothing is fetched or read to render a document: a picture referenced inside
-a markdown file renders as its alt text. Resolving those references would
-mean one file's contents deciding what other files get read, and a remote one
-would mean opening a document quietly calls out to whoever wrote it. An image
-is looked at by opening it, which is its own tab.
+**Sanitizing.** A file tab renders the document's own raw HTML, because
+READMEs are written in it. The page it lands in can reach the preload
+bridge, which types into terminals, so the output — ours and the document's
+— goes through **DOMPurify** with the HTML-only profile (no SVG or MathML)
+before it's inserted. On top of DOMPurify's defaults it forbids `<style>`,
+forms, media, frames and `<template>`; drops a `style` attribute that
+fetches (`url(`) or positions itself (`position:`, which could lay a fake UI
+over the window); and keeps class names only in the renderer's own
+namespaces (`md-`, `tok-`, `code-`, `footnote`), so a document can't borrow
+the app's overlay classes. A session peek renders with raw HTML *escaped*: a
+reply that mentions `<Shell>` without backticks should read as text.
+
+**Images.** Nothing is fetched while rendering: the sanitizer's hook moves
+every `src` — markdown images and raw `<img>` alike — to `data-md-src`, and
+drops `srcset`. `loadMarkdownImages` then resolves each one against the
+document's own folder (`resolveDocumentPath`, which refuses absolute paths
+and anything that climbs out) and reads it through `file:open`, the same
+containment check as any file tab, as a data URL. A remote image becomes a
+link to itself instead: opening a document never calls out to whoever wrote
+it. A peek reads no images at all.
+
+**Links.** `#heading` scrolls within the document (heading ids carry an `md-`
+prefix so they can't collide with the app's own; the click handler adds it
+back). A relative path opens that file as a tab through `openFileTab`.
+Anything else goes to `shell:open-external`, which re-parses the URL and
+opens only http, https and mailto.
 
 The image reader reads bytes and hands over a `data:` URL, drawn by an
 `<img>`. That is the safe way round: an SVG loaded as an image cannot run the
@@ -1205,8 +1238,7 @@ recognises comments, strings, numbers, keywords and call sites, and leaves
 everything else plain. Being wrong should mean an uncoloured word, never a
 missing one.
 
-It escapes every chunk before introducing a tag of its own, the order
-`markdown.js` uses, and emits nothing but its own fixed set of
+It escapes every chunk before introducing a tag of its own and emits nothing but its own fixed set of
 `<span class="tok-*">` — which is what makes the viewer's one
 `dangerouslySetInnerHTML` safe. A block-comment flag is threaded down the file
 so a multi-line comment stays one colour; it's computed for the whole file
@@ -1946,5 +1978,4 @@ on errors.
   be the same data the Changes pane reads, but polling it for every row in
   the list has not been costed.
 - **Dead code.** The `chatHistory:get-session` handler is left over from the
-  old chat UI and has no callers. (`src/shared/markdown.js` was too, until a
-  markdown file tab started rendering with it.)
+  old chat UI and has no callers.

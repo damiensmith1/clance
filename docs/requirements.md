@@ -227,18 +227,29 @@ Sessions Clance starts get these tools when Accessibility is granted:
   still be read as a diff. A file whose reader has only one view never shows
   the choice — an SVG offers Image / Raw, a PNG offers nothing, a `.ts` is
   only itself.
-- Nothing is loaded to render a document. A picture referenced inside a
-  markdown file shows as its alt text; opening a file never reads other
-  files, and never fetches anything from whoever wrote it. An image is looked
-  at by opening it, which is its own tab.
-- A link in a rendered document opens in the browser, and only if it is
-  http, https or mailto. The URL is re-parsed before it is opened rather than
-  handed over as it was written.
+- Rendered markdown covers CommonMark and GitHub's extensions (tables, task
+  lists, strikethrough, autolinks, footnotes, `> [!NOTE]` alerts), definition
+  lists, `==mark==` / `~sub~` / `^sup^`, and Obsidian's callouts, wikilinks,
+  `#tags` and `%%comments%%`. Front matter shows as its YAML source — fenced, monospace, keys picked out — rather than run together into a paragraph. Code
+  blocks are highlighted and have a Copy button; a `diff` block is coloured
+  by line. Math and Mermaid show as their source.
+- Raw HTML in a document renders, sanitized: anything that can run code —
+  scripts, event handlers, `javascript:` URLs, iframes, objects, forms,
+  `<style>`, SVG — is removed, so opening a document is never running it.
+- A picture inside a markdown file is shown when it is a file inside the same
+  repository or folder, read with the same containment check as any file
+  tab. A remote picture is never fetched — it shows as a link — so opening a
+  document never calls out to whoever wrote it.
+- A link in a rendered document to `#a-heading` scrolls there, and one to a
+  relative path opens that file in a tab. Anything else opens in the
+  browser, only if it is http, https or mailto, and the URL is re-parsed
+  before it is opened rather than handed over as it was written.
 - A file no reader claims says what it can about itself — its name, its size —
   rather than apologising. So does one larger than its reader will open.
 - A reader never executes what it reads. File content is drawn, never turned
-  into markup, because a folder being browsed may have been cloned a minute
-  ago and SVG and HTML both carry script.
+  into live markup, because a folder being browsed may have been cloned a
+  minute ago and SVG and HTML both carry script. Rendered markdown is the one
+  place a file's own HTML reaches the page, and only through the sanitizer.
 - Readers are added in the codebase. Clance loads nothing from a user's disk
   to render a file, and this isn't a plugin surface.
 - A file tab open when the branch changes under it follows the branch. If the
@@ -257,10 +268,11 @@ Sessions Clance starts get these tools when Accessibility is granted:
   the folder it was last pointed at, independently of the Changes repository.
 - Directories expand and collapse, one level read at a time. Which are open
   is remembered per folder for as long as the app is running.
-- Files git is ignoring are hidden, with a toggle to show them — the same set
-  ⌘P searches, so the two can't disagree about what is in the project.
-  Outside a repository nothing is ignored and the toggle is absent. Dotfiles
-  are always shown.
+- Every file in the folder is listed, including ones git ignores; those are
+  dimmed, and a toggle hides them. Ignored files open like any other, without
+  a diff. ⌘P still searches only what git isn't ignoring. Outside a
+  repository nothing is ignored and the toggle is absent. Dotfiles are always
+  shown.
 - When git can't say what a repository ignores, the tree lists everything and
   says so. Silently showing node_modules looks exactly like a project that
   ignores nothing.
