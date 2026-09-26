@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld("clanceApp", {
   setSessionPinned: (sessionId: string, pinned: boolean) =>
     ipcRenderer.invoke("chatHistory:set-pinned", sessionId, pinned),
   sessionTitleForArgs: (args: string[]) => ipcRenderer.invoke("sessions:title-for-args", args),
+  sessionIdForArgs: (args: string[]) => ipcRenderer.invoke("sessions:id-for-args", args),
   sessionFolder: (sessionId: string) => ipcRenderer.invoke("sessions:folder", sessionId),
   revealFolder: (dir: string) => ipcRenderer.invoke("sessions:reveal-folder", dir),
   resumeInTerminal: (target: { sessionId?: string; agentId?: string; cwd?: string }) =>
@@ -117,6 +118,7 @@ contextBridge.exposeInMainWorld("clanceApp", {
   gitStatus: (dir: string) => ipcRenderer.invoke("git:status", dir),
   gitFileDiff: (dir: string, path: string) => ipcRenderer.invoke("git:file-diff", dir, path),
   openFileView: (dir: string, path: string) => ipcRenderer.invoke("file:open", dir, path),
+  revealFile: (path: string) => ipcRenderer.invoke("file:reveal", path),
   openExternalUrl: (url: string) => ipcRenderer.invoke("shell:open-external", url),
   gitListFiles: (dir: string) => ipcRenderer.invoke("git:list-files", dir),
   gitLog: (dir: string, limit?: number) => ipcRenderer.invoke("git:log", dir, limit),

@@ -36,7 +36,7 @@ import { SHORTCUT_ACTIONS } from "./shortcuts";
 import { peekSession, listSessions, hasRealUserMessage, titleForSessionId, SESSION_PLACEHOLDER_TITLE } from "./chatHistory";
 import { setSessionArchived } from "./archivedSessions";
 import { setSessionPinned } from "./pinnedSessions";
-import { sessionFolder, revealFolder, resumeInTerminal } from "./sessionActions";
+import { sessionFolder, revealFolder, revealFile, resumeInTerminal } from "./sessionActions";
 import { getLaunchOnLogin, setLaunchOnLogin } from "./launchOnLogin";
 import {
   listLocalTools,
@@ -403,6 +403,11 @@ ipcMain.handle("sessions:title-for-args", async (_event, args: unknown) => {
   return sessionId ? titleForSessionId(sessionId) : null;
 });
 
+// A tab knows only its launch args; its menu's Copy Session ID needs the
+// conversation's own id.
+ipcMain.handle("sessions:id-for-args", (_event, args: unknown) =>
+  Array.isArray(args) && args.every((arg) => typeof arg === "string") ? resolveSessionId(args) : null
+);
 ipcMain.handle("sessions:folder", (_event, sessionId: unknown) => sessionFolder(sessionId));
 ipcMain.handle("sessions:reveal-folder", (_event, dir: unknown) => revealFolder(dir));
 ipcMain.handle(
@@ -568,6 +573,7 @@ ipcMain.handle("files:folder-repo", (_event, root: unknown) => folderRepo(root))
 // check and the size limit, so a path is checked in one place rather than
 // once per reader.
 ipcMain.handle("file:open", (_event, dir: unknown, path: unknown) => openFileView(dir, path));
+ipcMain.handle("file:reveal", (_event, path: unknown) => revealFile(path));
 
 // A link clicked in a rendered markdown file. The URL arrives from a file
 // that may have been cloned a minute ago, so it is parsed and rebuilt here

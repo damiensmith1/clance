@@ -811,6 +811,11 @@
         width: 240px;
         z-index: 40;
       }
+      /* Opens over the tab bar, which is a window-drag region — without this
+         macOS takes the menu's clicks as a title-bar drag. */
+      .tab-menu {
+        -webkit-app-region: no-drag;
+      }
       .toast-floating {
         position: fixed;
         right: var(--space-5);

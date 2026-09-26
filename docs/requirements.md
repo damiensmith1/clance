@@ -300,6 +300,12 @@ Sessions Clance starts get these tools when Accessibility is granted:
   clipped word. Hovering any tab for two seconds gives its full name — for a
   file tab, its whole path, since the label is only a basename and two tabs
   called `index.ts` are otherwise the same tab twice.
+- Right-clicking a tab offers Close Tab, Close Other Tabs, Close Tabs to the
+  Left / Right and Close All (all within that tab's pane), and Move to Pane
+  for each other pane. Closing every tab of the only pane leaves the Sessions
+  tab. A session tab adds Close and Stop Session, Open in Floating Window and
+  Copy Session ID; a file tab adds Copy Path, Copy Relative Path and Reveal in
+  Finder. Splitting stays a drag, not a menu item.
 - Tabs are driven from the keyboard the way they are in any macOS app: ⌘W
   closes the active tab (and the window once its last tab goes), ⇧⌘W closes
   the window, and ⌃⇥ / ⇧⌃⇥ move between the tabs of the pane in focus. The

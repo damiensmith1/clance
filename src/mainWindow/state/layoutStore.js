@@ -304,6 +304,34 @@ function reduce(state, action) {
       return { ...state, root, activePaneId };
     }
 
+    // Several tabs of one pane at once — the tab menu's Close Others / to the
+    // Left / to the Right / All. Unlike CLOSE_TAB this may empty the only
+    // pane, since the user asked for exactly that; the window then falls back
+    // to the Sessions tab rather than being left empty. When the active tab
+    // goes, `focusTabId` (the tab the menu was opened on) takes over if it
+    // survived.
+    case "CLOSE_TABS": {
+      const pane = findPane(state.root, action.paneId);
+      if (!pane) return state;
+      const closing = new Set(action.tabIds);
+      const nextTabs = pane.tabs.filter((t) => !closing.has(t.id));
+      if (nextTabs.length === pane.tabs.length) return state;
+      let root;
+      if (nextTabs.length === 0) {
+        root = removePane(state.root, action.paneId) ?? initialState().root;
+      } else {
+        const keep = (id) => nextTabs.some((t) => t.id === id);
+        const nextActive = keep(pane.activeTabId)
+          ? pane.activeTabId
+          : keep(action.focusTabId)
+            ? action.focusTabId
+            : nextTabs[0].id;
+        root = updateLeaf(state.root, action.paneId, (leaf) => ({ ...leaf, tabs: nextTabs, activeTabId: nextActive }));
+      }
+      const activePaneId = paneExists(root, state.activePaneId) ? state.activePaneId : findFirstLeaf(root).id;
+      return { ...state, root, activePaneId };
+    }
+
     case "MOVE_TAB": {
       const { tabId, fromPaneId, toPaneId, toIndex } = action;
       const fromPane = findPane(state.root, fromPaneId);
@@ -463,6 +491,10 @@ export function activatePane(paneId) {
 
 export function closeTab(paneId, tabId) {
   dispatch({ type: "CLOSE_TAB", paneId, tabId });
+}
+
+export function closeTabs(paneId, tabIds, focusTabId) {
+  dispatch({ type: "CLOSE_TABS", paneId, tabIds, focusTabId });
 }
 
 export function renameTab(paneId, tabId, label) {

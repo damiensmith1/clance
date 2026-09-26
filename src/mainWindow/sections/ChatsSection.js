@@ -185,11 +185,12 @@ function SessionRow({ row, selected, lastPinned, onOpen, onContextMenu, onPopOut
 // A menu item: title, optional right-aligned mono detail and shortcut.
 // mousedown is swallowed so clicking an item doesn't blur the search field
 // (which would close the command menu before the click lands).
-function MenuItem({ title, detail, shortcut, active, onSelect }) {
+export function MenuItem({ title, detail, shortcut, active, disabled, onSelect }) {
   return html`
     <button
       class="menu-item ${active ? "menu-item-active" : ""}"
       role="menuitem"
+      disabled=${disabled}
       onMouseDown=${(e) => e.preventDefault()}
       onClick=${onSelect}
     >

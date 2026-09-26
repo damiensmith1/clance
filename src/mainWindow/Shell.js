@@ -1,6 +1,6 @@
 import { html, useEffect, useMemo, useRef, useState } from "../shared/vendor/preact-htm-standalone.module.js";
 import { Icon } from "../shared/icons.js";
-import { ChatsListSection, focusSessionSearch } from "./sections/ChatsSection.js";
+import { ChatsListSection, MenuItem, focusSessionSearch } from "./sections/ChatsSection.js";
 import { ChangesSection } from "./sections/ChangesSection.js";
 import { FilesSection } from "./sections/FilesSection.js";
 import { FileSection } from "./sections/FileSection.js";
@@ -15,6 +15,7 @@ import {
   activateTab,
   activatePane,
   closeTab,
+  closeTabs,
   renameTab,
   listTabs,
   moveTab,
@@ -81,6 +82,13 @@ const DRAG_THRESHOLD_PX = 4;
 // hit-test, computed independently (see the comment in hitTest() for why).
 const OUTER_FRACTION = 0.1;
 const INNER_FRACTION = 0.18;
+
+// Every leaf pane in the tree, left to right.
+function leavesOf(node, out = []) {
+  if (node.type === "split") node.children.forEach((child) => leavesOf(child, out));
+  else out.push(node);
+  return out;
+}
 
 function withinRect(x, y, rect) {
   return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
@@ -407,6 +415,8 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
   // { text, x, y } once a tab has been hovered long enough to earn it.
   const [tip, setTip] = useState(null);
   const tipTimer = useRef(null);
+  // { tab, x, y } while a tab's right-click menu is open.
+  const [menu, setMenu] = useState(null);
 
   useEffect(() => {
     const element = tabListRef.current;
@@ -461,6 +471,131 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
     closeTab(node.id, tab.id);
   }
 
+  useEffect(() => {
+    if (!menu) return;
+    // pointerdown, not mousedown: a tab's own pointerdown (startDrag)
+    // prevents default, which suppresses the mousedown that would follow, so
+    // clicking another tab would otherwise leave the menu open.
+    function onPointerDown(e) {
+      if (!e.target.closest?.(".tab-menu")) setMenu(null);
+    }
+    function onKeyDown(e) {
+      if (e.key === "Escape") setMenu(null);
+    }
+    const onBlur = () => setMenu(null);
+    document.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [menu]);
+
+  function openTabMenu(event, tab) {
+    event.preventDefault();
+    hideTip();
+    // Fixed-position, so viewport coordinates, kept clear of the window's
+    // right and bottom edges.
+    setMenu({
+      tab,
+      x: Math.min(event.clientX, window.innerWidth - 250),
+      y: Math.min(event.clientY, window.innerHeight - 380),
+    });
+  }
+
+  // Same as the tab's own ✕, for however many tabs: a terminal tab keeps its
+  // pty alive across a mere tab switch, so closing it has to end it
+  // explicitly. The session behind it is a background agent and goes on
+  // running either way.
+  function closeMany(tabs, focusTab) {
+    tabs.forEach((tab) => tab.type === "terminal" && destroyTerminal(tab.terminalId));
+    closeTabs(node.id, tabs.map((tab) => tab.id), focusTab?.id);
+  }
+
+  // A file tab's path on disk. `repoRoot` is the folder it was opened from
+  // (a repository, or any folder the Files sidecar browsed); without one the
+  // path is already absolute.
+  function filePathOf(tab) {
+    return tab.repoRoot ? `${tab.repoRoot}/${tab.path}` : tab.path;
+  }
+
+  async function copySessionId(tab) {
+    const id = await window.clanceApp.sessionIdForArgs(tab.args);
+    if (id) navigator.clipboard.writeText(id);
+  }
+
+  // One action, not two: closing a session tab only detaches it, and the
+  // background agent goes on running (see docs/design.md's "Sessions"), so
+  // "done with this" means both. `attach <agentId>` is the only shape a
+  // Clance session tab has; stopping by that id is what the Sessions tab's
+  // Stop does too.
+  function closeAndStop(tab) {
+    closeMany([tab]);
+    window.clanceApp.stopAgent(tab.args[1]);
+  }
+
+  function renderTabMenu() {
+    const { tab } = menu;
+    const index = node.tabs.findIndex((t) => t.id === tab.id);
+    if (index === -1) return null;
+    const left = node.tabs.slice(0, index);
+    const right = node.tabs.slice(index + 1);
+    const others = [...left, ...right];
+    const onlyTabOfOnlyPane = root.type === "leaf" && node.tabs.length === 1;
+    const otherPanes = leavesOf(root).filter((leaf) => leaf.id !== node.id);
+    // A brand-new tab with no args has nothing to resume or stop yet; a
+    // plain shell tab isn't a session at all.
+    const isSession = tab.type === "terminal" && Boolean(tab.args?.length);
+    const isAgent = isSession && tab.args[0] === "attach";
+    const act = (fn) => () => {
+      setMenu(null);
+      fn();
+    };
+    return html`
+      <div class="menu context-menu tab-menu" role="menu" style=${{ left: `${menu.x}px`, top: `${menu.y}px` }}>
+        <${MenuItem}
+          title="Close Tab"
+          shortcut=${tab.id === node.activeTabId ? "⌘W" : null}
+          disabled=${onlyTabOfOnlyPane}
+          onSelect=${act(() => closeMany([tab]))}
+        />
+        <${MenuItem} title="Close Other Tabs" disabled=${others.length === 0} onSelect=${act(() => closeMany(others, tab))} />
+        <${MenuItem} title="Close Tabs to the Left" disabled=${left.length === 0} onSelect=${act(() => closeMany(left, tab))} />
+        <${MenuItem} title="Close Tabs to the Right" disabled=${right.length === 0} onSelect=${act(() => closeMany(right, tab))} />
+        <${MenuItem} title="Close All" disabled=${onlyTabOfOnlyPane && tab.type === "chats"} onSelect=${act(() => closeMany(node.tabs))} />
+        ${isAgent &&
+        html`<${MenuItem} title="Close and Stop Session" onSelect=${act(() => closeAndStop(tab))} />`}
+        ${isSession &&
+        html`
+          <div class="menu-separator"></div>
+          <${MenuItem} title="Open in Floating Window" onSelect=${act(() => popOutTab(tab))} />
+          <${MenuItem} title="Copy Session ID" onSelect=${act(() => copySessionId(tab))} />
+        `}
+        ${tab.type === "file" &&
+        html`
+          <div class="menu-separator"></div>
+          <${MenuItem} title="Copy Path" onSelect=${act(() => navigator.clipboard.writeText(filePathOf(tab)))} />
+          ${tab.repoRoot &&
+          html`<${MenuItem} title="Copy Relative Path" onSelect=${act(() => navigator.clipboard.writeText(tab.path))} />`}
+          <${MenuItem} title="Reveal in Finder" onSelect=${act(() => window.clanceApp.revealFile(filePathOf(tab)))} />
+        `}
+        ${otherPanes.length > 0 && html`<div class="menu-separator"></div>`}
+        ${otherPanes.map(
+          (leaf) => html`
+            <${MenuItem}
+              key=${leaf.id}
+              title="Move to Pane"
+              detail=${tabLabel(leaf.tabs.find((t) => t.id === leaf.activeTabId) ?? leaf.tabs[0])}
+              onSelect=${act(() => moveTab(tab.id, node.id, leaf.id, leaf.tabs.length))}
+            />
+          `
+        )}
+      </div>
+    `;
+  }
+
   return html`
     <div class="pane-leaf" onMouseDown=${() => activatePane(node.id)}>
       <div class="tab-bar ${node.id === topLeftPaneId ? "tab-bar-inset" : ""}" data-pane-id=${node.id}>
@@ -476,6 +611,7 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
                 }}
                 onMouseEnter=${(e) => armTip(e, tab)}
                 onMouseLeave=${hideTip}
+                onContextMenu=${(e) => openTabMenu(e, tab)}
               >
                 <span class="tab-icon">${tabIcon(tab)}</span>
                 <span class="tab-label">${tabLabel(tab)}</span>
@@ -526,6 +662,7 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
           </div>
         `}
       </div>
+      ${menu && renderTabMenu()}
       ${showLauncher && launcher.banner}
       <main class="content ${FLUSH_TAB_TYPES.has(activeTab?.type) ? "content-flush" : ""}">
         ${activeTab &&
@@ -856,16 +993,9 @@ export function Shell() {
     });
   }
 
-  // Reads the store directly rather than the render's `state`, so it's
-  // current when called from a listener registered once.
-  // Every leaf pane in the tree, left to right.
-  function leavesOf(node, out = []) {
-    if (node.type === "split") node.children.forEach((child) => leavesOf(child, out));
-    else out.push(node);
-    return out;
-  }
-
-  // The pane a sidecar is already living in, if one is open.
+  // The pane a sidecar is already living in, if one is open. Reads the store
+  // directly rather than the render's `state`, so it's current when called
+  // from a listener registered once.
   function sidecarPane() {
     return leavesOf(getState().root).find((leaf) => leaf.tabs.some((tab) => SIDECARS.has(tab.id))) ?? null;
   }

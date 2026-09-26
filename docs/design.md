@@ -778,6 +778,29 @@ which `Shell.js` applies to the pane that has focus.
   widget's own window is never destroyed — its live session and xterm state
   are what make the next hotkey press instant. Tab commands elsewhere no-op.
 
+### Tab menu
+
+Right-clicking a tab opens a menu owned by its `PaneLeaf`. The bulk closes
+(Others, to the Left, to the Right, All) are one `CLOSE_TABS` store action
+rather than repeated `CLOSE_TAB`s: `CLOSE_TAB` refuses to empty the only
+pane, while Close All asked for exactly that, so `CLOSE_TABS` lets it and
+falls back to the Sessions tab. If the active tab closes, the tab the menu
+was opened on takes over. Terminals are destroyed first, as the ✕ does.
+
+Move to Pane lists every other pane by its active tab's name and appends the
+tab there.
+
+- **Close and Stop Session** is one item because closing a session tab only
+  detaches it — the background agent keeps running — so "done with this"
+  needs both. It stops by the agent id in the tab's `attach` args, as the
+  Sessions tab's Stop does.
+- **Copy Session ID** asks main (`sessions:id-for-args`, `resolveSessionId`)
+  since a tab only knows its agent id.
+- A file tab's path is `repoRoot/path`; Copy Relative Path is `path` and is
+  offered only when there is a `repoRoot`. **Reveal in Finder** goes through
+  `file:reveal`, which checks for an existing absolute file before
+  `shell.showItemInFolder`.
+
 ### Tab labels and names
 
 A pane can be a quarter of the window, which is not enough for a tab to say

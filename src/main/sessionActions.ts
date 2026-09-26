@@ -27,6 +27,18 @@ export async function sessionFolder(sessionId: unknown): Promise<string | null> 
   return isDirectory(cwd) ? cwd : null;
 }
 
+/** Shows a file selected in its Finder window — a file tab's Reveal in Finder. */
+export function revealFile(path: unknown): boolean {
+  if (typeof path !== "string" || !isAbsolute(path)) return false;
+  try {
+    if (!statSync(path).isFile()) return false;
+  } catch {
+    return false;
+  }
+  shell.showItemInFolder(path);
+  return true;
+}
+
 /** Opens a session's folder in Finder. */
 export async function revealFolder(dir: unknown): Promise<boolean> {
   if (!isDirectory(dir)) return false;
