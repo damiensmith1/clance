@@ -227,7 +227,8 @@ field. `Shell.js` catches it in the capture phase so a focused terminal never
 sees it, and `focusSessionSearch()` holds the request until the section has
 mounted. The search dropdown lists
 the top matches and then "start a new session in" the default folder (⌘↩),
-recent folders or a chosen one (⌘O). In the table ↑↓ select, ↩ opens in a tab,
+recent folders or a chosen one (⌘O). ⌘↩ and ⌘O work whenever the field has
+focus, before anything is typed. In the table ↑↓ select, ↩ opens in a tab,
 ⌥↩ opens in the widget, ⌘⌫ archives (or stops a live session) and ⌘N starts a
 new session. Archiving shows a toast with Undo. Right-clicking a row adds Peek,
 Resume in Terminal, Copy folder path, Reveal in Finder and Pin/Unpin. Those go through

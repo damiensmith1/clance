@@ -506,6 +506,18 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
       else e.currentTarget.blur();
       return;
     }
+    // The menu's shortcuts work from the moment the field has focus, not
+    // only once something's been typed and the menu is showing.
+    if (e.key === "Enter" && e.metaKey) {
+      e.preventDefault();
+      runCommand({ type: "new", dir: null });
+      return;
+    }
+    if (e.key.toLowerCase() === "o" && e.metaKey) {
+      e.preventDefault();
+      runCommand({ type: "browse" });
+      return;
+    }
     if (!commandOpen) {
       if (e.key === "ArrowDown" && rows.length > 0) {
         e.preventDefault();
@@ -518,15 +530,9 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
       e.preventDefault();
       const step = e.key === "ArrowDown" ? 1 : -1;
       setCommandIndex((index) => (index + step + commandItems.length) % commandItems.length);
-    } else if (e.key === "Enter" && e.metaKey) {
-      e.preventDefault();
-      runCommand(commandItems.find((item) => item.type === "new"));
     } else if (e.key === "Enter") {
       e.preventDefault();
       runCommand(commandItems[commandIndex]);
-    } else if (e.key === "o" && e.metaKey) {
-      e.preventDefault();
-      runCommand({ type: "browse" });
     }
   }
 
