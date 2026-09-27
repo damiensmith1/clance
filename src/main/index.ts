@@ -529,14 +529,16 @@ ipcMain.handle("git:pull", (_event, dir: unknown) => gitPull(dir));
 
 ipcMain.handle("git:fetch", (_event, dir: unknown) => gitFetch(dir));
 
-// The repos worth offering in the switcher: wherever new sessions open,
-// wherever the user has recently opened one, and wherever the running agents
-// are actually working. No configuration of its own — Clance already knows.
+// The repos worth offering in the switcher: wherever new sessions open, the
+// repositories the pane has been pointed at before (including ones chosen
+// with "Choose folder…"), wherever the user has recently opened a session,
+// and wherever the running agents are actually working.
 ipcMain.handle("git:list-repos", async () => {
   const config = readConfig();
   const agents = await listAgents({ all: true }).catch(() => []);
   return listRepos([
     getDefaultDirectory(),
+    ...config.recentRepos,
     ...config.recentDirectories,
     ...agents.map((agent) => agent.cwd).filter((cwd): cwd is string => typeof cwd === "string"),
   ]);
@@ -561,6 +563,7 @@ ipcMain.handle("files:list-folders", async () => {
   const agents = await listAgents({ all: true }).catch(() => []);
   return listFolders([
     getDefaultDirectory(),
+    ...config.recentFolders,
     ...config.recentDirectories,
     ...agents.map((agent) => agent.cwd).filter((cwd): cwd is string => typeof cwd === "string"),
   ]);

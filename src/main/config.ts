@@ -23,6 +23,11 @@ export type ClanceConfig = {
   // lastGitRepo: Files browses anything, including folders that aren't
   // repositories at all, so the two can't share one setting.
   lastFolder: string | null;
+  // Repositories the Changes pane has been pointed at, and folders the Files
+  // explorer has, most recent first — so one chosen with "Choose folder…" is
+  // offered in the switcher from then on, not just the one time.
+  recentRepos: string[];
+  recentFolders: string[];
   // Which of localToolsServer.ts's LOCAL_TOOLS the agent may use. Defaults
   // to "all" (opt-out) — these are Clance's own first-party tools
   // (screenshot, click, type), not arbitrary third-party skill
@@ -98,6 +103,8 @@ const DEFAULT_CONFIG: ClanceConfig = {
   recentDirectories: [],
   lastGitRepo: null,
   lastFolder: null,
+  recentRepos: [],
+  recentFolders: [],
   enabledLocalTools: "all",
   dictation: DEFAULT_DICTATION,
   writableRoots: [],
@@ -157,15 +164,24 @@ export function addRecentDirectory(dir: string): void {
 
 // The Changes pane's repo, remembered across launches. Written whenever the
 // switcher lands on a repo, not when it's merely offered one.
+const MAX_RECENT_PLACES = 10;
+
+function withRecent(list: string[], dir: string | null): string[] {
+  return dir ? [dir, ...list.filter((d) => d !== dir)].slice(0, MAX_RECENT_PLACES) : list;
+}
+
+// Also remembered as a recent repository, so the switcher keeps offering it.
 export function setLastGitRepo(root: string | null): void {
   const config = readConfig();
   config.lastGitRepo = root;
+  config.recentRepos = withRecent(config.recentRepos, root);
   writeConfig(config);
 }
 
 export function setLastFolder(root: string | null): void {
   const config = readConfig();
   config.lastFolder = root;
+  config.recentFolders = withRecent(config.recentFolders, root);
   writeConfig(config);
 }
 

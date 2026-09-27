@@ -147,9 +147,10 @@ Sessions Clance starts get these tools when Accessibility is granted:
   right, a quarter of the window wide, when the window has room for one. It
   keeps whatever width it is given afterwards.
 - One repository at a time, chosen from a switcher that offers the default
-  session directory, recently used directories, wherever the running agents
-  are working, and any other folder. It reopens on the repository it was last
-  pointed at.
+  session directory, the repositories it has been pointed at before
+  (including ones chosen with "Choose folder…"), recently used directories,
+  wherever the running agents are working, and any other folder. It reopens
+  on the repository it was last pointed at.
 - Moving the pane, splitting it, or switching away from its tab and back
   never makes it start over: it redraws at once as it was — the files, the
   history, the open row, a half-written commit message, where the list was
@@ -260,9 +261,10 @@ Sessions Clance starts get these tools when Accessibility is granted:
   repository — a scratch directory, a folder of notes, a repository that
   isn't the one Changes is pointed at. ⌘P needs a filename already; looking
   around a project is a different act from recalling a file in it.
-- One folder at a time, from a switcher offering the same places the Changes
-  switcher does: the default session directory, recently used directories,
-  wherever running agents are working, and any other folder. It reopens on
+- One folder at a time, from a switcher offering the default session
+  directory, the folders it has been pointed at before (including ones chosen
+  with "Choose folder…"), recently used directories, wherever running agents
+  are working, and any other folder. It reopens on
   the folder it was last pointed at, independently of the Changes repository.
 - Rows have VS Code-style file-type icons (Material Icon Theme), by file
   name, extension and folder name.

@@ -63,7 +63,7 @@ which is also the working directory for sessions that have no project:
 
 | Path | Contents | Owner |
 |---|---|---|
-| `config.json` | Shortcuts, default directory, recent directories, the Changes pane's last repo, the Files folder, enabled local tools, dictation settings, editor settings, writable roots | `config.ts` |
+| `config.json` | Shortcuts, default directory, recent directories, the Changes pane's last and recent repos, the Files folder and recent folders, enabled local tools, dictation settings, editor settings, writable roots | `config.ts` |
 | `archived-sessions.json` | Archived session ids | `archivedSessions.ts` |
 | `window-layout.json` | Main window pane/tab tree; tabs for sections that no longer exist are dropped on restore | `windowLayout.ts` |
 | `pool.json` | The pre-warmed popup session | `agentPool.ts` |
