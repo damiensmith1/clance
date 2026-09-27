@@ -97,6 +97,12 @@ const FLUSH_TAB_TYPES = new Set(["terminal", "file", "changes", "files", "search
 // the row and the tab count rather than the rendered tabs: deciding from
 // content width would feed the result back into what is being measured.
 const TAB_LABEL_MIN_PX = 92;
+// ...and only in a pane that is a small share of the window. A bigger pane
+// keeps its labels even when they don't all fit — the row scrolls sideways
+// instead, with the active tab kept in view — because dropping them there
+// leaves the row mostly empty. A share rather than a size, so it scales with
+// the window: an even two-pane split keeps its labels, a side pane doesn't.
+const TAB_LABEL_PANE_SHARE = 0.45;
 // How long a tab has to be hovered before it says its full name. Long enough
 // that moving across the row doesn't trail tooltips behind it.
 const TAB_TOOLTIP_DELAY_MS = 2000;
@@ -541,9 +547,15 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
   useEffect(() => {
     const element = tabListRef.current;
     if (!element) return;
-    const measure = () => setCompact(element.clientWidth / Math.max(node.tabs.length, 1) < TAB_LABEL_MIN_PX);
+    const pane = element.closest(".pane-leaf") ?? element;
+    const measure = () =>
+      setCompact(
+        element.clientWidth / Math.max(node.tabs.length, 1) < TAB_LABEL_MIN_PX &&
+          pane.clientWidth < window.innerWidth * TAB_LABEL_PANE_SHARE
+      );
     const observer = new ResizeObserver(measure);
     observer.observe(element);
+    observer.observe(pane);
     measure();
     return () => observer.disconnect();
   }, [node.tabs.length]);

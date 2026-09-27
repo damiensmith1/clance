@@ -428,7 +428,9 @@ Sessions Clance starts get these tools when Accessibility is granted:
   a live dot and a status line with its folder and start time, and can be
   popped out into the widget.
 - A tab too narrow to show its name shows only its icon, rather than a
-  clipped word. Hovering any tab for two seconds gives its full name — for a
+  clipped word — but only in a pane that's a small share of the window (under
+  45% of its width). A bigger pane keeps its names even when they don't all
+  fit, and its tab row scrolls sideways. Hovering any tab for two seconds gives its full name — for a
   file tab, its whole path, since the label is only a basename and two tabs
   called `index.ts` are otherwise the same tab twice.
 - Right-clicking a tab offers Close Tab, Close Other Tabs, Close Tabs to the

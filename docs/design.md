@@ -855,8 +855,14 @@ A pane can be a quarter of the window, which is not enough for a tab to say
 "Changes" — it says "Cha". `PaneLeaf` drops the labels instead, leaving the
 icons, and the full name moves to a tooltip after two seconds.
 
-The decision is made from the tab row's own width divided by the number of
-tabs, never from how wide the rendered tabs turned out to be. A
+Labels come off only when both hold: the row's width divided by the number
+of tabs is under 92 px, *and* the pane is under 45% of the window's width. A
+bigger pane keeps its labels and lets the row scroll (the active tab is kept
+in view); dropping them there left most of the row empty. A share of the
+window rather than a pixel size, so it scales: an even two-pane split keeps
+its labels, a side pane or a corner of a 2×2 grid on a small window doesn't. The decision is made from
+the tab row's and the pane's own widths, never from how wide the rendered
+tabs turned out to be. A
 `ResizeObserver` that measured its own content would feed the result back
 into what it was measuring, which is the same trap the Changes history strip
 had to avoid. The row's width already excludes the launcher cluster, so the
