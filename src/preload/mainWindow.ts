@@ -186,6 +186,14 @@ contextBridge.exposeInMainWorld("clanceApp", {
     ipcRenderer.invoke("files:list-directory", root, path, showIgnored),
   filesResolveFile: (root: string, path: string) => ipcRenderer.invoke("files:resolve-file", root, path),
   filesFolderRepo: (root: string) => ipcRenderer.invoke("files:folder-repo", root),
+  // One watched folder per window; `dirs` is null when too much changed to list.
+  filesWatch: (root: string) => ipcRenderer.invoke("files:watch", root),
+  filesUnwatch: () => ipcRenderer.invoke("files:unwatch"),
+  onFilesChanged: (callback: (payload: { root: string; dirs: string[] | null }) => void) => {
+    const listener = (_event: unknown, payload: { root: string; dirs: string[] | null }) => callback(payload);
+    ipcRenderer.on("files:changed", listener);
+    return () => ipcRenderer.removeListener("files:changed", listener);
+  },
   filesCreate: (root: string, parent: string, name: string, kind: "file" | "folder") =>
     ipcRenderer.invoke("files:create", root, parent, name, kind),
   filesRename: (root: string, path: string, name: string) => ipcRenderer.invoke("files:rename", root, path, name),

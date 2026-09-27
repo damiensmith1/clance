@@ -1644,9 +1644,17 @@ on the window rather than the row: the row can leave the page mid-gesture
 when the tree re-reads, and a release it never hears would leave the tree
 stuck mid-drag. A Finder drop is native, since it comes from outside the
 window, and any ending of it — a drop elsewhere, a cancel, leaving the
-window — clears its highlight. The tree re-reads the
-directories it has open after its own changes and whenever the window comes
-back to the front — sessions create files too.
+window — clears its highlight.
+
+The tree follows the disk, since sessions create files too. The main process
+keeps one recursive `fs.watch` (FSEvents) per window on the Files folder
+(`watchFolder` in `files.ts`, `files:watch`), skipping `.git` and
+`node_modules`, and after a 150 ms pause sends `files:changed` with the
+directories touched: each changed path's parent and the path itself, or
+null past 200 or when an event carries no name. The tree re-reads whichever
+of those it has open, or everything open on null. It also re-reads what's
+open after its own changes and whenever the window comes back to the front,
+which covers a folder the watch couldn't be set up on.
 
 ### Opening from outside
 
@@ -2294,10 +2302,6 @@ on errors.
   file without looking at open buffers. A clean one follows the disk; a
   dirty one gets the conflict banner, which is safe, but a warning before
   discarding would be kinder.
-- **The Files tree isn't watched.** It re-reads after its own changes and
-  when the window comes back to the front, not live while a session creates
-  files in the background.
-
 - **The ⌥A confidence threshold is unmeasured.** Per intent, and pickable
   only from real utterances by real voices — too low and the assistant acts
   on what it misheard, too high and it asks about everything. There is no

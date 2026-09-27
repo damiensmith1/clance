@@ -270,6 +270,9 @@ Sessions Clance starts get these tools when Accessibility is granted:
   name, extension and folder name.
 - Directories expand and collapse, one level read at a time. Which are open
   is remembered per folder for as long as the app is running.
+- The tree keeps up with the disk: a file a session creates, deletes or
+  renames appears or goes within a moment, in any directory that's open,
+  without switching away and back.
 - Every file in the folder is listed, including ones git ignores; those are
   dimmed, and a toggle hides them. Ignored files open like any other, without
   a diff. ⌘P still searches only what git isn't ignoring. Outside a

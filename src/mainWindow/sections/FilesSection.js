@@ -96,6 +96,8 @@ export function FilesSection({ onOpenFile, onOpenResult, onPathMoved, onOpenTerm
   useTabScroll(listRef, root && !search ? "files.tree" : null, { version: root });
   const dirsRef = useRef(dirs);
   dirsRef.current = dirs;
+  const showIgnoredRef = useRef(showIgnored);
+  showIgnoredRef.current = showIgnored;
 
   // ---- searching ----
 
@@ -159,7 +161,7 @@ export function FilesSection({ onOpenFile, onOpenResult, onPathMoved, onOpenTerm
 
   function reloadOpen() {
     if (!root) return;
-    for (const path of [...dirsRef.current.keys()]) loadDir(root, path, showIgnored);
+    for (const path of [...dirsRef.current.keys()]) loadDir(root, path, showIgnoredRef.current);
   }
 
   useEffect(() => {
@@ -221,8 +223,29 @@ export function FilesSection({ onOpenFile, onOpenResult, onPathMoved, onOpenTerm
     return () => window.removeEventListener("clance:files-folder", onFolder);
   }, []);
 
-  // Sessions create and delete files too; the tree catches up whenever the
-  // window comes back to the front.
+  // Sessions create and delete files too. The main process watches the folder
+  // and names the directories that changed; whichever of those are open
+  // re-read. Everything open also re-reads when the window comes back to the
+  // front, in case the watch couldn't be set up.
+  useEffect(() => {
+    if (!root) return;
+    window.clanceApp.filesWatch(root);
+    const stop = window.clanceApp.onFilesChanged(({ root: changed, dirs }) => {
+      if (changed !== rootRef.current) return;
+      if (!dirs) {
+        reloadOpen();
+        return;
+      }
+      for (const dir of dirs) {
+        if (dirsRef.current.has(dir)) loadDir(root, dir, showIgnoredRef.current);
+      }
+    });
+    return () => {
+      stop();
+      window.clanceApp.filesUnwatch();
+    };
+  }, [root]);
+
   useEffect(() => {
     const onFocus = () => reloadOpen();
     window.addEventListener("focus", onFocus);

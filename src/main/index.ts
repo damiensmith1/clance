@@ -78,7 +78,7 @@ import {
   isDirectory,
 } from "./git";
 import { createEntry, renameEntry, moveEntry, duplicateEntry, trashEntry, copyIn } from "./fileOps";
-import { listFolders, resolveFolder, listDirectory, resolveFile, folderRepo } from "./files";
+import { listFolders, resolveFolder, listDirectory, resolveFile, folderRepo, watchFolder } from "./files";
 import { readWindowLayout, writeWindowLayout } from "./windowLayout";
 import { readDocument, saveDocument, watchDocument, unwatchDocument, resolveContained } from "./documents";
 import { registerRoot } from "./roots";
@@ -583,6 +583,38 @@ ipcMain.handle("files:list-directory", (_event, root: unknown, path: unknown, sh
   listDirectory(root, path, showIgnored)
 );
 
+// One watched folder per window — the Files tab shows one folder at a time.
+// Keyed by the sender's id so a reload (which sends no unwatch) can't leave
+// an FSEvents stream behind.
+const folderWatches = new Map<number, () => void>();
+const folderWatchSenders = new Set<number>();
+ipcMain.handle("files:watch", (event, root: unknown) => {
+  const senderId = event.sender.id;
+  folderWatches.get(senderId)?.();
+  folderWatches.delete(senderId);
+  const dir = resolveFolder(root);
+  if (!dir) return false;
+  const sender = event.sender;
+  folderWatches.set(
+    senderId,
+    watchFolder(dir, (dirs) => {
+      if (!sender.isDestroyed()) sender.send("files:changed", { root, dirs });
+    })
+  );
+  if (!folderWatchSenders.has(senderId)) {
+    folderWatchSenders.add(senderId);
+    sender.once("destroyed", () => {
+      folderWatchSenders.delete(senderId);
+      folderWatches.get(senderId)?.();
+      folderWatches.delete(senderId);
+    });
+  }
+  return true;
+});
+ipcMain.handle("files:unwatch", (event) => {
+  folderWatches.get(event.sender.id)?.();
+  folderWatches.delete(event.sender.id);
+});
 ipcMain.handle("files:resolve-file", (_event, root: unknown, path: unknown) => resolveFile(root, path));
 
 ipcMain.handle("files:folder-repo", (_event, root: unknown) => folderRepo(root));

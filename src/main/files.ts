@@ -1,4 +1,4 @@
-import { readdirSync, realpathSync, statSync, type Dirent } from "fs";
+import { readdirSync, realpathSync, statSync, watch, type Dirent, type FSWatcher } from "fs";
 import { isAbsolute, join, relative, sep } from "path";
 import { checkIgnore, findRepoRoot } from "./git";
 
@@ -212,4 +212,71 @@ export async function resolveFile(root: unknown, rel: unknown): Promise<{ root: 
     }
   }
   return { root: folder, path: relative(folder, full).split(sep).join("/") };
+}
+
+// ---- watching ----
+//
+// The tree lists one directory at a time, so it only needs to know which
+// directories changed: one recursive watch (FSEvents) on the folder, events
+// collected for a beat and handed over as the directories they touched — a
+// changed path's parent (its listing gained, lost or renamed an entry) and
+// the path itself (in case it's a directory whose listing is open). The
+// renderer re-reads whichever of those it has open. `.git` internals and
+// dependency trees churn constantly and are skipped.
+
+const FOLDER_WATCH_DEBOUNCE_MS = 150;
+// Past this many, say "everything" rather than list them.
+const FOLDER_WATCH_MAX_DIRS = 200;
+
+function isFolderNoise(rel: string): boolean {
+  const parts = rel.split(sep);
+  return parts[0] === ".git" || parts.includes("node_modules") || parts[parts.length - 1] === ".DS_Store";
+}
+
+/**
+ * Watches `root` for the Files tree. `onChange` gets the directories touched,
+ * relative to the root with "/" separators ("" for the root itself), or null
+ * when too much changed to list. Returns the unwatch.
+ */
+export function watchFolder(root: string, onChange: (dirs: string[] | null) => void): () => void {
+  let pending = new Set<string>();
+  let overflow = false;
+  let timer: NodeJS.Timeout | null = null;
+  let watcher: FSWatcher | null = null;
+
+  const flush = () => {
+    timer = null;
+    const dirs = overflow ? null : [...pending];
+    pending = new Set();
+    overflow = false;
+    onChange(dirs);
+  };
+
+  try {
+    watcher = watch(root, { recursive: true }, (_event, filename) => {
+      if (typeof filename === "string" && filename && isFolderNoise(filename)) return;
+      // No name (FSEvents coalesced, or dropped events): re-read everything.
+      if (typeof filename !== "string" || !filename) {
+        overflow = true;
+      } else {
+        const rel = filename.split(sep).join("/");
+        const cut = rel.lastIndexOf("/");
+        pending.add(cut === -1 ? "" : rel.slice(0, cut));
+        pending.add(rel);
+        if (pending.size > FOLDER_WATCH_MAX_DIRS) overflow = true;
+      }
+      if (!timer) timer = setTimeout(flush, FOLDER_WATCH_DEBOUNCE_MS);
+    });
+    // A folder deleted or unmounted under the watch: stop quietly; the tree
+    // shows the read error on its next re-read.
+    watcher.on("error", () => watcher?.close());
+  } catch {
+    // Past the descriptor limit or on a mount FSEvents can't watch: the tree
+    // still re-reads whenever the window comes back to the front.
+  }
+
+  return () => {
+    watcher?.close();
+    if (timer) clearTimeout(timer);
+  };
 }
