@@ -855,6 +855,14 @@ and splits (`{ direction, sizes, children }`, always two children).
   against elements that always exist, because the drop-zone overlays may not
   have painted yet on a fast drag. Only drag start and end touch Preact state;
   the ghost, preview and reorder highlight are updated on the DOM directly.
+- **A drop always ends the drag.** The tab bar is also the window's title
+  bar, a macOS drag region, and a release over a drag region goes to the
+  window rather than the page — the drop never arrived and the drag hung
+  until Esc. So while a tab moves, `body.tab-dragging` turns the bar's drag
+  region off; and in case a release is lost anyway, a pointer move with no
+  button held finishes the drop where the pointer is, while a lost pointer
+  capture or the window losing focus cancels it. Tab tooltips don't arm
+  mid-drag.
 - **Persistence.** The tree is written to `window-layout.json`, debounced
   400 ms, and restored on launch. Restored agent tabs re-attach with their
   saved args.

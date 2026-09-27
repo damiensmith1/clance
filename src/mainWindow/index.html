@@ -99,6 +99,11 @@
         flex-shrink: 0;
         -webkit-app-region: drag;
       }
+      /* While a tab is being dragged the bar stops moving the window, so a
+         drop over it reaches the page (see startDrag in Shell.js). */
+      body.tab-dragging .tab-bar {
+        -webkit-app-region: no-drag;
+      }
       /* The scrollable region for tabs, separate from .tab-bar itself —
          .tab-bar also carries the launcher-cluster (top-right corner
          buttons) as a sibling flex item. Without this wrapper, tabs and

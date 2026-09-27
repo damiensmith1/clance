@@ -520,6 +520,8 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
   }
 
   function armTip(event, tab) {
+    // Not while a tab is being dragged across the row.
+    if (dragTab) return;
     const rect = event.currentTarget.getBoundingClientRect();
     clearTimeout(tipTimer.current);
     tipTimer.current = setTimeout(
@@ -834,6 +836,7 @@ export function Shell() {
     const startX = event.clientX;
     const startY = event.clientY;
     let dragging = false;
+    let done = false;
     let ghostEl = null;
     let pending = null;
 
@@ -905,9 +908,20 @@ export function Shell() {
     }
 
     function onMove(e) {
+      // The button is up but no release arrived: it was let go somewhere that
+      // didn't pass it on (see below). Finish there, as if it had.
+      if (e.buttons === 0) {
+        if (dragging) hitTest(e.clientX, e.clientY);
+        finish();
+        return;
+      }
       if (!dragging) {
         if (Math.hypot(e.clientX - startX, e.clientY - startY) < DRAG_THRESHOLD_PX) return;
         dragging = true;
+        // The tab bar doubles as the window's title bar — a macOS drag region
+        // — and a release over a drag region goes to the window, not the
+        // page: the drop never finished. Off for as long as a tab is moving.
+        document.body.classList.add("tab-dragging");
         setDragTab({ tabId: tab.id, paneId: fromPaneId });
         ghostEl = document.createElement("div");
         ghostEl.className = "tab-drag-ghost";
@@ -919,11 +933,16 @@ export function Shell() {
     }
 
     function finish() {
-      target.releasePointerCapture(event.pointerId);
+      if (done) return;
+      done = true;
+      if (target.hasPointerCapture?.(event.pointerId)) target.releasePointerCapture(event.pointerId);
       target.removeEventListener("pointermove", onMove);
       target.removeEventListener("pointerup", finish);
       target.removeEventListener("pointercancel", onCancel);
+      target.removeEventListener("lostpointercapture", onLostCapture);
       window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("blur", onCancel);
+      document.body.classList.remove("tab-dragging");
       ghostEl?.remove();
       clearTabBarHighlight();
       hidePreview();
@@ -946,10 +965,18 @@ export function Shell() {
       if (e.key === "Escape") onCancel();
     }
 
+    // Capture taken away without a release (the element went, the OS took
+    // the pointer): nothing more will arrive, so end it rather than hang.
+    function onLostCapture() {
+      if (!done) onCancel();
+    }
+
     target.addEventListener("pointermove", onMove);
     target.addEventListener("pointerup", finish);
     target.addEventListener("pointercancel", onCancel);
+    target.addEventListener("lostpointercapture", onLostCapture);
     window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("blur", onCancel);
   }
 
   useEffect(() => {
