@@ -353,6 +353,21 @@ function reduce(state, action) {
       return changed ? { ...state, root } : state;
     }
 
+    // Where a file tab was left — scroll, cursor, which view, Edit or Diff —
+    // so switching back, or relaunching, lands there. Stored on the tab
+    // itself, so it moves with the tab and is saved with the layout.
+    case "SET_TAB_VIEW": {
+      let changed = false;
+      const update = (node) => {
+        if (node.type !== "leaf") return { ...node, children: node.children.map(update) };
+        if (!node.tabs.some((tab) => tab.id === action.tabId)) return node;
+        changed = true;
+        return { ...node, tabs: node.tabs.map((tab) => (tab.id === action.tabId ? { ...tab, view: action.view } : tab)) };
+      };
+      const root = update(state.root);
+      return changed ? { ...state, root } : state;
+    }
+
     case "MOVE_TAB": {
       const { tabId, fromPaneId, toPaneId, toIndex } = action;
       const fromPane = findPane(state.root, fromPaneId);
@@ -436,9 +451,18 @@ function schedulePersist() {
   }, 400);
 }
 
-export function dispatch(action) {
+/** Writes the layout now rather than after the debounce — before a reload. */
+export function persistNow() {
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = null;
+  window.clanceApp.saveWindowLayout({ root: state.root, activePaneId: state.activePaneId });
+}
+
+export function dispatch(action, { quiet = false } = {}) {
   state = reduce(state, action);
-  listeners.forEach((listener) => listener(state));
+  // A quiet change is saved but doesn't re-render the window: a tab's scroll
+  // position changes constantly and nothing on screen depends on it.
+  if (!quiet) listeners.forEach((listener) => listener(state));
   schedulePersist();
 }
 
@@ -537,6 +561,10 @@ export function movedFileTab(tab, fromAbs, toAbs) {
     path = nextAbs.slice(nextAbs.lastIndexOf("/") + 1);
   }
   return { ...tab, id: `file:${repoRoot}:${path}`, repoRoot, path, label: path.split("/").pop() };
+}
+
+export function setTabView(tabId, view) {
+  dispatch({ type: "SET_TAB_VIEW", tabId, view }, { quiet: true });
 }
 
 export function rekeyFileTabs(fromAbs, toAbs) {

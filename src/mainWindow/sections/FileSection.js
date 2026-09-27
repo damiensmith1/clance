@@ -1,6 +1,6 @@
 import { html, useEffect, useMemo, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
 import { Chunk, Text, goToNextChunk, goToPreviousChunk } from "../../shared/vendor/codemirror.mjs";
-import { acquire, subscribe, setMode, keepMine, takeTheirs } from "../editor/buffers.js";
+import { acquire, subscribe, setMode, setViewId as rememberViewId, keepMine, takeTheirs } from "../editor/buffers.js";
 import { CompareView } from "../editor/views.js";
 import { pickHandler } from "../handlers/index.js";
 
@@ -51,10 +51,19 @@ function Banner({ tone = "warning", children }) {
   return html`<div class="file-banner file-banner-${tone}" role="status">${children}</div>`;
 }
 
-export function FileSection({ repoRoot, path, onOpenFile }) {
-  const buffer = acquire(repoRoot, path);
+// `savedView` is where this tab was left (the layout keeps it); `onViewState`
+// hears about every change to that, to keep it.
+export function FileSection({ repoRoot, path, onOpenFile, savedView = null, onViewState = null }) {
+  const buffer = acquire(repoRoot, path, savedView);
+  buffer.ui.report = onViewState;
   const [, rerender] = useState(0);
-  const [viewId, setViewId] = useState(null);
+  // Which view the tab is on lives with the buffer, so switching away and
+  // back (which remounts this component) keeps it.
+  const [viewId, setViewIdState] = useState(buffer.ui.viewId);
+  const setViewId = (id) => {
+    setViewIdState(id);
+    rememberViewId(buffer, id);
+  };
   const [comparing, setComparing] = useState(false);
 
   useEffect(() => {
@@ -63,9 +72,10 @@ export function FileSection({ repoRoot, path, onOpenFile }) {
     rerender((n) => n + 1);
     return stop;
   }, [buffer]);
-  // A different file gets its handler's own default view.
+  // A different file comes back on the view it was left on, or its handler's
+  // default.
   useEffect(() => {
-    setViewId(null);
+    setViewIdState(buffer.ui.viewId);
     setComparing(false);
   }, [repoRoot, path]);
   useEffect(() => {

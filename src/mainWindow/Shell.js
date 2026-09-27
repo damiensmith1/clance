@@ -18,6 +18,8 @@ import {
   save as saveBuffer,
   saveAll as saveAllBuffers,
   rekey as rekeyBuffer,
+  viewStateOf,
+  reportAllViews,
   acquire as acquireBuffer,
   revealLine,
 } from "./editor/buffers.js";
@@ -39,6 +41,8 @@ import {
   canSplitAt,
   movedFileTab,
   rekeyFileTabs,
+  setTabView,
+  persistNow,
 } from "./state/layoutStore.js";
 
 const LAUNCHER_ITEMS = [
@@ -115,7 +119,13 @@ const MAX_CLOSED_TABS = 20;
 
 function rememberClosed(tab, paneId) {
   if (tab.type === "terminal" && !tab.args?.length) return;
-  closedTabs.push({ tab, paneId });
+  // The store's copy, not the one the tab strip rendered with: view state
+  // (scroll, cursor) is written to the store quietly, without a re-render.
+  let current = listTabs(getState().root).find((entry) => entry.tab.id === tab.id)?.tab ?? tab;
+  // A file tab's very latest place, not the last one reported.
+  const buffer = tab.type === "file" ? peekBuffer(tab.repoRoot, tab.path) : null;
+  if (buffer) current = { ...current, view: viewStateOf(buffer) };
+  closedTabs.push({ tab: current, paneId });
   if (closedTabs.length > MAX_CLOSED_TABS) closedTabs.shift();
 }
 
@@ -136,9 +146,9 @@ async function confirmUnsaved(tabs) {
 }
 
 function endTab(tab, paneId) {
+  rememberClosed(tab, paneId);
   if (tab.type === "terminal") destroyTerminal(tab.terminalId);
   if (tab.type === "file") releaseBuffer(tab.repoRoot, tab.path);
-  rememberClosed(tab, paneId);
 }
 
 async function closeTabsSafely(paneId, tabs, focusTabId) {
@@ -376,7 +386,16 @@ function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut, openSectio
     case "search":
       return html`<${SearchSection} onOpenResult=${launcher.openSearchResult} />`;
     case "file":
-      return html`<${FileSection} repoRoot=${tab.repoRoot} path=${tab.path} onOpenFile=${openFileTab} />`;
+      // Keyed by tab: without it two file tabs in one pane share a component
+      // and its DOM, and a preview's scroll carries from one file to the next.
+      return html`<${FileSection}
+        key=${tab.id}
+        repoRoot=${tab.repoRoot}
+        path=${tab.path}
+        onOpenFile=${openFileTab}
+        savedView=${tab.view ?? null}
+        onViewState=${(view) => setTabView(tab.id, view)}
+      />`;
     case "settings":
       return html`<${SettingsSection} />`;
     case "dictation":
@@ -1332,6 +1351,17 @@ export function Shell() {
 
   useEffect(() => {
     loadEditorConfig();
+  }, []);
+
+  // A reload or quit shouldn't lose the last moment of scrolling to the
+  // debounces: report every tab's place and write the layout now.
+  useEffect(() => {
+    const flush = () => {
+      reportAllViews();
+      persistNow();
+    };
+    window.addEventListener("beforeunload", flush);
+    return () => window.removeEventListener("beforeunload", flush);
   }, []);
 
   // Files and folders opened from Finder or `clance`: a file opens as a tab,

@@ -1392,6 +1392,29 @@ or splitting a pane never loses unsaved edits. A buffer is created the first
 time its tab renders and released when the tab closes (`closeTabsSafely` in
 `Shell.js`), which also stops watching the file.
 
+**Where a tab was left.** Moving the editor's DOM out of the page loses its
+scroll position, and a tab switch remounts `FileSection` (keyed by tab id —
+without the key two file tabs in one pane shared a component and its DOM, so
+one file's scroll leaked into the next), losing which view it was on. So both
+live with the buffer instead (`buffer.ui`):
+
+- As `EditorPane` unmounts it takes a CodeMirror `scrollSnapshot()`, which
+  restores the exact position on the next mount.
+- Previews remember their own `scrollTop` per view and reapply it as content
+  settles (a document's images load after it renders). Only the person's own
+  scrolling is recorded: a restore clamped short by content that hasn't
+  reached full height fires a scroll event too, so a scroll that lands
+  exactly where the last restore put it is ignored.
+- The same state as plain values — view, Edit/Diff, the top visible line and
+  the offset into it, cursor and selection, preview offsets — is written onto
+  the tab in the layout store (`SET_TAB_VIEW`, a *quiet* action that is
+  persisted but doesn't re-render the window, since it changes on every
+  scroll). It moves with the tab, survives ⇧⌘T, and is flushed immediately on
+  `beforeunload`, so a reload doesn't lose the last moment of scrolling.
+- After a relaunch the editor scrolls the saved line into view (so that part
+  of the document gets measured — far-off lines only have estimated heights),
+  then sets the exact pixel from where that line really landed.
+
 A buffer is **dirty** when its document differs from `savedText`, the text it
 was loaded or last saved as — compared with CodeMirror's `Text.eq` on each
 change, so undoing back to the saved text clears the dot.

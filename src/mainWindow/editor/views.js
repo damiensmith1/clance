@@ -2,7 +2,16 @@ import { html, useEffect, useLayoutEffect, useMemo, useRef, useState } from "../
 import { renderMarkdown, attachCopyHandler, loadMarkdownImages, resolveDocumentPath } from "../../shared/markdown.js";
 import { MergeView, EditorView, EditorState } from "../../shared/vendor/codemirror.mjs";
 import { baseExtensions, languageFor } from "./setup.js";
-import { onContent, textOfBuffer, openAsText, resolveCompare, applyPendingLine } from "./buffers.js";
+import {
+  onContent,
+  textOfBuffer,
+  openAsText,
+  resolveCompare,
+  parkEditor,
+  restoreEditor,
+  reportView,
+  rememberScroll,
+} from "./buffers.js";
 
 // The views a file-type handler can offer (handlers/). Each takes the tab's
 // buffer rather than a file, so a preview follows unsaved edits.
@@ -34,16 +43,65 @@ export function EditorPane({ buffer }) {
     if (!view || !host) return;
     host.appendChild(view.dom);
     view.requestMeasure();
-    if (buffer.pendingLine) requestAnimationFrame(() => applyPendingLine(buffer));
+    // Back where it was: the scroll and cursor it had when the tab was last
+    // on screen (or saved with the layout), not the top of the file.
+    restoreEditor(buffer);
     // Take focus when nothing else has it (a tab just opened), never away
     // from a terminal the person is typing in.
     if (document.activeElement === document.body || !document.activeElement) view.focus();
+    const onScroll = () => reportView(buffer);
+    view.scrollDOM.addEventListener("scroll", onScroll);
     return () => {
+      view.scrollDOM.removeEventListener("scroll", onScroll);
+      parkEditor(buffer);
+      reportView(buffer, true);
       if (view.dom.parentNode === host) host.removeChild(view.dom);
     };
   }, [view]);
   if (!view) return html`<div class="file-empty"><p>Reading ${buffer.name}…</p></div>`;
   return html`<div class="editor-host" ref=${ref}></div>`;
+}
+
+/**
+ * A scrolling view (a preview, an image) that comes back where it was left.
+ * The offset is reapplied as content settles — a document's images load
+ * after it renders, and restoring before they do lands short.
+ */
+function useRememberedScroll(buffer, viewId) {
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const saved = buffer.ui.scroll[viewId] ?? 0;
+    // Only the person's own scrolling counts. A restore that's clamped short
+    // (the content hasn't reached its full height yet) fires a scroll event
+    // too; taking that for the person's would stop restoring and record the
+    // wrong place. So a scroll that lands exactly where the last restore put
+    // it is ours, and anything else — wheel, scrollbar, keys — is theirs.
+    let touched = false;
+    let applied = null;
+    const apply = () => {
+      if (touched) return;
+      element.scrollTop = saved;
+      applied = element.scrollTop;
+    };
+    apply();
+    const settle = new ResizeObserver(apply);
+    for (const child of element.children) settle.observe(child);
+    const stopSettling = setTimeout(() => settle.disconnect(), 2000);
+    const onScroll = () => {
+      if (!touched && element.scrollTop === applied) return;
+      touched = true;
+      rememberScroll(buffer, viewId, element.scrollTop);
+    };
+    element.addEventListener("scroll", onScroll);
+    return () => {
+      settle.disconnect();
+      clearTimeout(stopSettling);
+      element.removeEventListener("scroll", onScroll);
+    };
+  }, [buffer, viewId]);
+  return ref;
 }
 
 /** Follows the buffer's text, a beat behind typing. */
@@ -72,6 +130,7 @@ function useBufferText(buffer, delay = 150) {
  */
 export function MarkdownPreview({ buffer, onOpenFile }) {
   const bodyRef = useRef(null);
+  const scrollRef = useRememberedScroll(buffer, "rendered");
   const source = useBufferText(buffer);
   const { root, path } = buffer;
   const rendering = useMemo(() => renderMarkdown(source, { html: true, frontMatter: true }), [source]);
@@ -117,7 +176,7 @@ export function MarkdownPreview({ buffer, onOpenFile }) {
   }
 
   return html`
-    <div class="file-body">
+    <div class="file-body" ref=${scrollRef}>
       <div class="file-markdown" ref=${bodyRef} onClick=${onClick} dangerouslySetInnerHTML=${{ __html: rendering }}></div>
     </div>
   `;
@@ -130,12 +189,14 @@ export function MarkdownPreview({ buffer, onOpenFile }) {
 export function SvgPreview({ buffer }) {
   const text = useBufferText(buffer, 250);
   const src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(text)}`;
-  return html`<div class="file-image-body"><img class="file-image" src=${src} alt=${buffer.path} /></div>`;
+  const scrollRef = useRememberedScroll(buffer, "image");
+  return html`<div class="file-image-body" ref=${scrollRef}><img class="file-image" src=${src} alt=${buffer.path} /></div>`;
 }
 
 /** A bitmap image, at its size, fit to the pane. */
 export function ImageView({ buffer }) {
-  return html`<div class="file-image-body"><img class="file-image" src=${buffer.doc.dataUrl} alt=${buffer.path} /></div>`;
+  const scrollRef = useRememberedScroll(buffer, "image");
+  return html`<div class="file-image-body" ref=${scrollRef}><img class="file-image" src=${buffer.doc.dataUrl} alt=${buffer.path} /></div>`;
 }
 
 /** A file no handler claims says what it can about itself, and offers a way out. */

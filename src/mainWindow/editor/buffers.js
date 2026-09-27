@@ -242,8 +242,12 @@ function listen() {
 
 // ---- public API ----
 
-/** The buffer for a file, loading it the first time it's asked for. */
-export function acquire(root, path) {
+/**
+ * The buffer for a file, loading it the first time it's asked for. `saved` is
+ * the view state its tab was left in (see `viewStateOf`), used only when the
+ * buffer is new — after a relaunch, or a tab reopened.
+ */
+export function acquire(root, path, saved = null) {
   listen();
   const key = keyOf(root, path);
   let buffer = buffers.get(key);
@@ -269,7 +273,18 @@ export function acquire(root, path) {
     listeners: new Set(),
     contentListeners: new Set(),
     asText: false,
+    // Where the tab was left: its view, its editor's scroll (a CodeMirror
+    // snapshot while the app runs; a line and cursor to restore from after
+    // a relaunch), each preview's scroll, and whoever wants to know.
+    ui: {
+      viewId: saved?.viewId ?? null,
+      snapshot: null,
+      restore: saved && typeof saved.topLine === "number" ? saved : null,
+      scroll: { ...(saved?.scroll ?? {}) },
+      report: null,
+    },
   };
+  if (saved?.mode === "diff") buffer.mode = "diff";
   buffers.set(key, buffer);
   window.clanceApp.docWatch(root, path);
   load(buffer);
@@ -306,6 +321,88 @@ export function applyPendingLine(buffer) {
   const line = view.state.doc.line(number);
   view.dispatch({ selection: { anchor: line.from, head: line.to }, effects: EditorView.scrollIntoView(line.from, { y: "center" }) });
   view.focus();
+}
+
+/** The view state worth saving: plain values, no CodeMirror objects. */
+export function viewStateOf(buffer) {
+  const state = { viewId: buffer.ui.viewId, mode: buffer.mode, scroll: { ...buffer.ui.scroll } };
+  const view = buffer.view;
+  if (view?.dom.isConnected) {
+    // The line at the top, and how far into it — a line alone lands up to a
+    // line off.
+    const height = Math.max(0, view.scrollDOM.scrollTop - view.documentPadding.top);
+    const block = view.lineBlockAtHeight(height);
+    state.topLine = view.state.doc.lineAt(block.from).number;
+    state.topOffset = Math.round(height - block.top);
+    state.anchor = view.state.selection.main.anchor;
+    state.head = view.state.selection.main.head;
+  } else if (buffer.ui.lastEditor) {
+    Object.assign(state, buffer.ui.lastEditor);
+  }
+  return state;
+}
+
+const reportTimer = new Map();
+/** Tells the tab its view state changed, a beat later (it's saved to disk). */
+export function reportView(buffer, now = false) {
+  clearTimeout(reportTimer.get(buffer.key));
+  const send = () => buffer.ui.report?.(viewStateOf(buffer));
+  if (now) send();
+  else reportTimer.set(buffer.key, setTimeout(send, 400));
+}
+
+/**
+ * Puts a freshly mounted editor back where it was: this session's exact
+ * scroll snapshot if there is one, else the line and cursor saved with the
+ * layout. A pending line (a search result) wins over both.
+ */
+export function restoreEditor(buffer) {
+  const view = buffer.view;
+  if (!view) return;
+  if (buffer.pendingLine) {
+    requestAnimationFrame(() => applyPendingLine(buffer));
+    return;
+  }
+  if (buffer.ui.snapshot) {
+    view.dispatch({ effects: buffer.ui.snapshot });
+    buffer.ui.snapshot = null;
+    return;
+  }
+  const saved = buffer.ui.restore;
+  if (!saved) return;
+  buffer.ui.restore = null;
+  const doc = view.state.doc;
+  const clamp = (n) => Math.min(Math.max(0, n ?? 0), doc.length);
+  const top = doc.line(Math.min(Math.max(1, saved.topLine), doc.lines)).from;
+  // Two steps. Scrolling the line into view gets that part of the document
+  // measured (far-off lines only have estimated heights until then); once it
+  // is, the exact offset is set from where the line really sits — the
+  // inverse of how `viewStateOf` took it.
+  view.dispatch({
+    selection: { anchor: clamp(saved.anchor), head: clamp(saved.head ?? saved.anchor) },
+    effects: EditorView.scrollIntoView(top, { y: "start", yMargin: 0 }),
+  });
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      if (!view.dom.isConnected) return;
+      const block = view.lineBlockAt(top);
+      view.scrollDOM.scrollTop = block.top + view.documentPadding.top + (saved.topOffset ?? 0);
+    })
+  );
+}
+
+/** Every open buffer's view state, reported now — before a reload or quit. */
+export function reportAllViews() {
+  for (const buffer of buffers.values()) reportView(buffer, true);
+}
+
+/** Called as an editor leaves the page: remember exactly where it was. */
+export function parkEditor(buffer) {
+  const view = buffer.view;
+  if (!view) return;
+  const state = viewStateOf(buffer);
+  buffer.ui.lastEditor = { topLine: state.topLine, anchor: state.anchor, head: state.head };
+  buffer.ui.snapshot = view.scrollSnapshot();
 }
 
 export function peek(root, path) {
@@ -376,6 +473,18 @@ export function setMode(buffer, mode) {
   buffer.mode = mode;
   reconfigure(buffer);
   notify(buffer);
+  reportView(buffer);
+}
+
+export function setViewId(buffer, viewId) {
+  buffer.ui.viewId = viewId;
+  reportView(buffer);
+}
+
+/** A non-editor view's scroll offset (a preview, an image). */
+export function rememberScroll(buffer, viewId, top) {
+  buffer.ui.scroll[viewId] = Math.round(top);
+  reportView(buffer);
 }
 
 /**

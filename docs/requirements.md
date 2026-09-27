@@ -210,6 +210,10 @@ Sessions Clance starts get these tools when Accessibility is granted:
   way down a long file.
 - A file tab follows the file: a session writing to it while it's open updates
   what's shown (see Editor for when there are unsaved edits).
+- A file tab stays where it was left. Switching to another tab and back, moving
+  it between panes, reopening it with ⇧⌘T or relaunching Clance brings it back
+  to the same scroll position, cursor and selection, the same view (Rendered
+  or Source, Edit or Diff), and a preview to the same place in the document.
 - One tab per file — opening the same file again focuses the tab that's
   already there. Files open beside the sidecars rather than over them.
 - An image opens in a tab of its own and is shown at its size, fit to the
