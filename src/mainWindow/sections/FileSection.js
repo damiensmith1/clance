@@ -3,6 +3,7 @@ import { Chunk, Text, goToNextChunk, goToPreviousChunk } from "../../shared/vend
 import { acquire, subscribe, setMode, setViewId as rememberViewId, keepMine, takeTheirs } from "../editor/buffers.js";
 import { CompareView } from "../editor/views.js";
 import { pickHandler } from "../handlers/index.js";
+import { useTabId, readTabState, writeTabState } from "../state/tabState.js";
 
 // A file tab: the file, in whichever view its handler offers, editable where
 // it can be. The document itself — text, undo history, whether it's saved —
@@ -51,11 +52,13 @@ function Banner({ tone = "warning", children }) {
   return html`<div class="file-banner file-banner-${tone}" role="status">${children}</div>`;
 }
 
-// `savedView` is where this tab was left (the layout keeps it); `onViewState`
-// hears about every change to that, to keep it.
-export function FileSection({ repoRoot, path, onOpenFile, savedView = null, onViewState = null }) {
-  const buffer = acquire(repoRoot, path, savedView);
-  buffer.ui.report = onViewState;
+export function FileSection({ repoRoot, path, onOpenFile }) {
+  // Where this tab was left — scroll, cursor, view, Edit or Diff — is the
+  // tab's persisted `view` state (state/tabState.js): it seeds a new buffer
+  // (after a relaunch, or ⇧⌘T), and the buffer reports every change back.
+  const tabId = useTabId();
+  const buffer = acquire(repoRoot, path, tabId ? readTabState(tabId, "view", null) : null);
+  buffer.ui.report = tabId ? (view) => writeTabState(tabId, "view", view, { persist: true }) : null;
   const [, rerender] = useState(0);
   // Which view the tab is on lives with the buffer, so switching away and
   // back (which remounts this component) keeps it.

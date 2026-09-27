@@ -353,16 +353,21 @@ function reduce(state, action) {
       return changed ? { ...state, root } : state;
     }
 
-    // Where a file tab was left — scroll, cursor, which view, Edit or Diff —
-    // so switching back, or relaunching, lands there. Stored on the tab
-    // itself, so it moves with the tab and is saved with the layout.
-    case "SET_TAB_VIEW": {
+    // A tab's persisted state (see tabState.js) — a search, a filter, a
+    // scroll offset, where a file was left. Stored on the tab itself, so it
+    // moves with the tab, is saved with the layout, and comes back with ⇧⌘T.
+    case "SET_TAB_STATE": {
       let changed = false;
       const update = (node) => {
         if (node.type !== "leaf") return { ...node, children: node.children.map(update) };
         if (!node.tabs.some((tab) => tab.id === action.tabId)) return node;
         changed = true;
-        return { ...node, tabs: node.tabs.map((tab) => (tab.id === action.tabId ? { ...tab, view: action.view } : tab)) };
+        return {
+          ...node,
+          tabs: node.tabs.map((tab) =>
+            tab.id === action.tabId ? { ...tab, state: { ...tab.state, [action.key]: action.value } } : tab
+          ),
+        };
       };
       const root = update(state.root);
       return changed ? { ...state, root } : state;
@@ -490,7 +495,9 @@ function rehydrateNode(node) {
     // empty tab.
     const tabs = node.tabs
       .filter((tab) => KNOWN_TAB_TYPES.has(tab?.type))
-      .map((tab) => (tab.type === "terminal" && !tab.shell ? { ...tab, terminalId: nextTerminalId() } : tab));
+      .map((tab) => (tab.type === "terminal" && !tab.shell ? { ...tab, terminalId: nextTerminalId() } : tab))
+      // A file tab's view state used to be saved as `view`; it's `state.view` now.
+      .map(({ view, ...tab }) => (view && !tab.state?.view ? { ...tab, state: { ...tab.state, view } } : tab));
     if (tabs.length === 0) return null;
     const activeTabId = tabs.some((t) => t.id === node.activeTabId) ? node.activeTabId : tabs[0].id;
     return { ...node, tabs, activeTabId };
@@ -563,8 +570,8 @@ export function movedFileTab(tab, fromAbs, toAbs) {
   return { ...tab, id: `file:${repoRoot}:${path}`, repoRoot, path, label: path.split("/").pop() };
 }
 
-export function setTabView(tabId, view) {
-  dispatch({ type: "SET_TAB_VIEW", tabId, view }, { quiet: true });
+export function setTabStateValue(tabId, key, value) {
+  dispatch({ type: "SET_TAB_STATE", tabId, key, value }, { quiet: true });
 }
 
 export function rekeyFileTabs(fromAbs, toAbs) {

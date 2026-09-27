@@ -10,8 +10,8 @@ import {
   parkEditor,
   restoreEditor,
   reportView,
-  rememberScroll,
 } from "./buffers.js";
+import { useTabScroll } from "../state/tabState.js";
 
 // The views a file-type handler can offer (handlers/). Each takes the tab's
 // buffer rather than a file, so a preview follows unsaved edits.
@@ -62,48 +62,6 @@ export function EditorPane({ buffer }) {
   return html`<div class="editor-host" ref=${ref}></div>`;
 }
 
-/**
- * A scrolling view (a preview, an image) that comes back where it was left.
- * The offset is reapplied as content settles — a document's images load
- * after it renders, and restoring before they do lands short.
- */
-function useRememberedScroll(buffer, viewId) {
-  const ref = useRef(null);
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    const saved = buffer.ui.scroll[viewId] ?? 0;
-    // Only the person's own scrolling counts. A restore that's clamped short
-    // (the content hasn't reached its full height yet) fires a scroll event
-    // too; taking that for the person's would stop restoring and record the
-    // wrong place. So a scroll that lands exactly where the last restore put
-    // it is ours, and anything else — wheel, scrollbar, keys — is theirs.
-    let touched = false;
-    let applied = null;
-    const apply = () => {
-      if (touched) return;
-      element.scrollTop = saved;
-      applied = element.scrollTop;
-    };
-    apply();
-    const settle = new ResizeObserver(apply);
-    for (const child of element.children) settle.observe(child);
-    const stopSettling = setTimeout(() => settle.disconnect(), 2000);
-    const onScroll = () => {
-      if (!touched && element.scrollTop === applied) return;
-      touched = true;
-      rememberScroll(buffer, viewId, element.scrollTop);
-    };
-    element.addEventListener("scroll", onScroll);
-    return () => {
-      settle.disconnect();
-      clearTimeout(stopSettling);
-      element.removeEventListener("scroll", onScroll);
-    };
-  }, [buffer, viewId]);
-  return ref;
-}
-
 /** Follows the buffer's text, a beat behind typing. */
 function useBufferText(buffer, delay = 150) {
   const [text, setText] = useState(() => textOfBuffer(buffer));
@@ -130,7 +88,9 @@ function useBufferText(buffer, delay = 150) {
  */
 export function MarkdownPreview({ buffer, onOpenFile }) {
   const bodyRef = useRef(null);
-  const scrollRef = useRememberedScroll(buffer, "rendered");
+  // Where the preview was scrolled is the tab's state (state/tabState.js).
+  const scrollRef = useRef(null);
+  useTabScroll(scrollRef, "preview.rendered");
   const source = useBufferText(buffer);
   const { root, path } = buffer;
   const rendering = useMemo(() => renderMarkdown(source, { html: true, frontMatter: true }), [source]);
@@ -189,13 +149,15 @@ export function MarkdownPreview({ buffer, onOpenFile }) {
 export function SvgPreview({ buffer }) {
   const text = useBufferText(buffer, 250);
   const src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(text)}`;
-  const scrollRef = useRememberedScroll(buffer, "image");
+  const scrollRef = useRef(null);
+  useTabScroll(scrollRef, "preview.image");
   return html`<div class="file-image-body" ref=${scrollRef}><img class="file-image" src=${src} alt=${buffer.path} /></div>`;
 }
 
 /** A bitmap image, at its size, fit to the pane. */
 export function ImageView({ buffer }) {
-  const scrollRef = useRememberedScroll(buffer, "image");
+  const scrollRef = useRef(null);
+  useTabScroll(scrollRef, "preview.image");
   return html`<div class="file-image-body" ref=${scrollRef}><img class="file-image" src=${buffer.doc.dataUrl} alt=${buffer.path} /></div>`;
 }
 

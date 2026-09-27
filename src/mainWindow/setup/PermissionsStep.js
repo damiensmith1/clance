@@ -1,12 +1,12 @@
 import { h, html, useState, useEffect } from "../../shared/vendor/preact-htm-standalone.module.js";
-import { useRemembered } from "../state/remember.js";
+import { useTabState } from "../state/tabState.js";
 import { StatusCard } from "../components/StatusCard.js";
 
 const RECHECK_MS = 2000;
 
 export function PermissionsStep({ onComplete, onBack, onReady } = {}) {
   // Remembered so a remount doesn't flash "checking…"; re-checked underneath.
-  const [status, setStatus] = useRemembered("step.permissions.status", null);
+  const [status, setStatus] = useTabState("step.permissions.status", null);
   // The restart hint only appears once the user has actually been sent to
   // System Settings — before that it would just be noise.
   const [openedScreenSettings, setOpenedScreenSettings] = useState(false);

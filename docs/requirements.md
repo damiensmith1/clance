@@ -415,9 +415,12 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - Moving a tab to another pane, or switching away from it and back, never
   loses what it was doing. Sessions keeps its search, filter, selected row,
   an open peek and where that peek was scrolled; Dictation its search and
-  date filter; Settings its open groups; every tab its scroll position. None
-  of them flashes back to "Loading…" — they redraw as they were and refresh
-  quietly.
+  date filter; Settings its open groups; Search its query and results; Files
+  its open folders; every tab its scroll position. None of them flashes back
+  to "Loading…" — they redraw as they were and refresh quietly.
+- The parts worth keeping — a search, a filter, scroll positions, where a
+  file was left — also survive a relaunch and come back with a tab reopened
+  by ⇧⌘T. What a tab was showing (lists, results) is re-read instead.
 - A session with nothing in it yet is shown as "Clance Chat" — one name for
   that state, wherever it appears. A tab takes the conversation's real title
   as soon as it has one.

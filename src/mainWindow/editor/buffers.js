@@ -273,14 +273,14 @@ export function acquire(root, path, saved = null) {
     listeners: new Set(),
     contentListeners: new Set(),
     asText: false,
-    // Where the tab was left: its view, its editor's scroll (a CodeMirror
-    // snapshot while the app runs; a line and cursor to restore from after
-    // a relaunch), each preview's scroll, and whoever wants to know.
+    // Where the tab was left: its view and its editor's scroll (a
+    // CodeMirror snapshot while the app runs; a line and cursor to restore
+    // from after a relaunch), and whoever wants to know. Previews keep their
+    // own scroll as tab state (see views.js).
     ui: {
       viewId: saved?.viewId ?? null,
       snapshot: null,
       restore: saved && typeof saved.topLine === "number" ? saved : null,
-      scroll: { ...(saved?.scroll ?? {}) },
       report: null,
     },
   };
@@ -325,7 +325,7 @@ export function applyPendingLine(buffer) {
 
 /** The view state worth saving: plain values, no CodeMirror objects. */
 export function viewStateOf(buffer) {
-  const state = { viewId: buffer.ui.viewId, mode: buffer.mode, scroll: { ...buffer.ui.scroll } };
+  const state = { viewId: buffer.ui.viewId, mode: buffer.mode };
   const view = buffer.view;
   if (view?.dom.isConnected) {
     // The line at the top, and how far into it — a line alone lands up to a
@@ -481,11 +481,6 @@ export function setViewId(buffer, viewId) {
   reportView(buffer);
 }
 
-/** A non-editor view's scroll offset (a preview, an image). */
-export function rememberScroll(buffer, viewId, top) {
-  buffer.ui.scroll[viewId] = Math.round(top);
-  reportView(buffer);
-}
 
 /**
  * Saves a buffer. Resolves "saved", "conflict" (the file changed on disk

@@ -1,5 +1,6 @@
 import { html, useEffect, useMemo, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
 import { Icon } from "../../shared/icons.js";
+import { useTabState, useTabScroll } from "../state/tabState.js";
 
 // Find in Files (⇧⌘F): a sidecar that searches every file under the Files
 // folder with ripgrep (src/main/search.ts). Results stream in grouped by
@@ -10,9 +11,7 @@ const DEBOUNCE_MS = 250;
 
 let nextId = 1;
 
-// Remembered for as long as the app runs, so closing the tab and coming back
-// finds the last search where it was.
-const memory = { query: "", caseSensitive: false, wholeWord: false, regex: false, include: "", exclude: "", includeIgnored: false };
+const DEFAULT_OPTIONS = { query: "", caseSensitive: false, wholeWord: false, regex: false, include: "", exclude: "", includeIgnored: false };
 
 /** Focuses the search box, from ⇧⌘F. */
 export function focusSearchInput() {
@@ -40,14 +39,22 @@ function Toggle({ on, title, onToggle, children }) {
 }
 
 export function SearchSection({ onOpenResult }) {
-  const [options, setOptions] = useState({ ...memory });
-  const [root, setRoot] = useState(null);
-  const [results, setResults] = useState([]);
-  const [status, setStatus] = useState(null);
-  const [collapsed, setCollapsed] = useState(() => new Set());
-  const [showFilters, setShowFilters] = useState(Boolean(memory.include || memory.exclude));
+  // The search itself (query, toggles, globs) is the tab's persisted state,
+  // saved with the layout; the results and what's collapsed are its live
+  // state (state/tabState.js). Moving the tab or switching away keeps them all,
+  // and doesn't run the same search again.
+  const [options, setOptions] = useTabState("search.options", DEFAULT_OPTIONS, { persist: true });
+  const [showFilters, setShowFilters] = useTabState("search.showFilters", false, { persist: true });
+  const [root, setRoot] = useTabState("search.root", null);
+  const [results, setResults] = useTabState("search.results", []);
+  const [status, setStatus] = useTabState("search.status", null);
+  const [collapsed, setCollapsed] = useTabState("search.collapsed", () => new Set());
+  // What `results` are the answer to, so a remount knows not to search again.
+  const [searched, setSearched] = useTabState("search.searched", null);
   const inputRef = useRef(null);
+  const resultsRef = useRef(null);
   const currentId = useRef(0);
+  useTabScroll(resultsRef, "search.results", { version: searched });
 
   // The folder the Files sidecar is pointed at, or else the Changes
   // repository: search covers the project being looked at.
@@ -84,9 +91,13 @@ export function SearchSection({ onOpenResult }) {
   // A pause in typing (or any toggle) starts a new search, which cancels the
   // one before it in the main process.
   useEffect(() => {
-    Object.assign(memory, options);
     if (!root) return;
+    // Already the answer on screen (coming back to the tab) — unless it was
+    // cut off mid-search by the tab going away.
+    const signature = JSON.stringify([root, options]);
+    if (signature === searched && !status?.running) return;
     const timer = setTimeout(() => {
+      setSearched(signature);
       const id = nextId++;
       currentId.current = id;
       setResults([]);
@@ -178,7 +189,7 @@ export function SearchSection({ onOpenResult }) {
         `}
         <div class="search-summary ${status?.error ? "search-summary-error" : ""}">${summary}</div>
       </div>
-      <div class="search-results">
+      <div class="search-results" ref=${resultsRef}>
         ${groups.map(
           ([path, matches]) => html`
             <div class="search-group" key=${path}>

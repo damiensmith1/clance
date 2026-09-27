@@ -1,6 +1,7 @@
 import { html, useEffect, useMemo, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
 import { Icon } from "../../shared/icons.js";
 import { MenuItem } from "./ChatsSection.js";
+import { useTabState, useTabScroll } from "../state/tabState.js";
 
 // The Files explorer: a sidecar like Changes, browsing any folder on the
 // machine — ⌘P needs you to know a filename already, and looking around a
@@ -13,20 +14,10 @@ import { MenuItem } from "./ChatsSection.js";
 // tree re-reads what's open after its own changes and whenever the window
 // comes back to the front, since sessions create files too.
 //
-// Which directories are open is kept per folder in `cache`, module-level, so
-// closing the tab and opening it again lands where it was left. It doesn't
-// survive a relaunch; persisting it would mean a new store, and the layout
-// file already restores which tabs are open rather than what's inside them.
-const cache = new Map();
-
-function cacheFor(root) {
-  let entry = cache.get(root);
-  if (!entry) {
-    entry = { expanded: new Set(), selected: null };
-    cache.set(root, entry);
-  }
-  return entry;
-}
+// Which directories are open, what's selected and the listings already read
+// are kept per folder as the tab's state (state/tabState.js), so moving the
+// tab or switching away and back redraws the tree at once and re-reads it
+// quietly, rather than starting from a blank folder.
 
 function homeShort(path) {
   return path.replace(/^\/Users\/[^/]+/, "~");
@@ -40,16 +31,22 @@ function parentOf(path) {
 const DRAG_THRESHOLD_PX = 4;
 
 export function FilesSection({ onOpenFile, onPathMoved, onOpenTerminal, onAskClaude }) {
-  const [folders, setFolders] = useState([]);
-  const [root, setRoot] = useState(null);
+  const [byRoot] = useTabState("files.byRoot", () => new Map());
+  function cacheFor(folder) {
+    if (!byRoot.has(folder)) byRoot.set(folder, { expanded: new Set(), selected: null, dirs: new Map() });
+    return byRoot.get(folder);
+  }
+  const [folders, setFolders] = useTabState("files.folders", []);
+  const [root, setRoot] = useTabState("files.root", null);
+  const initial = root ? byRoot.get(root) ?? null : null;
   // path → the listing of that directory. "" is the chosen folder itself.
-  const [dirs, setDirs] = useState(() => new Map());
-  const [expanded, setExpanded] = useState(() => new Set());
-  const [selected, setSelected] = useState(null);
+  const [dirs, setDirs] = useState(() => initial?.dirs ?? new Map());
+  const [expanded, setExpanded] = useState(() => new Set(initial?.expanded ?? []));
+  const [selected, setSelected] = useState(initial?.selected ?? null);
   // On by default: the tree is for looking around a folder, and a build
   // output or a local scratch file is as much in it as a tracked one.
   // Ignored rows are dimmed rather than hidden, and the toggle hides them.
-  const [showIgnored, setShowIgnored] = useState(true);
+  const [showIgnored, setShowIgnored] = useTabState("files.showIgnored", true, { persist: true });
   const [menu, setMenu] = useState(false);
   const [repo, setRepo] = useState(null);
   const [loaded, setLoaded] = useState(false);
@@ -70,6 +67,7 @@ export function FilesSection({ onOpenFile, onPathMoved, onOpenTerminal, onAskCla
   const rootRef = useRef(null);
   const switcherRef = useRef(null);
   const listRef = useRef(null);
+  useTabScroll(listRef, root ? "files.tree" : null, { version: root });
   const dirsRef = useRef(dirs);
   dirsRef.current = dirs;
 
@@ -102,9 +100,10 @@ export function FilesSection({ onOpenFile, onPathMoved, onOpenTerminal, onAskCla
       ]);
       if (cancelled) return;
       setFolders(list ?? []);
-      const start = last ?? (list && list.length > 0 ? list[0].root : null);
-      setRoot(start);
       setLoaded(true);
+      // Coming back to a tab that already had a folder keeps it.
+      if (root) return;
+      setRoot(last ?? (list && list.length > 0 ? list[0].root : null));
     })();
     return () => {
       cancelled = true;
@@ -114,10 +113,12 @@ export function FilesSection({ onOpenFile, onPathMoved, onOpenTerminal, onAskCla
   useEffect(() => {
     rootRef.current = root;
     if (!root) return;
+    // A folder seen before comes back as it was, then re-reads; a new one
+    // starts empty.
     const saved = cacheFor(root);
     setExpanded(new Set(saved.expanded));
     setSelected(saved.selected);
-    setDirs(new Map());
+    setDirs(new Map(saved.dirs));
     setError(null);
     window.clanceApp.filesSetLastFolder(root);
     window.clanceApp.filesFolderRepo(root).then((found) => {
@@ -159,7 +160,8 @@ export function FilesSection({ onOpenFile, onPathMoved, onOpenTerminal, onAskCla
     const saved = cacheFor(root);
     saved.expanded = new Set(expanded);
     saved.selected = selected;
-  }, [root, expanded, selected]);
+    saved.dirs = dirs;
+  }, [root, expanded, selected, dirs]);
 
   useEffect(() => {
     if (!menu) return;

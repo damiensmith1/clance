@@ -1,5 +1,5 @@
 import { h, html, useEffect, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
-import { useRemembered } from "../state/remember.js";
+import { useTabState } from "../state/tabState.js";
 import { Icon } from "../../shared/icons.js";
 import { StatusCard } from "../components/StatusCard.js";
 import { Toggle } from "../components/Toggle.js";
@@ -166,17 +166,17 @@ function MicrophoneRow({ value, onChange }) {
 
 export function DictationStep({ onComplete, onBack, onReady } = {}) {
   // Remembered so a remount doesn't redraw from nothing; re-read underneath.
-  const [data, setData] = useRemembered("step.dictation.data", null);
-  const [settings, setSettings] = useRemembered("step.dictation.settings", null);
+  const [data, setData] = useTabState("step.dictation.data", null);
+  const [settings, setSettings] = useTabState("step.dictation.settings", null);
 
   useEffect(() => {
     if (data && settings) onReady?.();
   }, [Boolean(data && settings)]);
-  const [mic, setMic] = useRemembered("step.dictation.mic", null);
+  const [mic, setMic] = useTabState("step.dictation.mic", null);
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState(null);
   const [promptDraft, setPromptDraft] = useState(null);
-  const [showAllModels, setShowAllModels] = useRemembered("step.dictation.allModels", false);
+  const [showAllModels, setShowAllModels] = useTabState("step.dictation.allModels", false);
   const [dictateShortcut, setDictateShortcut] = useState("Alt+D");
 
   useEffect(() => {

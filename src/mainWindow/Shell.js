@@ -4,7 +4,14 @@ import { ChatsListSection, MenuItem, focusSessionSearch } from "./sections/Chats
 import { ChangesSection } from "./sections/ChangesSection.js";
 import { FilesSection } from "./sections/FilesSection.js";
 import { SearchSection, focusSearchInput } from "./sections/SearchSection.js";
-import { useRememberedScroll } from "./state/remember.js";
+import {
+  TabContext,
+  useTabScroll,
+  writeTabState,
+  flushTabState,
+  dropTabState,
+  rekeyTabState,
+} from "./state/tabState.js";
 import { FileSection } from "./sections/FileSection.js";
 import { SettingsSection } from "./sections/SettingsSection.js";
 import { DictationSection } from "./sections/DictationSection.js";
@@ -42,7 +49,6 @@ import {
   canSplitAt,
   movedFileTab,
   rekeyFileTabs,
-  setTabView,
   persistNow,
 } from "./state/layoutStore.js";
 
@@ -122,10 +128,12 @@ function rememberClosed(tab, paneId) {
   if (tab.type === "terminal" && !tab.args?.length) return;
   // The store's copy, not the one the tab strip rendered with: view state
   // (scroll, cursor) is written to the store quietly, without a re-render.
-  let current = listTabs(getState().root).find((entry) => entry.tab.id === tab.id)?.tab ?? tab;
-  // A file tab's very latest place, not the last one reported.
+  // A file tab's very latest place, not the last one reported; then every
+  // pending persisted value written onto the tab, so ⇧⌘T brings it all back.
   const buffer = tab.type === "file" ? peekBuffer(tab.repoRoot, tab.path) : null;
-  if (buffer) current = { ...current, view: viewStateOf(buffer) };
+  if (buffer) writeTabState(tab.id, "view", viewStateOf(buffer), { persist: true });
+  flushTabState(tab.id);
+  const current = listTabs(getState().root).find((entry) => entry.tab.id === tab.id)?.tab ?? tab;
   closedTabs.push({ tab: current, paneId });
   if (closedTabs.length > MAX_CLOSED_TABS) closedTabs.shift();
 }
@@ -150,6 +158,7 @@ function endTab(tab, paneId) {
   rememberClosed(tab, paneId);
   if (tab.type === "terminal") destroyTerminal(tab.terminalId);
   if (tab.type === "file") releaseBuffer(tab.repoRoot, tab.path);
+  dropTabState(tab.id);
 }
 
 async function closeTabsSafely(paneId, tabs, focusTabId) {
@@ -394,8 +403,6 @@ function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut, openSectio
         repoRoot=${tab.repoRoot}
         path=${tab.path}
         onOpenFile=${openFileTab}
-        savedView=${tab.view ?? null}
-        onViewState=${(view) => setTabView(tab.id, view)}
       />`;
     case "settings":
       return html`<${SettingsSection} />`;
@@ -517,11 +524,11 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
   const tabListRef = useRef(null);
   // The page area scrolls for section tabs (Sessions, Dictation, Settings).
   // It belongs to the pane, not the tab, so it's keyed by tab below — one
-  // tab's scroll must not carry into the next — and each tab's position is
-  // remembered, so switching back or moving the tab to another pane lands
-  // where it was.
+  // tab's scroll must not carry into the next — and its offset is that tab's
+  // state (tabState.js), so switching back, moving the tab or relaunching
+  // lands where it was.
   const contentRef = useRef(null);
-  useRememberedScroll(contentRef, activeTab ? `tab.${activeTab.id}` : null);
+  useTabScroll(contentRef, "page", { tabId: activeTab?.id ?? null });
   // Labels come off when there isn't room for them, rather than being cut
   // to two letters and an ellipsis.
   const [compact, setCompact] = useState(false);
@@ -776,7 +783,10 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
         class="content ${FLUSH_TAB_TYPES.has(activeTab?.type) ? "content-flush" : ""}"
       >
         ${activeTab &&
-        renderTabContent(
+        // Everything the tab shows can keep state that belongs to the tab
+        // (tabState.js), which needs to know which tab it's in.
+        html`<${TabContext.Provider} value=${activeTab.id}>
+          ${renderTabContent(
           activeTab,
           openChatTab,
           openNewChatTab,
@@ -794,6 +804,7 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
           launcher.openFileTab,
           launcher
         )}
+        </${TabContext.Provider}>`}
         ${dragTab &&
         splittableEdges.length > 0 &&
         (dragTab.paneId !== node.id || node.tabs.length > 1) &&
@@ -1370,6 +1381,7 @@ export function Shell() {
   useEffect(() => {
     const flush = () => {
       reportAllViews();
+      flushTabState();
       persistNow();
     };
     window.addEventListener("beforeunload", flush);
@@ -1470,7 +1482,9 @@ export function Shell() {
   function onPathMoved(fromAbs, toAbs) {
     for (const { tab } of listTabs(getState().root)) {
       const moved = movedFileTab(tab, fromAbs, toAbs);
-      if (moved) rekeyBuffer(tab.repoRoot, tab.path, moved.repoRoot, moved.path);
+      if (!moved) continue;
+      rekeyBuffer(tab.repoRoot, tab.path, moved.repoRoot, moved.path);
+      rekeyTabState(tab.id, moved.id);
     }
     rekeyFileTabs(fromAbs, toAbs);
   }

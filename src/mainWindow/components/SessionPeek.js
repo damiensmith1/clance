@@ -1,5 +1,5 @@
 import { html, useEffect, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
-import { useRemembered, useRememberedScroll } from "../state/remember.js";
+import { useTabState, useTabScroll } from "../state/tabState.js";
 import { Icon } from "../../shared/icons.js";
 import { renderMarkdown, attachCopyHandler, loadMarkdownImages } from "../../shared/markdown.js";
 
@@ -116,17 +116,24 @@ function Turn({ turn, details }) {
 
 export function SessionPeek({ sessionId, onClose, onOpen, onPopOut }) {
   // The transcript last read, whether tool output was showing, and where the
-  // reader was — so moving the Sessions tab, or switching away and back,
-  // keeps the peek where it was. The transcript is re-read either way.
-  const [peek, setPeek] = useRemembered(`peek.${sessionId}`, null);
+  // reader was are the Sessions tab's state (state/tabState.js) — so moving
+  // the tab, or switching away and back, keeps the peek where it was. One
+  // peek's worth, for whichever session is open: nothing piles up. The
+  // transcript is re-read either way.
+  const [kept, setKept] = useTabState("sessions.peekState", null);
+  const mine = kept?.sessionId === sessionId ? kept : null;
+  const peek = mine?.peek ?? null;
+  const details = mine?.details ?? false;
+  const setPeek = (next) => setKept((current) => ({ sessionId, details: current?.sessionId === sessionId ? current.details : false, peek: next }));
+  const setDetails = (next) => setKept((current) => ({ ...(current?.sessionId === sessionId ? current : { sessionId, peek }), details: next }));
   const [failed, setFailed] = useState(false);
-  const [details, setDetails] = useRemembered(`peek.${sessionId}.details`, false);
   const bodyRef = useRef(null);
   // Opens at the end of the conversation the first time — where a session got
   // to is the thing you peek for — and where it was left after that.
   // (It's also the end `peekSession` keeps when a transcript is too long to
   // send whole; scrolling up walks back in time.)
-  useRememberedScroll(bodyRef, peek ? `peek.${sessionId}` : null, {
+  useTabScroll(bodyRef, peek ? "sessions.peek" : null, {
+    version: sessionId,
     onFirst: (element) => {
       element.scrollTop = element.scrollHeight;
     },

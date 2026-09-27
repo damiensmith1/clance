@@ -736,25 +736,50 @@ check and an on/off switch per tool (`config.enabledLocalTools`, default
 
 ### Shell and navigation
 
-**Tabs don't start over.** Moving a tab to another pane, splitting, or
-switching away and back unmounts its section, so anything in plain `useState`
-would reset — a search emptied, a peek closed, "Loading…" again.
-`state/remember.js`'s `useRemembered(key, initial)` is `useState` whose value
-lives module-level under a key instead, so a remount picks up where it was;
-sections use it for what the person was doing (Sessions' search, filter,
-selection and open peek; Dictation's search and range; Settings' groups) and
-for the data they last showed, which is still re-read underneath. It lasts as
-long as the app runs. Sections that need more — the editor's buffers, the
-Changes pane's per-repository memory, the terminal registry — keep their own.
-Hidden sections are *not* kept mounted: Sessions and the peek listen for keys
-window-wide, and a hidden one would answer them.
+**Tab state.** Moving a tab to another pane, splitting, or switching away and
+back unmounts whatever it shows, so anything in plain `useState` would
+reset — a search emptied, a peek closed, a list back at the top behind
+"Loading…". There is one mechanism for what belongs to a tab rather than to
+the component drawing it: `state/tabState.js`.
+
+- `useTabState(key, initial, { persist })` is `useState` scoped to the tab
+  it's rendered in. The pane wraps each tab's content in `TabContext`, which
+  carries the tab's id; outside a tab (the setup wizard reuses Settings'
+  panels) it is plain `useState`.
+- **Live** values are kept in memory per tab while it's open and dropped when
+  it closes. A section's last data goes here (Sessions' lists, Dictation's
+  history, the Changes pane's per-repository memory, Search's results, the
+  Files tree's listings), so a remount draws at once and re-reads underneath.
+  Mutable caches carry a bound (`boundCache`).
+- **Persisted** values are also written onto the tab in the layout store
+  (`SET_TAB_STATE` → `tab.state`, a *quiet* action that is saved but doesn't
+  re-render the window, debounced 300 ms). They move with the tab, survive a
+  relaunch, and come back with ⇧⌘T. Only small things are persisted: a
+  search and filter, a date range, which groups are open, scroll offsets,
+  where a file was left — never data.
+- `useTabScroll(ref, key)` keeps a scrolling element's offset as persisted
+  tab state, reapplying it as content settles and ignoring the scroll events
+  its own restore causes. A `version` names what's being scrolled (a peek's
+  session, the Changes pane's repository), so an offset never applies to the
+  wrong thing.
+- **Lifecycle.** Closing a tab flushes its pending persisted values onto the
+  tab object ⇧⌘T keeps, then drops its live state. Writes for a tab that is
+  no longer in the layout are ignored — a closing tab's components report
+  once more as they unmount, and would otherwise overwrite what was kept and
+  resurrect memory for a tab that's gone. A file renamed in the tree moves
+  its tab's state to the new id. A reload flushes everything first. A saved
+  value beats a live one that's still only a default: the window renders a
+  default layout for a moment before the saved one is read.
+
+Hidden tabs are *not* kept mounted to preserve state: Sessions and the peek
+listen for keys window-wide, and a hidden one would answer them. The
+editor's buffers and the terminal registry stay separate — they hold a live
+document and a live process, not state about a view of them — but where a
+file tab was left is its `view` tab state like everything else.
 
 The page area (`main.content`) belongs to the pane, not the tab, so it is
 keyed by tab — without that, one tab's scroll carried into the next shown in
-the same pane — and `useRememberedScroll` keeps each tab's scroll position,
-reapplying it as content settles and ignoring the scroll events its own
-restore causes. The session peek uses the same hook: it opens at the end the
-first time, and where it was left after that.
+the same pane — and its offset is the tab's `page` scroll.
 
 `Shell.js` renders a floating launcher in the top-right corner — Sessions,
 Changes, Files, Search, Dictation, Settings, and a plain terminal — rather than a
@@ -961,12 +986,12 @@ cover more than one file, and a header read as content shows up as garbled
 context lines.
 
 **Surviving a remount.** Moving the pane, splitting it, or switching away
-from its tab and back unmounts `ChangesSection`. What it knew is kept
-module-level per repository (`memory` in the file) — status, history,
-branches, remote, the open row and its diff, the draft message, the seen
-baseline for "new" marks, the list's scroll — so a remount draws from it at
-once and the usual refresh runs behind it, without the "Reading…" state. The
-same idea as the editor's buffers and the terminal registry.
+from its tab and back unmounts `ChangesSection`. What it knew is the
+tab's live state (see "Tab state"), per repository — status, history,
+branches, remote, the open row and its diff (the last 40 kept), the draft
+message, the seen baseline for "new" marks — and the list's scroll is its
+persisted state, so a remount draws from it at once and the usual refresh
+runs behind it, without the "Reading…" state.
 
 **Watching.** `watchRepo` is what makes the pane live rather than something to
 refresh by hand. One recursive `fs.watch` per repo — on macOS that's FSEvents,
@@ -1428,17 +1453,11 @@ live with the buffer instead (`buffer.ui`):
 
 - As `EditorPane` unmounts it takes a CodeMirror `scrollSnapshot()`, which
   restores the exact position on the next mount.
-- Previews remember their own `scrollTop` per view and reapply it as content
-  settles (a document's images load after it renders). Only the person's own
-  scrolling is recorded: a restore clamped short by content that hasn't
-  reached full height fires a scroll event too, so a scroll that lands
-  exactly where the last restore put it is ignored.
 - The same state as plain values — view, Edit/Diff, the top visible line and
-  the offset into it, cursor and selection, preview offsets — is written onto
-  the tab in the layout store (`SET_TAB_VIEW`, a *quiet* action that is
-  persisted but doesn't re-render the window, since it changes on every
-  scroll). It moves with the tab, survives ⇧⌘T, and is flushed immediately on
-  `beforeunload`, so a reload doesn't lose the last moment of scrolling.
+  the offset into it, cursor and selection — is the tab's persisted `view`
+  state (see "Tab state"), which seeds a new buffer after a relaunch or ⇧⌘T.
+  Previews keep their scroll as tab state too (`preview.rendered`,
+  `preview.image`).
 - After a relaunch the editor scrolls the saved line into view (so that part
   of the document gets measured — far-off lines only have estimated heights),
   then sets the exact pixel from where that line really landed.

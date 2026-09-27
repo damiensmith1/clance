@@ -1,4 +1,5 @@
 import { html, useEffect, useLayoutEffect, useMemo, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { useTabState, useTabScroll, boundCache } from "../state/tabState.js";
 import { Icon } from "../../shared/icons.js";
 
 // The Changes pane: a monitor, not a reader. It lives in a narrow pane on the
@@ -49,31 +50,30 @@ const PEEK_LINES = 120;
 // Moving the pane, splitting, or switching away from its tab and back all
 // unmount this section. Everything it knew — per repository: the status,
 // history, branches, remote, which row is open, the draft commit message,
-// what's been seen, the list's scroll — is kept here, module-level, so it comes
-// back drawn at once and then refreshes quietly, instead of starting over
-// behind "Reading…". Same idea as the editor's buffers and the terminals'
-// registry.
-const memory = { repos: null, root: undefined, byRoot: new Map(), peeks: new Map() };
+// what's been seen — is the tab's state (state/tabState.js), so it comes back
+// drawn at once and then refreshes quietly, instead of starting over behind
+// "Reading…". The list's scroll is the tab's too. All of it goes when the tab
+// closes.
 
-function rememberedRepo(root) {
-  let entry = memory.byRoot.get(root);
-  if (!entry) {
-    entry = { status: null, commits: null, branches: null, remote: null, expanded: null, message: "", seen: new Map(), newPaths: new Set(), scroll: 0 };
-    memory.byRoot.set(root, entry);
-  }
-  return entry;
+function emptyRepoMemory() {
+  return { status: null, commits: null, branches: null, remote: null, expanded: null, message: "", seen: new Map(), newPaths: new Set() };
 }
+
+/** How many rows' last diffs are kept to show while they're re-read. */
+const PEEK_CACHE = 40;
 
 /** A compact diff under a row — a peek, for when opening a tab is more than the question deserves. */
 function InlinePeek({ repoRoot, path }) {
   // The last diff read for this row, shown while it's read again.
   const key = `${repoRoot}\0${path}`;
-  const [diff, setDiff] = useState(() => memory.peeks.get(key) ?? null);
+  const [peeks] = useTabState("changes.peeks", () => new Map());
+  const [diff, setDiff] = useState(() => peeks.get(key) ?? null);
 
   useEffect(() => {
     let cancelled = false;
     window.clanceApp.gitFileDiff(repoRoot, path).then((next) => {
-      memory.peeks.set(key, next);
+      peeks.delete(key);
+      boundCache(peeks.set(key, next), PEEK_CACHE);
       if (!cancelled) setDiff(next);
     });
     return () => {
@@ -286,10 +286,16 @@ function FileRow({ file, isNew, expanded, repoRoot, onOpen, onToggleStage, onTog
 }
 
 export function ChangesSection({ onOpenFile }) {
-  // Whatever the pane knew before it was last unmounted (see `memory`).
-  const initial = memory.root ? memory.byRoot.get(memory.root) ?? null : null;
-  const [repos, setRepos] = useState(memory.repos ?? []);
-  const [root, setRoot] = useState(memory.root ?? null);
+  // Whatever the pane knew before it was last unmounted (see above). `root`
+  // is undefined until a repository has been chosen in this tab.
+  const [byRoot] = useTabState("changes.byRoot", () => new Map());
+  const [repos, setRepos] = useTabState("changes.repos", []);
+  const [root, setRoot] = useTabState("changes.root", undefined);
+  const initial = root ? byRoot.get(root) ?? null : null;
+  function rememberedRepo(repo) {
+    if (!byRoot.has(repo)) byRoot.set(repo, emptyRepoMemory());
+    return byRoot.get(repo);
+  }
   const [status, setStatus] = useState(initial?.status ?? null);
   const [loaded, setLoaded] = useState(Boolean(initial?.status));
   const [expanded, setExpanded] = useState(initial?.expanded ?? null);
@@ -316,23 +322,14 @@ export function ChangesSection({ onOpenFile }) {
   const repoRef = useRef(null);
   const listRef = useRef(null);
 
-  // Everything worth keeping goes back into memory as it changes.
+  // Everything worth keeping goes back into the tab's memory as it changes.
   useEffect(() => {
     if (!root) return;
     Object.assign(rememberedRepo(root), { status, commits, branches, remote, expanded, message, newPaths, seen: seenRef.current });
   }, [root, status, commits, branches, remote, expanded, message, newPaths]);
 
-  // The file list's scroll, put back once the rows are drawn.
-  useLayoutEffect(() => {
-    const list = listRef.current;
-    if (!list || !root) return;
-    list.scrollTop = rememberedRepo(root).scroll;
-    const onScroll = () => {
-      rememberedRepo(root).scroll = list.scrollTop;
-    };
-    list.addEventListener("scroll", onScroll);
-    return () => list.removeEventListener("scroll", onScroll);
-  }, [root, loaded]);
+  // The file list's scroll, per repository.
+  useTabScroll(listRef, loaded ? "changes.list" : null, { version: root ?? null });
 
   async function refresh(targetRoot = rootRef.current) {
     if (!targetRoot) return;
@@ -361,11 +358,10 @@ export function ChangesSection({ onOpenFile }) {
         window.clanceApp.gitGetLastRepo(),
       ]);
       if (cancelled) return;
-      memory.repos = list;
       setRepos(list);
       // Coming back to a pane that already had a repository keeps it; only a
       // first open picks one.
-      if (memory.root !== undefined) return;
+      if (root !== undefined) return;
       setRoot(last ?? list[0]?.root ?? null);
       if (!last && !list[0]) setLoaded(true);
     })();
@@ -378,7 +374,6 @@ export function ChangesSection({ onOpenFile }) {
   // the filesystem events; this just re-reads status when one gets through.
   useEffect(() => {
     rootRef.current = root;
-    if (root !== null) memory.root = root;
     // A repository seen before comes back as it was, then refreshes; a new
     // one starts empty.
     const entry = root ? rememberedRepo(root) : null;

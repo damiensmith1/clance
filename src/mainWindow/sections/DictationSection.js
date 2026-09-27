@@ -1,5 +1,5 @@
 import { h, html, useEffect, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
-import { useRemembered } from "../state/remember.js";
+import { useTabState } from "../state/tabState.js";
 import { Icon } from "../../shared/icons.js";
 
 // Presets rather than a date picker: dictation history is browsed by
@@ -109,17 +109,18 @@ function TranscriptRow({ transcript, onDelete }) {
 // component, and having it in two places meant two routes to the same
 // controls. This tab is history only.
 export function DictationSection({ onOpenSettings }) {
-  // The history, the search and the date filter survive the tab moving or
-  // being switched away from (state/remember.js); the history is re-read
-  // underneath.
-  const [transcripts, setTranscripts] = useRemembered("dictation.transcripts", null);
-  const [query, setQuery] = useRemembered("dictation.query", "");
-  const [stats, setStats] = useRemembered("dictation.stats", null);
-  const [availability, setAvailability] = useRemembered("dictation.availability", null);
-  const [shortcut, setShortcut] = useRemembered("dictation.shortcut", null);
-  const [rangeId, setRangeId] = useRemembered("dictation.range", "all");
-  const [customFrom, setCustomFrom] = useRemembered("dictation.from", "");
-  const [customTo, setCustomTo] = useRemembered("dictation.to", "");
+  // The history, the search and the date filter are the tab's state
+  // (state/tabState.js): they survive the tab moving or being switched away
+  // from, and the search and range are saved with the layout. The history is
+  // re-read underneath.
+  const [transcripts, setTranscripts] = useTabState("dictation.transcripts", null);
+  const [query, setQuery] = useTabState("dictation.query", "", { persist: true });
+  const [stats, setStats] = useTabState("dictation.stats", null);
+  const [availability, setAvailability] = useTabState("dictation.availability", null);
+  const [shortcut, setShortcut] = useTabState("dictation.shortcut", null);
+  const [rangeId, setRangeId] = useTabState("dictation.range", "all", { persist: true });
+  const [customFrom, setCustomFrom] = useTabState("dictation.from", "", { persist: true });
+  const [customTo, setCustomTo] = useTabState("dictation.to", "", { persist: true });
   // The custom range's dates open in a dropdown under the date filter, so
   // picking them doesn't push the list down.
   const [customOpen, setCustomOpen] = useState(false);
