@@ -49,6 +49,8 @@ import {
   canSplitAt,
   movedFileTab,
   rekeyFileTabs,
+  countLeaves,
+  MAX_PANES,
   persistNow,
 } from "./state/layoutStore.js";
 
@@ -61,18 +63,21 @@ const LAUNCHER_ITEMS = [
   { id: "settings", label: "Settings", icon: "gear" },
 ];
 
-// Sections read *alongside* the work rather than instead of it, so they open
-// in a pane beside it. The second one to open joins the first's pane as a tab
-// rather than taking another quarter of the window.
-const SIDECARS = new Set(["changes", "files", "search"]);
+// Tabs that open in a small pane on the right by default rather than the
+// largest one: they're looked at alongside the work. Only a default — once
+// open, a tab goes wherever it's dragged, and nothing is enforced after.
+const RIGHT_PANE_TABS = new Set(["changes", "files"]);
 
 // How often an unnamed session tab asks whether its conversation has a name
 // yet. Only runs while at least one tab is still unnamed.
 const TAB_TITLE_POLL_MS = 3000;
 
-// How much of the window a sidecar takes when it opens itself a pane. Above
-// MIN_PANE_PCT, so the divider can still be dragged either way.
-const SIDECAR_PANE_PCT = 25;
+// How much of the width a right-hand pane takes when one is made for it.
+// Above MIN_PANE_PCT, so the divider can still be dragged either way.
+const RIGHT_PANE_PCT = 25;
+// A right-hand pane at most this share of the window's width counts as the
+// small one on the right.
+const RIGHT_PANE_MAX_SHARE = 0.4;
 
 // The split whose own child leaf holds `tabId` — the one created by the split
 // that just put it there, and so the one whose sizes decide its width.
@@ -89,7 +94,7 @@ function findSplitContainingTab(node, tabId) {
 
 // Tab types that fill their pane themselves rather than sitting in the
 // padded, 880px-wide content column — a terminal, a file and the Changes
-// sidecar all want every pixel.
+// Files, Search and Changes panes all want every pixel.
 const FLUSH_TAB_TYPES = new Set(["terminal", "file", "changes", "files", "search"]);
 
 // Below this much room per tab, a label can only be shown as a few clipped
@@ -180,6 +185,54 @@ async function closeTabsSafely(paneId, tabs, focusTabId) {
   if (tabs.length === 1) closeTab(paneId, tabs[0].id);
   else closeTabs(paneId, tabs.map((tab) => tab.id), focusTabId);
   return true;
+}
+
+// ---- where tabs open ----
+//
+// Decided from the layout's shape alone — panes' sizes and positions, never
+// what's in them — so moving tabs around never changes where the next one
+// goes. Most tabs open in the largest pane; RIGHT_PANE_TABS open in a small
+// pane on the right, made if there isn't one.
+
+// Every leaf with where it sits in the window, as fractions: x, y, width and
+// height, from the split sizes down the tree.
+function paneRects(node, x = 0, y = 0, width = 1, height = 1, out = []) {
+  if (node.type === "leaf") {
+    out.push({ leaf: node, x, y, width, height, area: width * height });
+    return out;
+  }
+  let offset = 0;
+  node.children.forEach((child, i) => {
+    const share = (node.sizes[i] ?? 100 / node.children.length) / 100;
+    if (node.direction === "row") paneRects(child, x + width * offset, y, width * share, height, out);
+    else paneRects(child, x, y + height * offset, width, height * share, out);
+    offset += share;
+  });
+  return out;
+}
+
+// The largest pane. A tie (an even split) goes to the pane with focus, then
+// the leftmost.
+function mainPaneId() {
+  const { root, activePaneId } = getState();
+  const panes = paneRects(root);
+  const largest = Math.max(...panes.map(({ area }) => area));
+  const biggest = panes.filter(({ area }) => area > largest - 0.001);
+  return (biggest.find(({ leaf }) => leaf.id === activePaneId) ?? biggest[0]).leaf.id;
+}
+
+// The small pane on the right, if the layout has one: touching the window's
+// right edge (the topmost such), no wider than RIGHT_PANE_MAX_SHARE, and not
+// the largest pane.
+function smallRightPaneId() {
+  const panes = paneRects(getState().root);
+  if (panes.length < 2) return null;
+  const main = mainPaneId();
+  const right = panes
+    .filter(({ x, width }) => x + width > 0.999)
+    .sort((a, b) => a.y - b.y)[0];
+  if (!right || right.leaf.id === main || right.width > RIGHT_PANE_MAX_SHARE) return null;
+  return right.leaf.id;
 }
 
 // Every leaf pane in the tree, left to right.
@@ -644,7 +697,7 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
   }
 
   // A file tab's path on disk. `repoRoot` is the folder it was opened from
-  // (a repository, or any folder the Files sidecar browsed); without one the
+  // (a repository, or any folder the Files pane browsed); without one the
   // path is already absolute.
   function filePathOf(tab) {
     return tab.repoRoot ? `${tab.repoRoot}/${tab.path}` : tab.path;
@@ -1053,7 +1106,7 @@ export function Shell() {
       await window.clanceApp.reparentTerminal(terminalId);
       openTab(
         { id: terminalId, type: "terminal", label: title, icon: "terminal", terminalId, args },
-        { paneId: getState().activePaneId }
+        { paneId: mainPaneId() }
       );
     });
   }, []);
@@ -1154,53 +1207,47 @@ export function Shell() {
     });
   }
 
-  // The pane a sidecar is already living in, if one is open. Reads the store
-  // directly rather than the render's `state`, so it's current when called
-  // from a listener registered once.
-  function sidecarPane() {
-    return leavesOf(getState().root).find((leaf) => leaf.tabs.some((tab) => SIDECARS.has(tab.id))) ?? null;
-  }
-
+  // Reopening a section that's already open focuses it wherever it is
+  // (openTab's dedup); otherwise it opens in the largest pane, or Changes and
+  // Files in the small pane on the right.
   function openSection(id) {
     const item = LAUNCHER_ITEMS.find((i) => i.id === id);
-    // A second sidecar joins the first rather than claiming another quarter
-    // of the window: both are read alongside the work, and two quarter-width
-    // columns would leave half a window to work in. They become tabs in the
-    // one pane, switched with ⌃⇥ like any other pair.
-    const existing = SIDECARS.has(id) ? sidecarPane() : null;
-    const paneId = existing ? existing.id : getState().activePaneId;
-    openTab({ id, type: id, label: item.label, icon: item.icon }, { paneId });
-    // A sidecar is read while something else is being worked on, so it opens
-    // beside the work rather than on top of it. Only when there's something
-    // to open beside — splitting a pane away from its only tab is a no-op in
-    // the store, and a window already at MAX_PANES can't take another, in
-    // which case this quietly stays a tab where it landed.
-    if (!SIDECARS.has(id) || existing) return;
-    const pane = findPane(getState().root, paneId);
-    if (!pane || pane.tabs.length < 2) return;
-    if (!canSplitAt(getState().root, paneId, id, paneId, "right")) return;
-    splitPane(id, paneId, paneId, "right");
-    // A sidecar, so it takes a quarter rather than the even half a split
-    // gives by default. Only on the split that just created it — a pane the
-    // user has since resized keeps the width they gave it, because reopening
-    // a sidecar while it's already open focuses it instead of splitting again.
-    const split = findSplitContainingTab(getState().root, id);
-    if (split) resizeSplit(split.id, [100 - SIDECAR_PANE_PCT, SIDECAR_PANE_PCT]);
+    const tab = { id, type: id, label: item.label, icon: item.icon };
+    const alreadyOpen = listTabs(getState().root).some((entry) => entry.tab.id === id);
+    if (!RIGHT_PANE_TABS.has(id) || alreadyOpen) {
+      openTab(tab, { paneId: mainPaneId() });
+      return;
+    }
+    const right = smallRightPaneId();
+    if (right) openTab(tab, { paneId: right });
+    else openInNewRightPane(tab);
   }
 
-  // Where a file opens. Not the pane Changes is in: clicking a row there
-  // would otherwise cover the list that was just clicked, and the point of
-  // the sidecar is that it stays put while files come and go beside it.
-  // Files land together in one pane, so reading a second doesn't split the
-  // window further.
-  function paneForFileTabs() {
-    const { root, activePaneId } = getState();
-    const leaves = leavesOf(root);
-    const sidecar = leaves.find((leaf) => leaf.tabs.some((tab) => SIDECARS.has(tab.id)));
-    if (!sidecar || leaves.length === 1) return activePaneId;
-    const withFile = leaves.find((leaf) => leaf.id !== sidecar.id && leaf.tabs.some((t) => t.type === "file"));
-    const other = leaves.find((leaf) => leaf.id !== sidecar.id);
-    return (withFile ?? other ?? sidecar).id;
+  // No small pane on the right yet: make one — a full-height column down the
+  // window's right edge if the layout can take one, else a split off the
+  // rightmost pane — a quarter of the width it splits, not the even half a
+  // split gives by default (only on the split that made it, so a width the
+  // user has dragged since is kept). With no room for another pane (four
+  // already, or two side by side, since the layout allows at most two
+  // columns), the tab opens in the rightmost pane.
+  function openInNewRightPane(tab) {
+    const home = mainPaneId();
+    openTab(tab, { paneId: home });
+    const { root } = getState();
+    const rightmost = topRightLeafId(root);
+    if (countLeaves(root) < MAX_PANES) {
+      for (const target of [root.id, rightmost]) {
+        if (!canSplitAt(root, home, tab.id, target, "right")) continue;
+        splitPane(tab.id, home, target, "right");
+        const split = findSplitContainingTab(getState().root, tab.id);
+        if (split) resizeSplit(split.id, [100 - RIGHT_PANE_PCT, RIGHT_PANE_PCT]);
+        return;
+      }
+    }
+    if (rightmost !== home) {
+      const pane = findPane(getState().root, rightmost);
+      moveTab(tab.id, home, rightmost, pane ? pane.tabs.length : 0);
+    }
   }
 
   // One tab per file, keyed by repo and path so opening the same file twice
@@ -1216,7 +1263,10 @@ export function Shell() {
         repoRoot,
         path,
       },
-      { paneId: paneForFileTabs() }
+      // The largest pane — which a small pane on the right (where Files or
+      // Changes usually sits) never is, so it stays put while files come and
+      // go beside it.
+      { paneId: mainPaneId() }
     );
     if (line) revealLine(acquireBuffer(repoRoot, path), line);
   }
@@ -1465,7 +1515,7 @@ export function Shell() {
       const { id, name } = await window.clanceApp.spawnNewAgent([], dir);
       openTab(
         { id: terminalId, type: "terminal", label: name, icon: "terminal", terminalId, args: ["attach", id] },
-        { paneId: getState().activePaneId }
+        { paneId: mainPaneId() }
       );
       return terminalId;
     } finally {
@@ -1485,7 +1535,7 @@ export function Shell() {
     const label = cwd ? cwd.split("/").filter(Boolean).pop() : "Terminal";
     openTab(
       { id: terminalId, type: "terminal", label, icon: "terminal", terminalId, shell: true, ...(cwd ? { cwd } : {}) },
-      { paneId: getState().activePaneId }
+      { paneId: mainPaneId() }
     );
   }
 
@@ -1521,7 +1571,7 @@ export function Shell() {
       // session.id is the actual session UUID either way.
       openTab(
         { id: `chat:${session.id}`, type: "terminal", label: session.title, icon: "terminal", terminalId, args },
-        { paneId: state.activePaneId }
+        { paneId: mainPaneId() }
       );
     } finally {
       openingRef.current.delete(session.id);

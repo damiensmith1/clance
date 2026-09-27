@@ -219,7 +219,8 @@ Sessions Clance starts get these tools when Accessibility is granted:
   to the same scroll position, cursor and selection, the same view (Rendered
   or Source, Edit or Diff), and a preview to the same place in the document.
 - One tab per file — opening the same file again focuses the tab that's
-  already there. Files open beside the sidecars rather than over them.
+  already there. Files open in the largest pane, so a file clicked in Files or
+  Changes opens beside the list rather than over it.
 - An image opens in a tab of its own and is shown at its size, fit to the
   pane. A transparent one reads as transparent rather than as whatever colour
   the page happens to be.
@@ -273,7 +274,7 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - When git can't say what a repository ignores, the tree lists everything and
   says so. Silently showing node_modules looks exactly like a project that
   ignores nothing.
-- Clicking a file opens it as a file tab beside the sidecar. A file inside a
+- Clicking a file opens it as a file tab in the largest pane. A file inside a
   repository opens against that repository, so it arrives with its changes
   marked in place and is the same tab the Changes pane would have opened.
 - Arrows move through the tree, → opens a directory and ← closes it or moves
@@ -373,7 +374,7 @@ Sessions Clance starts get these tools when Accessibility is granted:
   the shell's `PATH`.
 - A file inside a git repository opens against that repository, so it
   arrives with its changes marked. Anything else opens with its own folder
-  as the root. A folder opens in the Files sidecar.
+  as the root. A folder opens in the Files pane.
 - Opening a file launches Clance if it isn't running and shows the file once
   the window is ready. Opening several at once opens each as a tab.
 
@@ -386,7 +387,7 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - Results stream in as they're found, grouped by file with the matching line,
   and a new query cancels the old one. ↩ or a click opens the file with the
   match selected. Results stop at 5,000 and say so.
-- It opens from the launcher as a sidecar, like Changes and Files.
+- It opens from the launcher, in the largest pane like other tabs.
 
 ## Sessions and the editor
 
@@ -404,11 +405,14 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - Opens from the Dock icon or the menu-bar menu. While setup is incomplete it
   opens on launch.
 - A launcher opens Sessions, Changes, Files, Search, Dictation, Settings, or
-  a plain shell terminal. Changes, Files and Search are sidecars: they open
-  in a pane of their own on the right when the window can take one, and files
-  open as tabs beside it. A later sidecar joins the first's pane as a tab
-  rather than taking another quarter of the window. Sections open as tabs;
-  reopening one focuses it.
+  a plain shell terminal. Sections open as tabs; reopening one focuses it
+  wherever it is.
+- By default, tabs open in the largest pane, except Changes and Files, which
+  open in the small pane on the right (one no wider than 40% of the window),
+  made at a quarter of the width if there isn't one. Where the layout has no
+  room for another pane, they open in the rightmost pane. These are only
+  defaults: which pane a tab is in never changes where the next one opens,
+  and a tab goes wherever it's dragged.
 - Tabs can be split into up to four panes by dragging to an edge (at most a
   2×2 grid), resized by dragging dividers, and reordered. The layout is
   restored on launch.

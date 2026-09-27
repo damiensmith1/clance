@@ -922,15 +922,8 @@ and splits (`{ direction, sizes, children }`, always two children).
 
 `sections/ChangesSection.js` over `src/main/git.ts`. A monitor, not a reader:
 it says what is moving in a repository right now, and hands the reading to a
-file tab. It opens in a pane of its own on the right — `openSection` opens the
-tab, splits it away, and resizes that new split to `CHANGES_PANE_PCT` (25)
-rather than the even half `wrapAsSplit` gives by default. It does this only
-when the pane it landed in has another tab to split from and the window isn't
-already at `MAX_PANES`; otherwise it stays a tab where it is rather than
-refusing. A sidecar that covered the work it sits beside would be pointless.
-The resize applies only to the split that just created the pane: reopening
-Changes while it's already open focuses it instead of splitting again, so a
-width the user has since dragged is never overwritten.
+file tab. By default it opens in a small pane on the right (see "Where tabs
+open").
 
 Because reading moved out, the pane fits a narrow column honestly: a bar with
 the repository, branch and a live dot when a session is working there; one
@@ -1104,8 +1097,8 @@ pressing the thing that opened it is a trap.
 ### Files explorer
 
 `sections/FilesSection.js` over `src/main/files.ts` (listing) and
-`src/main/fileOps.ts` (writing — see "Editor"). A sidecar like Changes, but
-pointed at a *folder* rather than a repository:
+`src/main/fileOps.ts` (writing — see "Editor"). Like Changes it opens on the
+right by default, but it's pointed at a *folder* rather than a repository:
 ⌘P is a recall tool that needs a filename already, and looking around a
 project is a different act from remembering a file in it.
 
@@ -1117,15 +1110,33 @@ tree has real content height and must scroll, and at "whatever's left over"
 it gets two rows on a dirty repo. A pane of its own costs a launcher entry
 and gains a layout that doesn't fight itself.
 
-**Sidecars.** `SIDECARS` in `Shell.js` is the set of sections that open
-beside the work instead of over it, and `openSection` treats them alike: a
-quarter of the window (`SIDECAR_PANE_PCT`), only when there's a pane to split
-from and the window isn't at `MAX_PANES`, and only on the split that created
-it, so a width the user has dragged survives. The second sidecar to open
-joins the first's pane as a tab rather than taking another quarter — both are
-read alongside the work, and two quarter-width columns leave half a window to
-work in. `paneForFileTabs` asks the same question, so a file opened from
-either one lands beside both.
+**Where tabs open.** A default, decided from the layout's shape alone —
+panes' sizes and positions, never what's in them — so dragging tabs around
+never changes where the next one goes, and no pane has a role. (An earlier
+design gave the pane holding Changes, Files or Search a "sidecar" role that
+other placement rules then worked around; it was dropped because it made
+panes behave differently depending on what happened to be in them.)
+
+- Most tabs — sessions, terminals, files, Search, Settings, Dictation — open
+  in the **largest pane** (`mainPaneId` in `Shell.js`). A pane's size is its
+  width fraction times its height fraction, from `paneRects` walking the split
+  sizes down the tree; a tie (an even split) goes to the pane with focus, then
+  the leftmost.
+- Changes and Files (`RIGHT_PANE_TABS`) open in the **small pane on the
+  right** (`smallRightPaneId`): the topmost pane touching the window's right
+  edge, if it's no wider than 40% of the window and isn't the largest. With
+  none, one is made (`openInNewRightPane`): a full-height column down the
+  window's right edge if the layout can take one, else a split off the
+  rightmost pane, sized to a quarter (`RIGHT_PANE_PCT`) — only on the split
+  that made it, so a width the user has dragged survives. With no room for
+  another pane — four already, or two side by side, since the layout allows
+  at most two columns — the tab opens in the rightmost pane.
+- Reopening a tab that's already open focuses it wherever it is, and ⇧⌘T puts
+  a tab back in the pane it left. Once open, a tab goes wherever it's
+  dragged.
+
+Because a small right pane is never the largest, work never lands in it,
+without a rule saying so.
 
 **Containment.** Inside a repository `ls-files` is what keeps a file tab in
 the tree: git will not name a path outside it, so escaping is structurally
@@ -1230,10 +1241,9 @@ re-reads every open tab in it. A file that isn't on the new branch opens as
 rather than "isn't there any more"; a deleted one shows its last committed
 version, read-only.
 
-**Where files open.** `paneForFileTabs` picks a pane that isn't the one
-holding a sidecar, preferring one that already has a file in it, so reading
-a second file doesn't split the window further and the sidecar stays
-visible.
+**Where files open.** In the largest pane (see "Where tabs open") — so a file
+clicked in Files or Changes over on the right opens beside it, leaving the
+list where it was.
 
 **⌘P** opens any file in the current repository by name, over `ls-files`
 (tracked, plus untracked files git isn't ignoring). Matching is on any
@@ -1631,7 +1641,7 @@ back to the front — sessions create files too.
   which it does on mount and whenever `open-paths-available` says more
   arrived. Taking rather than only sending, because the window finishing
   loading isn't the same as its tabs listening. A file opens as a tab; a
-  folder points the Files sidecar at it.
+  folder points the Files pane at it.
 - **`clance`** is `packaging/bin/clance`, copied into
   `Contents/Resources/bin/` (`extraResources`). It makes its arguments
   absolute, refuses ones that don't exist, and runs `open -b
@@ -1642,8 +1652,8 @@ back to the front — sessions create files too.
 
 ### Search
 
-⇧⌘F opens the **Search** sidecar (`SearchSection.js`), which joins the other
-sidecars' pane. It searches the Files folder, or the Changes repository if
+⇧⌘F opens **Search** (`SearchSection.js`) in the largest pane, like other
+tabs. It searches the Files folder, or the Changes repository if
 Files has none. The main process runs **ripgrep** (`search.ts`) with
 `--json`, arguments as an array and the query after `-e`, so nothing typed
 can become an option: `--hidden` with `!.git`, `--max-columns 400` and a

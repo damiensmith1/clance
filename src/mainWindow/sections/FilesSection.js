@@ -3,7 +3,7 @@ import { Icon } from "../../shared/icons.js";
 import { MenuItem } from "./ChatsSection.js";
 import { useTabState, useTabScroll } from "../state/tabState.js";
 
-// The Files explorer: a sidecar like Changes, browsing any folder on the
+// The Files explorer: a narrow pane like Changes, browsing any folder on the
 // machine — ⌘P needs you to know a filename already, and looking around a
 // project is a different act from recalling one. It opens file tabs, and it
 // creates, renames, moves, duplicates and trashes; every one of those is

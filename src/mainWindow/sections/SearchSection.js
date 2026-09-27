@@ -2,7 +2,7 @@ import { html, useEffect, useMemo, useRef, useState } from "../../shared/vendor/
 import { Icon } from "../../shared/icons.js";
 import { useTabState, useTabScroll } from "../state/tabState.js";
 
-// Find in Files (⇧⌘F): a sidecar that searches every file under the Files
+// Find in Files (⇧⌘F): searches every file under the Files
 // folder with ripgrep (src/main/search.ts). Results stream in grouped by
 // file; a new query cancels the one before it. Picking a result opens the file
 // at that line.
@@ -56,7 +56,7 @@ export function SearchSection({ onOpenResult }) {
   const currentId = useRef(0);
   useTabScroll(resultsRef, "search.results", { version: searched });
 
-  // The folder the Files sidecar is pointed at, or else the Changes
+  // The folder the Files pane is pointed at, or else the Changes
   // repository: search covers the project being looked at.
   useEffect(() => {
     (async () => {
