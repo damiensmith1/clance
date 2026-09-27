@@ -28,10 +28,13 @@ import {
   defaultKeymap,
   historyKeymap,
   indentWithTab,
+  search,
   searchKeymap,
   highlightSelectionMatches,
   gotoLine,
-  openSearchPanel,
+  getSearchQuery,
+  findNext,
+  findPrevious,
   closeBrackets,
   closeBracketsKeymap,
   bracketMatching,
@@ -71,6 +74,7 @@ import {
   nginx,
   xml,
 } from "../../shared/vendor/codemirror.mjs";
+import { requestFind, closeFindFor } from "./findBar.js";
 
 // ---- languages ----
 
@@ -185,6 +189,8 @@ export const clanceTheme = EditorView.theme({
   ".cm-selectionMatch": { backgroundColor: "var(--warning-bg)" },
   ".cm-searchMatch": { backgroundColor: "var(--warning-bg)", outline: "1px solid var(--warning)" },
   ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "var(--signal-soft)" },
+  ".cm-clance-find-stand-in": { display: "none" },
+  ".cm-panels-top:has(> .cm-clance-find-stand-in:only-child)": { display: "none" },
   ".cm-panels": { backgroundColor: "var(--surface-bg)", color: "var(--text-primary)" },
   ".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--surface-border)" },
   ".cm-panels.cm-panels-bottom": { borderTop: "1px solid var(--surface-border)" },
@@ -456,6 +462,17 @@ export function indentExtension(unit) {
  * CodeMirror's differ), history, search, brackets, folding. `commands`
  * carries the ones the tab supplies (toggle wrap).
  */
+function findPanelStandIn() {
+  const dom = document.createElement("div");
+  dom.className = "cm-clance-find-stand-in";
+  return { dom, top: true };
+}
+
+/** ⌘G: the next match of the find bar's query, or open the bar if it has none. */
+function findOr(command) {
+  return (view) => (getSearchQuery(view.state).valid ? command(view) : requestFind(view));
+}
+
 export function baseExtensions({ onToggleWrap } = {}) {
   return [
     lineNumbers(),
@@ -473,15 +490,25 @@ export function baseExtensions({ onToggleWrap } = {}) {
     crosshairCursor(),
     highlightActiveLine(),
     highlightSelectionMatches(),
+    // The search state and its match highlights. The find bar itself is
+    // Clance's (editor/findBar.js); CodeMirror only highlights matches while
+    // its panel is open, so the bar opens this empty, hidden one alongside.
+    search({ top: true, createPanel: findPanelStandIn }),
     syntaxHighlighting(clanceHighlight),
     clanceTheme,
     keymap.of([
       { key: "Ctrl-g", run: gotoLine },
-      { key: "Mod-Alt-f", run: openSearchPanel },
+      { key: "Mod-f", run: (view) => requestFind(view), preventDefault: true },
+      { key: "Mod-Alt-f", run: (view) => requestFind(view, true), preventDefault: true },
+      { key: "Mod-g", run: findOr(findNext), shift: findOr(findPrevious), preventDefault: true },
+      { key: "F3", run: findOr(findNext), shift: findOr(findPrevious), preventDefault: true },
+      { key: "Escape", run: closeFindFor },
       { key: "Alt-z", run: () => (onToggleWrap?.(), true) },
       ...closeBracketsKeymap,
       ...defaultKeymap,
-      ...searchKeymap,
+      // CodeMirror's search keys, less the ones that open its own panel
+      // (taken above).
+      ...searchKeymap.filter((binding) => !["Mod-f", "Mod-g", "F3", "Escape"].includes(binding.key)),
       ...historyKeymap,
       ...foldKeymap,
       indentWithTab,

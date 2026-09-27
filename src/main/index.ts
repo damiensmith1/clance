@@ -82,7 +82,7 @@ import { listFolders, resolveFolder, listDirectory, resolveFile, folderRepo } fr
 import { readWindowLayout, writeWindowLayout } from "./windowLayout";
 import { readDocument, saveDocument, watchDocument, unwatchDocument, resolveContained } from "./documents";
 import { registerRoot } from "./roots";
-import { startSearch, cancelSearch } from "./search";
+import { startSearch, cancelSearch, cancelSearchesFor } from "./search";
 import { listenForOpenedPaths, flushOpenedPaths, takeOpenedPaths, cliStatus, installCli } from "./openPaths";
 import { getHud } from "./dictationWindow";
 import {
@@ -633,8 +633,19 @@ ipcMain.handle("doc:confirm-unsaved", async (event, names: unknown) => {
   return response === 0 ? "save" : response === 2 ? "discard" : "cancel";
 });
 ipcMain.handle("open-paths:take", () => takeOpenedPaths());
-ipcMain.on("search:start", (event, id: unknown, root: unknown, options: unknown) => startSearch(event.sender, id, root, options));
-ipcMain.on("search:cancel", (event) => cancelSearch(event.sender));
+const searchingSenders = new Set<number>();
+ipcMain.on("search:start", (event, id: unknown, root: unknown, options: unknown, scope: unknown) => {
+  const senderId = event.sender.id;
+  if (!searchingSenders.has(senderId)) {
+    searchingSenders.add(senderId);
+    event.sender.once("destroyed", () => {
+      searchingSenders.delete(senderId);
+      cancelSearchesFor(senderId);
+    });
+  }
+  startSearch(event.sender, id, root, options, scope);
+});
+ipcMain.on("search:cancel", (event, id: unknown) => cancelSearch(event.sender, id));
 ipcMain.handle("cli:status", () => cliStatus());
 ipcMain.handle("cli:install", () => installCli());
 ipcMain.handle("editor:get-config", () => readConfig().editor);

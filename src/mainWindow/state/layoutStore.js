@@ -482,7 +482,7 @@ export function dispatch(action, { quiet = false } = {}) {
 // a renderer-only refresh rather than a full app restart — so keep its id
 // stable and let createPtySession's own "already exists" check (main
 // process) sort out whether there's really something to reattach to.
-const KNOWN_TAB_TYPES = new Set(["chats", "changes", "files", "search", "file", "dictation", "settings", "terminal"]);
+const KNOWN_TAB_TYPES = new Set(["chats", "changes", "files", "file", "dictation", "settings", "terminal"]);
 
 // Drops anything that doesn't look like a well-formed node, falling back
 // to `initialState()`.

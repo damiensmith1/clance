@@ -750,8 +750,8 @@ the component drawing it: `state/tabState.js`.
   panels) it is plain `useState`.
 - **Live** values are kept in memory per tab while it's open and dropped when
   it closes. A section's last data goes here (Sessions' lists, Dictation's
-  history, the Changes pane's per-repository memory, Search's results, the
-  Files tree's listings), so a remount draws at once and re-reads underneath.
+  history, the Changes pane's per-repository memory, the Files tab's search
+  results, the Files tree's listings), so a remount draws at once and re-reads underneath.
   Mutable caches carry a bound (`boundCache`).
 - **Persisted** values are also written onto the tab in the layout store
   (`SET_TAB_STATE` → `tab.state`, a *quiet* action that is saved but doesn't
@@ -784,7 +784,7 @@ keyed by tab — without that, one tab's scroll carried into the next shown in
 the same pane — and its offset is the tab's `page` scroll.
 
 `Shell.js` renders a floating launcher in the top-right corner — Sessions,
-Changes, Files, Search, Dictation, Settings, and a plain terminal — rather than a
+Changes, Files, Dictation, Settings, and a plain terminal — rather than a
 sidebar, so it takes no layout space. Sections are singleton tabs: opening
 one that's already open focuses it, in whichever pane it's in. The terminal
 button opens `$SHELL -il` in the default directory.
@@ -1115,11 +1115,11 @@ and gains a layout that doesn't fight itself.
 **Where tabs open.** A default, decided from the layout's shape alone —
 panes' sizes and positions, never what's in them — so dragging tabs around
 never changes where the next one goes, and no pane has a role. (An earlier
-design gave the pane holding Changes, Files or Search a "sidecar" role that
+design gave the pane holding Changes or Files a "sidecar" role that
 other placement rules then worked around; it was dropped because it made
 panes behave differently depending on what happened to be in them.)
 
-- Most tabs — sessions, terminals, files, Search, Settings, Dictation — open
+- Most tabs — sessions, terminals, files, Settings, Dictation — open
   in the **largest pane** (`mainPaneId` in `Shell.js`). A pane's size is its
   width fraction times its height fraction, from `paneRects` walking the split
   sizes down the tree; a tie (an even split) goes to the pane with focus, then
@@ -1438,8 +1438,9 @@ the document from the editor settings.
 
 **Keys.** CodeMirror's keymaps (default, search, history, fold, close
 brackets, Tab to indent) already match VS Code's for nearly everything; the
-additions are ⌃G for go to line, ⌥⌘F for the search panel (which has the
-replace field) and ⌥Z to toggle wrapping. App-level commands are menu items
+additions are ⌃G for go to line and ⌥Z to toggle wrapping. ⌘F, ⌥⌘F, ⌘G / ⇧⌘G,
+F3 and Esc are taken from CodeMirror's search keymap and pointed at Clance's
+own find bar (below). App-level commands are menu items
 in `appMenu.ts`'s File menu — Save (⌘S), Save All (⌥⌘S), Reopen Closed Tab
 (⇧⌘T), Find in Files (⇧⌘F), Ask Claude About Selection (⌘L) — for the same
 reason the tab keys are: a menu accelerator is handled before a focused
@@ -1670,18 +1671,54 @@ back to the front — sessions create files too.
   of `/opt/homebrew/bin`, `/usr/local/bin` or `~/.local/bin` that is
   writable, and says so if the last isn't on the login shell's `PATH`.
 
+**Find in a file.** `editor/findBar.js` is a small bar positioned over the
+top right of `.file-view`, so opening it never moves the code — CodeMirror's
+own panel takes a strip of the editor and pushes everything down. CodeMirror
+still does the searching: the bar sets `setSearchQuery` (case, whole word,
+regex, replacement) and runs `findNext`, `findPrevious`, `replaceNext` and
+`replaceAll`, so ⌘G from the editor uses the same query. Typing selects the
+nearest match from the cursor and scrolls to it; the count ("3 of 12", capped
+at 9,999) is recounted with the query's cursor after every step and edit.
+CodeMirror draws match highlights only while its search panel is open, so
+`search({ createPanel })` in `setup.js` makes that panel an empty hidden
+stand-in, opened and closed with the bar. The editor's keys reach the bar
+through a window event naming the `EditorView` (`requestFind`); the file tab
+showing that view opens it, seeded with a one-line selection. Whether it's
+open and its query are the tab's live state, so a move or tab switch keeps
+it. The replace row is hidden in Diff and on read-only files.
+
 ### Search
 
-⇧⌘F opens **Search** (`SearchSection.js`) in the largest pane, like other
-tabs. It searches the Files folder, or the Changes repository if
-Files has none. The main process runs **ripgrep** (`search.ts`) with
+Folder search is part of the **Files** tab rather than a tab of its own: one
+place to look around a project, and a search result sits in the same pane
+as the tree it came from. The search button in the Files header, ⇧⌘F
+(`openFolderSearch()`, held until the tab mounts, as ⌘K is for Sessions), or
+**Find in Folder…** on a directory's context menu swaps the tree for
+`components/FolderSearch.js`; Esc or the button again swaps back. ⌘F in the
+tab flips between the two: with focus anywhere in it, or with nothing
+focused while Files is the active pane's tab. Clicking a row focuses the
+tree, since a click doesn't focus a button on macOS. The tree
+stays mounted but hidden, and its scroll is re-keyed while hidden so it's put
+back on return. The mode and its scope are persisted tab state
+(`files.search`); the query and toggles are persisted, the results live. A
+scope is a folder relative to the Files root, shown as "in src/main" with a
+✕ to clear it, and is dropped when the Files folder changes. The main
+process runs **ripgrep** (`search.ts`) with
 `--json`, arguments as an array and the query after `-e`, so nothing typed
 can become an option: `--hidden` with `!.git`, `--max-columns 400` and a
 4 MB file limit so minified files don't flood results, `--fixed-strings`
 unless the regex toggle is on, `--no-ignore` only when asked, and the
 include / exclude globs as `-g`. Matches stream back in 60 ms batches as
 `search:results` — byte offsets turned into character ranges — and stop at
-5,000; a new query (250 ms after typing stops) kills the old process. A
+5,000; a new query (250 ms after typing stops) kills the old process.
+ripgrep's working directory is always the Files root and a scope is passed
+as the path to search, so result paths stay relative to the root; the scope
+is refused unless it resolves (links followed) to a directory inside the
+root. Each search is keyed by window and id, so two searches can run at
+once, and only the one who started a search cancels it; a window closing
+ends its searches. Results of a new run replace the old ones on its first
+batch rather than when it starts, so the re-run each time the window comes
+back to the front doesn't flash empty. A
 result opens through `filesResolveFile`, so a file inside a repository is
 the same tab Files or Changes would open, and `revealLine` puts the cursor
 on the match once the editor is on screen.

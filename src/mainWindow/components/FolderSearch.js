@@ -1,22 +1,24 @@
-import { html, useEffect, useMemo, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { html, useEffect, useMemo, useRef } from "../../shared/vendor/preact-htm-standalone.module.js";
 import { Icon } from "../../shared/icons.js";
+import { fileIconUrl } from "../../shared/fileIcons.js";
 import { useTabState, useTabScroll } from "../state/tabState.js";
 
-// Find in Files (⇧⌘F): searches every file under the Files
-// folder with ripgrep (src/main/search.ts). Results stream in grouped by
-// file; a new query cancels the one before it. Picking a result opens the file
-// at that line.
+// Search in the Files tab (⇧⌘F, or Find in Folder… on a folder): every file
+// under the Files folder, or under one folder inside it, searched with
+// ripgrep in the main process (src/main/search.ts). Results stream in grouped
+// by file; a new query cancels the one before it. Picking a result opens the
+// file at that line.
+//
+// The search itself (query, toggles, globs) is the tab's persisted state; the
+// results and what's collapsed are its live state (state/tabState.js), so
+// moving the tab, switching away, or going back to the tree and returning
+// keeps them all, and doesn't run the same search again.
 
 const DEBOUNCE_MS = 250;
 
 let nextId = 1;
 
 const DEFAULT_OPTIONS = { query: "", caseSensitive: false, wholeWord: false, regex: false, include: "", exclude: "", includeIgnored: false };
-
-/** Focuses the search box, from ⇧⌘F. */
-export function focusSearchInput() {
-  window.dispatchEvent(new CustomEvent("clance:focus-search"));
-}
 
 function Highlighted({ text, ranges }) {
   // Long lines are cut down around the first match, so it's always visible.
@@ -34,18 +36,25 @@ function Highlighted({ text, ranges }) {
   return html`<span class="search-line-text">${offset > 0 ? "…" : ""}${parts}</span>`;
 }
 
-function Toggle({ on, title, onToggle, children }) {
-  return html`<button class="search-toggle ${on ? "is-on" : ""}" title=${title} aria-pressed=${on} onClick=${onToggle}>${children}</button>`;
+export function SearchToggle({ on, title, onToggle, children }) {
+  return html`<button
+    class="search-toggle ${on ? "is-on" : ""}"
+    title=${title}
+    aria-pressed=${on}
+    onMouseDown=${(e) => e.preventDefault()}
+    onClick=${onToggle}
+  >
+    ${children}
+  </button>`;
 }
 
-export function SearchSection({ onOpenResult }) {
-  // The search itself (query, toggles, globs) is the tab's persisted state,
-  // saved with the layout; the results and what's collapsed are its live
-  // state (state/tabState.js). Moving the tab or switching away keeps them all,
-  // and doesn't run the same search again.
+/**
+ * `scope` is a folder relative to `root` (null: all of it). `focusSignal`
+ * changing puts the cursor in the field with the query selected.
+ */
+export function FolderSearch({ root, scope, focusSignal, onClearScope, onOpenResult, onClose }) {
   const [options, setOptions] = useTabState("search.options", DEFAULT_OPTIONS, { persist: true });
   const [showFilters, setShowFilters] = useTabState("search.showFilters", false, { persist: true });
-  const [root, setRoot] = useTabState("search.root", null);
   const [results, setResults] = useTabState("search.results", []);
   const [status, setStatus] = useTabState("search.status", null);
   const [collapsed, setCollapsed] = useTabState("search.collapsed", () => new Set());
@@ -54,64 +63,77 @@ export function SearchSection({ onOpenResult }) {
   const inputRef = useRef(null);
   const resultsRef = useRef(null);
   const currentId = useRef(0);
+  // Results of a new search replace the old ones when its first batch
+  // arrives, not when it starts, so re-running one doesn't flash empty.
+  const fresh = useRef(false);
+  const signature = JSON.stringify([root, scope, options]);
   useTabScroll(resultsRef, "search.results", { version: searched });
 
-  // The folder the Files pane is pointed at, or else the Changes
-  // repository: search covers the project being looked at.
   useEffect(() => {
-    (async () => {
-      const folder = (await window.clanceApp.filesGetLastFolder()) ?? (await window.clanceApp.gitGetLastRepo());
-      setRoot(folder ?? null);
-    })();
     inputRef.current?.focus();
-    const onFocusRequest = () => {
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    };
-    window.addEventListener("clance:focus-search", onFocusRequest);
-    return () => window.removeEventListener("clance:focus-search", onFocusRequest);
-  }, []);
+    inputRef.current?.select();
+  }, [focusSignal]);
 
   useEffect(() => {
     const stopResults = window.clanceApp.onSearchResults(({ id, matches }) => {
       if (id !== currentId.current) return;
-      setResults((current) => [...current, ...matches]);
+      if (fresh.current) {
+        fresh.current = false;
+        setResults(matches);
+      } else {
+        setResults((current) => [...current, ...matches]);
+      }
     });
     const stopDone = window.clanceApp.onSearchDone((done) => {
       if (done.id !== currentId.current) return;
+      if (fresh.current) {
+        fresh.current = false;
+        setResults([]);
+      }
       setStatus(done);
     });
     return () => {
       stopResults();
       stopDone();
-      window.clanceApp.searchCancel();
+      window.clanceApp.searchCancel(currentId.current);
     };
   }, []);
 
-  // A pause in typing (or any toggle) starts a new search, which cancels the
-  // one before it in the main process.
+  function run(force) {
+    if (!force && signature === searched && !status?.running) return;
+    if (signature !== searched) setCollapsed(new Set());
+    setSearched(signature);
+    window.clanceApp.searchCancel(currentId.current);
+    const id = nextId++;
+    currentId.current = id;
+    if (!options.query) {
+      fresh.current = false;
+      setResults([]);
+      setStatus(null);
+      return;
+    }
+    fresh.current = true;
+    setStatus({ running: true });
+    window.clanceApp.searchStart(id, root, options, scope);
+  }
+
+  // A pause in typing (or any toggle) starts a new search. Coming back to one
+  // already answered doesn't — unless the tab went away mid-search.
   useEffect(() => {
     if (!root) return;
-    // Already the answer on screen (coming back to the tab) — unless it was
-    // cut off mid-search by the tab going away.
-    const signature = JSON.stringify([root, options]);
-    if (signature === searched && !status?.running) return;
-    const timer = setTimeout(() => {
-      setSearched(signature);
-      const id = nextId++;
-      currentId.current = id;
-      setResults([]);
-      setCollapsed(new Set());
-      if (!options.query) {
-        setStatus(null);
-        window.clanceApp.searchCancel();
-        return;
-      }
-      setStatus({ running: true });
-      window.clanceApp.searchStart(id, root, options);
-    }, DEBOUNCE_MS);
+    const timer = setTimeout(() => run(false), DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [root, options]);
+  }, [signature]);
+
+  // Sessions edit files while you look: the search runs again whenever the
+  // window comes back to the front, the same moment the tree re-reads.
+  useEffect(() => {
+    const onFocus = () => {
+      if (root && options.query) run(true);
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  });
 
   const groups = useMemo(() => {
     const byPath = new Map();
@@ -135,7 +157,6 @@ export function SearchSection({ onOpenResult }) {
     });
   }
 
-  const rootName = root ? root.split("/").filter(Boolean).pop() : "";
   const summary = status?.running
     ? "Searching…"
     : status?.error
@@ -144,9 +165,7 @@ export function SearchSection({ onOpenResult }) {
         ? `${status.count} result${status.count === 1 ? "" : "s"} in ${groups.length} file${groups.length === 1 ? "" : "s"}${
             status.capped ? " — stopped at 5,000; narrow the search" : ""
           }`
-        : root
-          ? `Searches ${rootName}`
-          : "Choose a folder in Files first";
+        : null;
 
   return html`
     <div class="search-pane">
@@ -156,18 +175,28 @@ export function SearchSection({ onOpenResult }) {
           <input
             ref=${inputRef}
             class="search-input"
-            placeholder="Find in files"
+            placeholder=${scope ? `Search in ${scope}` : "Search in folder"}
             value=${options.query}
             onInput=${(e) => set({ query: e.target.value })}
             onKeyDown=${(e) => {
               if (e.key === "Enter" && results[0]) onOpenResult(root, results[0].path, results[0].line);
+              else if (e.key === "Escape") {
+                e.preventDefault();
+                onClose();
+              }
             }}
           />
-          <${Toggle} on=${options.caseSensitive} title="Match case" onToggle=${() => set({ caseSensitive: !options.caseSensitive })}>Aa</${Toggle}>
-          <${Toggle} on=${options.wholeWord} title="Whole word" onToggle=${() => set({ wholeWord: !options.wholeWord })}>ab</${Toggle}>
-          <${Toggle} on=${options.regex} title="Regular expression" onToggle=${() => set({ regex: !options.regex })}>.*</${Toggle}>
-          <${Toggle} on=${showFilters} title="Files to include or exclude" onToggle=${() => setShowFilters(!showFilters)}>…</${Toggle}>
+          <${SearchToggle} on=${options.caseSensitive} title="Match case" onToggle=${() => set({ caseSensitive: !options.caseSensitive })}>Aa</${SearchToggle}>
+          <${SearchToggle} on=${options.wholeWord} title="Whole word" onToggle=${() => set({ wholeWord: !options.wholeWord })}>ab</${SearchToggle}>
+          <${SearchToggle} on=${options.regex} title="Regular expression" onToggle=${() => set({ regex: !options.regex })}>.*</${SearchToggle}>
+          <${SearchToggle} on=${showFilters} title="Files to include or exclude" onToggle=${() => setShowFilters(!showFilters)}>…</${SearchToggle}>
         </div>
+        ${scope &&
+        html`<div class="search-scope">
+          <span class="search-scope-label">in</span>
+          <span class="search-scope-path" title=${scope}>${scope}</span>
+          <button class="search-scope-clear" title="Search the whole folder" onClick=${onClearScope}>${Icon.close(10)}</button>
+        </div>`}
         ${showFilters &&
         html`
           <input
@@ -187,7 +216,7 @@ export function SearchSection({ onOpenResult }) {
             Include files git ignores
           </label>
         `}
-        <div class="search-summary ${status?.error ? "search-summary-error" : ""}">${summary}</div>
+        ${summary && html`<div class="search-summary ${status?.error ? "search-summary-error" : ""}">${summary}</div>`}
       </div>
       <div class="search-results" ref=${resultsRef}>
         ${groups.map(
@@ -195,6 +224,7 @@ export function SearchSection({ onOpenResult }) {
             <div class="search-group" key=${path}>
               <button class="search-file" onClick=${() => toggleGroup(path)} title=${path}>
                 <span class="files-chevron ${collapsed.has(path) ? "" : "is-open"}">${Icon.chevronRight(11)}</span>
+                <span class="files-row-icon"><img src=${fileIconUrl(path.split("/").pop())} alt="" /></span>
                 <span class="search-file-name">${path.split("/").pop()}</span>
                 <span class="search-file-dir">${path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""}</span>
                 <span class="search-file-count">${matches.length}</span>

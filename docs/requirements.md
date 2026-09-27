@@ -300,6 +300,12 @@ Sessions Clance starts get these tools when Accessibility is granted:
   ⌘/ toggle comment, ⌘] / ⌘[ indent, ⌥↑ / ⌥↓ move line, ⇧⌥↓ duplicate line,
   ⇧⌘K delete line, ⌥Z toggle wrap. Bracket matching, auto-closing brackets,
   auto-indent and code folding are on.
+- Find and replace (⌘F, ⌥⌘F) is a small bar floating over the top right of
+  the code, never pushing it down: match case, whole word and regular
+  expression toggles, "3 of 12", ↩ / ⇧↩ for next and previous, and a replace
+  row (↩ replaces one, ⌘↩ all) where the file is editable. It opens with a
+  one-line selection as its query, highlights every match, jumps to the
+  nearest as you type, and Esc closes it and returns to the code.
 - Syntax highlighting while editing covers at least TypeScript / JavaScript
   (and JSX), JSON, CSS, HTML, Markdown, Python, shell, YAML, TOML, SQL, Rust,
   Go, Swift, Dockerfile and `.env`. Anything else edits as plain text.
@@ -384,14 +390,20 @@ Sessions Clance starts get these tools when Accessibility is granted:
 
 ## Search
 
-- ⇧⌘F searches the contents of every file under the Files folder (or the
-  current repository), skipping what git ignores unless asked not to.
+- Search lives in the Files tab: its search button, ⇧⌘F, or ⌘F while the
+  tab has focus swaps the tree for a search of the contents of every file
+  under the Files folder, and Esc, ⌘F or the button again brings the tree
+  back as it was left. Find in Folder… on a
+  folder (right-click) searches just that folder, shown as "in src/main"
+  with a ✕ to widen it to the whole Files folder. What git ignores is
+  skipped unless asked not to.
 - Case, whole-word and regular-expression toggles, and include / exclude
   globs.
 - Results stream in as they're found, grouped by file with the matching line,
   and a new query cancels the old one. ↩ or a click opens the file with the
   match selected. Results stop at 5,000 and say so.
-- It opens from the launcher, in the largest pane like other tabs.
+- The search runs again when the window comes back to the front, so results
+  keep up with files sessions have changed.
 
 ## Sessions and the editor
 
@@ -408,7 +420,7 @@ Sessions Clance starts get these tools when Accessibility is granted:
 
 - Opens from the Dock icon or the menu-bar menu. While setup is incomplete it
   opens on launch.
-- A launcher opens Sessions, Changes, Files, Search, Dictation, Settings, or
+- A launcher opens Sessions, Changes, Files, Dictation, Settings, or
   a plain shell terminal. Sections open as tabs; reopening one focuses it
   wherever it is.
 - By default, tabs open in the largest pane, except Changes and Files, which
@@ -423,8 +435,8 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - Moving a tab to another pane, or switching away from it and back, never
   loses what it was doing. Sessions keeps its search, filter, selected row,
   an open peek and where that peek was scrolled; Dictation its search and
-  date filter; Settings its open groups; Search its query and results; Files
-  its open folders; every tab its scroll position. None of them flashes back
+  date filter; Settings its open groups; Files its open folders, and
+  its search and results; a file tab its find bar; every tab its scroll position. None of them flashes back
   to "Loading…" — they redraw as they were and refresh quietly.
 - The parts worth keeping — a search, a filter, scroll positions, where a
   file was left — also survive a relaunch and come back with a tab reopened

@@ -2462,9 +2462,6 @@
         padding-bottom: var(--space-3);
         outline: none;
       }
-      .files-tree:focus-visible {
-        box-shadow: inset 0 0 0 2px var(--signal);
-      }
       /* A row is a button so it is reachable and clickable as one thing; the
          tree's own keyboard handling does the moving between them. */
       .files-row {
@@ -2520,7 +2517,7 @@
         min-width: 0;
         margin: 1px var(--space-1) 1px 0;
         padding: 1px var(--space-1);
-        border: 1px solid var(--signal);
+        border: 1px solid var(--divider-strong);
         border-radius: var(--radius-sm);
         background: var(--surface-card);
         color: var(--text-primary);
@@ -2554,7 +2551,44 @@
         width: 12px;
         color: var(--text-tertiary);
       }
-      /* ---- Find in Files (see docs/design.md's "Search") ---- */
+      .files-tree[hidden] {
+        display: none;
+      }
+      .files-bar-button.is-on {
+        color: var(--text-primary);
+        background: var(--surface-active);
+      }
+      /* ---- Search in the Files tab (see docs/design.md's "Search") ---- */
+      .search-scope {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+        min-width: 0;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .search-scope-path {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: var(--font-mono);
+        color: var(--text-secondary);
+      }
+      .search-scope-clear {
+        display: flex;
+        flex-shrink: 0;
+        padding: 2px;
+        border: none;
+        border-radius: var(--radius-sm);
+        background: none;
+        color: var(--text-tertiary);
+        cursor: pointer;
+      }
+      .search-scope-clear:hover {
+        background: var(--surface-hover);
+        color: var(--text-primary);
+      }
       .search-pane {
         display: flex;
         flex-direction: column;
@@ -2579,8 +2613,10 @@
         border-radius: var(--radius-sm);
         background: var(--surface-card);
       }
+      /* Focus is where the cursor is; the field doesn't need a coloured
+         ring to say so. */
       .search-field:focus-within {
-        border-color: var(--signal);
+        border-color: var(--divider-strong);
       }
       .search-field-icon {
         display: flex;
@@ -2588,9 +2624,13 @@
       }
       /* The global input style draws its own box; inside .search-field the
          field is the box. */
+      .search-field .search-input:focus-within {
+        box-shadow: none;
+      }
       .search-input {
         flex: 1;
         min-width: 0;
+        height: 26px;
         padding: var(--space-1) var(--space-1);
         border: none;
         border-radius: 0;
@@ -3402,11 +3442,102 @@
       }
       /* ---- Editor (see docs/design.md's "Editor") ---- */
       .file-view {
+        position: relative;
         display: flex;
         flex-direction: column;
         flex: 1;
         min-width: 0;
         min-height: 0;
+      }
+      /* Find and replace (editor/findBar.js): floats over the top right of
+         the code rather than taking a strip of the editor. Clear of the
+         scrollbar on the right. */
+      .find-bar {
+        position: absolute;
+        top: var(--space-2);
+        right: var(--space-4);
+        z-index: 5;
+        display: flex;
+        align-items: flex-start;
+        gap: 2px;
+        width: 380px;
+        max-width: calc(100% - var(--space-4) * 2);
+        box-sizing: border-box;
+        padding: var(--space-1);
+        background: var(--surface-bg);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-overlay);
+        font-family: var(--font-sans);
+      }
+      .find-bar-rows {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        flex: 1;
+        min-width: 0;
+      }
+      .find-bar-row {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+      }
+      .find-bar-field {
+        flex: 1;
+        min-width: 0;
+      }
+      .find-bar-twist,
+      .find-bar-button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        min-width: 22px;
+        height: 24px;
+        padding: 0 var(--space-1);
+        border: none;
+        border-radius: var(--radius-sm);
+        background: none;
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        cursor: pointer;
+      }
+      .find-bar-twist {
+        width: 16px;
+        min-width: 16px;
+        padding: 0;
+        color: var(--text-tertiary);
+      }
+      .find-bar-twist svg {
+        transition: transform 90ms ease;
+      }
+      .find-bar-twist.is-open svg {
+        transform: rotate(90deg);
+      }
+      .find-bar-twist:hover,
+      .find-bar-button:hover:not(:disabled) {
+        background: var(--surface-hover);
+        color: var(--text-primary);
+      }
+      .find-bar-button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .find-bar-text {
+        font-family: var(--font-sans);
+      }
+      .find-bar-count {
+        flex-shrink: 0;
+        min-width: 64px;
+        padding: 0 var(--space-1);
+        text-align: right;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        white-space: nowrap;
+      }
+      .find-bar-count.is-empty {
+        color: var(--danger);
       }
       .editor-host {
         flex: 1;

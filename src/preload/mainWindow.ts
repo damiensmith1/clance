@@ -151,9 +151,11 @@ contextBridge.exposeInMainWorld("clanceApp", {
     ipcRenderer.on("open-paths-available", listener);
     return () => ipcRenderer.removeListener("open-paths-available", listener);
   },
-  // Find in Files (see search.ts): results stream back as events.
-  searchStart: (id: number, root: string, options: unknown) => ipcRenderer.send("search:start", id, root, options),
-  searchCancel: () => ipcRenderer.send("search:cancel"),
+  // Folder search (see search.ts): results stream back as events. `scope`
+  // narrows it to a folder inside `root`.
+  searchStart: (id: number, root: string, options: unknown, scope: string | null = null) =>
+    ipcRenderer.send("search:start", id, root, options, scope),
+  searchCancel: (id: number) => ipcRenderer.send("search:cancel", id),
   onSearchResults: (callback: (payload: { id: number; matches: unknown[] }) => void) => {
     const listener = (_event: unknown, payload: { id: number; matches: unknown[] }) => callback(payload);
     ipcRenderer.on("search:results", listener);

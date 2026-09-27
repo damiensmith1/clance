@@ -2,8 +2,7 @@ import { html, useEffect, useMemo, useRef, useState } from "../shared/vendor/pre
 import { Icon } from "../shared/icons.js";
 import { ChatsListSection, MenuItem, focusSessionSearch } from "./sections/ChatsSection.js";
 import { ChangesSection } from "./sections/ChangesSection.js";
-import { FilesSection } from "./sections/FilesSection.js";
-import { SearchSection, focusSearchInput } from "./sections/SearchSection.js";
+import { FilesSection, openFolderSearch } from "./sections/FilesSection.js";
 import {
   TabContext,
   useTabScroll,
@@ -58,7 +57,6 @@ const LAUNCHER_ITEMS = [
   { id: "chats", label: "Sessions", icon: "chat" },
   { id: "changes", label: "Changes", icon: "gitBranch" },
   { id: "files", label: "Files", icon: "folder" },
-  { id: "search", label: "Search", icon: "search" },
   { id: "dictation", label: "Dictation", icon: "mic" },
   { id: "settings", label: "Settings", icon: "gear" },
 ];
@@ -94,8 +92,8 @@ function findSplitContainingTab(node, tabId) {
 
 // Tab types that fill their pane themselves rather than sitting in the
 // padded, 880px-wide content column — a terminal, a file and the Changes
-// Files, Search and Changes panes all want every pixel.
-const FLUSH_TAB_TYPES = new Set(["terminal", "file", "changes", "files", "search"]);
+// Files and Changes panes all want every pixel.
+const FLUSH_TAB_TYPES = new Set(["terminal", "file", "changes", "files"]);
 
 // Below this much room per tab, a label can only be shown as a few clipped
 // letters, which says less than the icon does on its own. Measured against
@@ -448,12 +446,11 @@ function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut, openSectio
     case "files":
       return html`<${FilesSection}
         onOpenFile=${openFileTab}
+        onOpenResult=${launcher.openSearchResult}
         onPathMoved=${launcher.onPathMoved}
         onOpenTerminal=${launcher.openShellTab}
         onAskClaude=${launcher.askClaudeAbout}
       />`;
-    case "search":
-      return html`<${SearchSection} onOpenResult=${launcher.openSearchResult} />`;
     case "file":
       // Keyed by tab: without it two file tabs in one pane share a component
       // and its DOM, and a preview's scroll carries from one file to the next.
@@ -1347,8 +1344,8 @@ export function Shell() {
       else if (command === "reopen-tab") reopenClosedTab();
       else if (command === "ask-claude") askAboutSelection();
       else if (command === "find-in-files") {
-        openSection("search");
-        focusSearchInput();
+        openSection("files");
+        openFolderSearch();
       }
     });
   }, []);

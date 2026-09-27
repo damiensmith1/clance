@@ -38,8 +38,8 @@ the text at your cursor.
   file as a tab to edit it — syntax highlighting, find and replace, its
   uncommitted changes marked in the gutter, and a warning rather than a
   silent overwrite if a session changed it on disk while you were editing.
-  Markdown renders as a preview, Find in Files (⇧⌘F) searches the whole
-  folder, and ⌘L asks a session about the selected code. Open files from
+  Markdown renders as a preview, the Files tab searches the whole folder or
+  any folder in it (⇧⌘F), and ⌘L asks a session about the selected code. Open files from
   Finder or with `clance <path>` in a terminal.
 - **On-device dictation.** Works in any app, powered by
   [whisper.cpp](https://github.com/ggml-org/whisper.cpp). Clance recommends a
@@ -122,7 +122,7 @@ beside your work rather than over it.
 | ⌘K | Search every session on your Mac, or start a new one |
 | ⌘P | Open a file in the current repository by name |
 | ⌘S / ⌥⌘S | Save the file / save all |
-| ⇧⌘F | Find in files |
+| ⌘F / ⇧⌘F | Find in the file / search the folder |
 | ⌘L | Ask a session about the selected code |
 | ⌘N | New session |
 | Space | Peek at the selected session without opening it |

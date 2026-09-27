@@ -3,7 +3,8 @@ import { Chunk, Text, goToNextChunk, goToPreviousChunk } from "../../shared/vend
 import { acquire, subscribe, setMode, setViewId as rememberViewId, keepMine, takeTheirs } from "../editor/buffers.js";
 import { CompareView } from "../editor/views.js";
 import { pickHandler } from "../handlers/index.js";
-import { useTabId, readTabState, writeTabState } from "../state/tabState.js";
+import { useTabId, useTabState, readTabState, writeTabState } from "../state/tabState.js";
+import { FindBar, DEFAULT_FIND, onFindRequest } from "../editor/findBar.js";
 
 // A file tab: the file, in whichever view its handler offers, editable where
 // it can be. The document itself — text, undo history, whether it's saved —
@@ -68,6 +69,11 @@ export function FileSection({ repoRoot, path, onOpenFile }) {
     rememberViewId(buffer, id);
   };
   const [comparing, setComparing] = useState(false);
+  // The find bar (editor/findBar.js): open or not, and what it's looking
+  // for, kept while the tab moves or is switched away from.
+  const [findOpen, setFindOpen] = useTabState("find.open", false);
+  const [find, setFind] = useTabState("find", DEFAULT_FIND);
+  const [findFocus, setFindFocus] = useState(0);
 
   useEffect(() => {
     const stop = subscribe(buffer, () => rerender((n) => n + 1));
@@ -84,6 +90,29 @@ export function FileSection({ repoRoot, path, onOpenFile }) {
   useEffect(() => {
     if (!buffer.conflict) setComparing(false);
   }, [buffer.conflict]);
+
+  // ⌘F / ⌥⌘F / Esc in this tab's editor.
+  useEffect(() => {
+    if (!buffer.view) return;
+    return onFindRequest(buffer.view, ({ replace, close }) => {
+      if (close) {
+        closeFind();
+        return;
+      }
+      // A selection on one line is what to look for, as in VS Code.
+      const { state } = buffer.view;
+      const selected = state.sliceDoc(state.selection.main.from, state.selection.main.to);
+      const seed = selected && !selected.includes("\n") ? { query: selected } : {};
+      setFind((current) => ({ ...current, ...seed, ...(replace ? { showReplace: true } : {}) }));
+      setFindOpen(true);
+      setFindFocus((n) => n + 1);
+    });
+  }, [buffer, buffer.view]);
+
+  function closeFind() {
+    setFindOpen(false);
+    buffer.view?.focus();
+  }
 
   const handler = pickHandler(buffer);
   // A search result or reference asked for a line: that's in the source.
@@ -202,6 +231,17 @@ export function FileSection({ repoRoot, path, onOpenFile }) {
       html`<${Banner} tone="danger"><span>Couldn't save: ${buffer.saveError}</span></${Banner}>`}
       <div class="file-view">
         <${Body} key=${current.id} buffer=${buffer} onOpenFile=${onOpenFile} />
+        ${findOpen &&
+        isSource &&
+        buffer.view &&
+        html`<${FindBar}
+          buffer=${buffer}
+          find=${find}
+          setFind=${setFind}
+          focusSignal=${findFocus}
+          editable=${doc?.kind === "text" && !doc.readOnly && !diffing}
+          onClose=${closeFind}
+        />`}
       </div>
     </div>
   `;

@@ -1,8 +1,10 @@
-import { html, useEffect, useMemo, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { html, useEffect, useLayoutEffect, useMemo, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
 import { Icon } from "../../shared/icons.js";
 import { MenuItem } from "./ChatsSection.js";
 import { fileIconUrl, folderIconUrl } from "../../shared/fileIcons.js";
-import { useTabState, useTabScroll } from "../state/tabState.js";
+import { useTabId, useTabState, useTabScroll } from "../state/tabState.js";
+import { getState, findPane } from "../state/layoutStore.js";
+import { FolderSearch } from "../components/FolderSearch.js";
 
 // The Files explorer: a narrow pane like Changes, browsing any folder on the
 // machine — ⌘P needs you to know a filename already, and looking around a
@@ -19,6 +21,20 @@ import { useTabState, useTabScroll } from "../state/tabState.js";
 // are kept per folder as the tab's state (state/tabState.js), so moving the
 // tab or switching away and back redraws the tree at once and re-reads it
 // quietly, rather than starting from a blank folder.
+//
+// The tab also searches (components/FolderSearch.js): the search icon, ⇧⌘F or
+// Find in Folder… swap the tree for a search of the folder, or of one folder
+// inside it, and Esc or the icon again brings the tree back as it was.
+
+const FOCUS_SEARCH_EVENT = "clance:files-search";
+
+// ⇧⌘F (Shell.js) calls this after switching to the Files tab. The tab may
+// not be mounted yet, so the request is also kept until it mounts.
+let searchPending = false;
+export function openFolderSearch() {
+  searchPending = true;
+  window.dispatchEvent(new Event(FOCUS_SEARCH_EVENT));
+}
 
 function homeShort(path) {
   return path.replace(/^\/Users\/[^/]+/, "~");
@@ -31,7 +47,7 @@ function parentOf(path) {
 
 const DRAG_THRESHOLD_PX = 4;
 
-export function FilesSection({ onOpenFile, onPathMoved, onOpenTerminal, onAskClaude }) {
+export function FilesSection({ onOpenFile, onOpenResult, onPathMoved, onOpenTerminal, onAskClaude }) {
   const [byRoot] = useTabState("files.byRoot", () => new Map());
   function cacheFor(folder) {
     if (!byRoot.has(folder)) byRoot.set(folder, { expanded: new Set(), selected: null, dirs: new Map() });
@@ -64,13 +80,67 @@ export function FilesSection({ onOpenFile, onPathMoved, onOpenTerminal, onAskCla
   // "" for the folder itself, or null when not over anywhere it can go).
   const [dragging, setDragging] = useState(null);
   const [dropHover, setDropHover] = useState(null);
+  // Search mode: { scope } (a folder relative to the root, or null for all
+  // of it) while searching, null while showing the tree.
+  const [search, setSearch] = useTabState("files.search", null, { persist: true });
+  const [searchFocus, setSearchFocus] = useState(0);
 
   const rootRef = useRef(null);
+  const paneRef = useRef(null);
+  const tabId = useTabId();
+  const lastRoot = useRef(root);
   const switcherRef = useRef(null);
   const listRef = useRef(null);
-  useTabScroll(listRef, root ? "files.tree" : null, { version: root });
+  // Keyed off while searching, so the tree's scroll is put back when it
+  // comes back rather than lost with the element.
+  useTabScroll(listRef, root && !search ? "files.tree" : null, { version: root });
   const dirsRef = useRef(dirs);
   dirsRef.current = dirs;
+
+  // ---- searching ----
+
+  function startSearch(scope) {
+    setSearch({ scope: scope || null });
+    setSearchFocus((n) => n + 1);
+  }
+
+  function closeSearch() {
+    setSearch(null);
+    requestAnimationFrame(() => listRef.current?.focus());
+  }
+
+  // ⌘F in the tab flips between the tree and search. "In the tab" is focus
+  // inside it, or — since clicking a row button doesn't move focus on macOS —
+  // nothing focused while this is the active tab of the active pane.
+  useEffect(() => {
+    function onKeyDown(event) {
+      if (!event.metaKey || event.shiftKey || event.altKey || event.ctrlKey || event.key.toLowerCase() !== "f") return;
+      const focused = document.activeElement;
+      const inside = paneRef.current?.contains(focused);
+      if (!inside) {
+        if (focused && focused !== document.body) return;
+        const { root: layout, activePaneId } = getState();
+        if (!tabId || findPane(layout, activePaneId)?.activeTabId !== tabId) return;
+      }
+      event.preventDefault();
+      if (search) closeSearch();
+      else startSearch(null);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [search, tabId]);
+
+  useEffect(() => {
+    function take() {
+      if (!searchPending) return;
+      searchPending = false;
+      setSearch((current) => current ?? { scope: null });
+      setSearchFocus((n) => n + 1);
+    }
+    take();
+    window.addEventListener(FOCUS_SEARCH_EVENT, take);
+    return () => window.removeEventListener(FOCUS_SEARCH_EVENT, take);
+  }, []);
 
   // ---- loading ----
 
@@ -121,6 +191,9 @@ export function FilesSection({ onOpenFile, onPathMoved, onOpenTerminal, onAskCla
     setSelected(saved.selected);
     setDirs(new Map(saved.dirs));
     setError(null);
+    // A folder picked inside the last one doesn't exist in the new one.
+    if (lastRoot.current && lastRoot.current !== root && search?.scope) setSearch({ scope: null });
+    lastRoot.current = root;
     window.clanceApp.filesSetLastFolder(root);
     window.clanceApp.filesFolderRepo(root).then((found) => {
       if (rootRef.current === root) setRepo(found ?? null);
@@ -195,6 +268,20 @@ export function FilesSection({ onOpenFile, onPathMoved, onOpenTerminal, onAskCla
       window.removeEventListener("keydown", onKey, true);
     };
   }, [rowMenu]);
+
+  // The name field takes focus once it's on the page — a ref callback runs
+  // before a new row is attached, when focusing does nothing and focus stays
+  // on the button that asked for the field.
+  const nameInputRef = useRef(null);
+  const editingKey = editing ? `${editing.kind}\0${editing.path ?? editing.parent}` : null;
+  useLayoutEffect(() => {
+    const el = nameInputRef.current;
+    if (!editing || !el) return;
+    el.focus();
+    // Select the name without its extension, as Finder does.
+    const dot = el.value.lastIndexOf(".");
+    el.setSelectionRange(0, editing.kind === "rename" && dot > 0 ? dot : el.value.length);
+  }, [editingKey]);
 
   // ---- the visible rows ----
 
@@ -418,6 +505,9 @@ export function FilesSection({ onOpenFile, onPathMoved, onOpenTerminal, onAskCla
       end();
       if (active && over !== null) move(entry.path, over);
       else if (!active && target.isConnected) {
+        // A click doesn't focus a button on macOS; the tree takes focus so
+        // its keys work after a click.
+        listRef.current?.focus({ preventScroll: true });
         setSelected(entry.path);
         activate(entry);
       }
@@ -579,6 +669,8 @@ export function FilesSection({ onOpenFile, onPathMoved, onOpenTerminal, onAskCla
           <${MenuItem} title="Duplicate" onSelect=${act(() => duplicate(entry))} />
           <${MenuItem} title="Move to Trash" shortcut="⌘⌫" onSelect=${act(() => trash(entry))} />
         `}
+        ${(!entry || (entry.directory && !entry.symlink)) &&
+        html`<${MenuItem} title="Find in Folder…" onSelect=${act(() => startSearch(entry?.path ?? null))} />`}
         <div class="menu-separator"></div>
         <${MenuItem} title="Copy Path" onSelect=${act(() => navigator.clipboard.writeText(abs))} />
         ${entry && html`<${MenuItem} title="Copy Relative Path" onSelect=${act(() => navigator.clipboard.writeText(entry.path))} />`}
@@ -602,14 +694,7 @@ export function FilesSection({ onOpenFile, onPathMoved, onOpenTerminal, onAskCla
         <input
           class="files-name-input"
           value=${editing.value}
-          ref=${(el) => {
-            if (el && document.activeElement !== el) {
-              el.focus();
-              // Select the name without its extension, as Finder does.
-              const dot = el.value.lastIndexOf(".");
-              el.setSelectionRange(0, editing.kind === "rename" && dot > 0 ? dot : el.value.length);
-            }
-          }}
+          ref=${nameInputRef}
           onInput=${(e) => setEditing((current) => current && { ...current, value: e.target.value })}
           onKeyDown=${(e) => {
             e.stopPropagation();
@@ -628,7 +713,7 @@ export function FilesSection({ onOpenFile, onPathMoved, onOpenTerminal, onAskCla
   }
 
   return html`
-    <div class="files-pane">
+    <div class="files-pane" ref=${paneRef}>
       <header class="files-bar">
         <div class="files-folder" ref=${switcherRef}>
           <button class="files-folder-button" title="Switch folder" onClick=${() => setMenu((open) => !open)}>
@@ -659,6 +744,13 @@ export function FilesSection({ onOpenFile, onPathMoved, onOpenTerminal, onAskCla
           `}
         </div>
         <span class="files-bar-actions">
+          <button
+            class="btn-quiet btn-small files-bar-button ${search ? "is-on" : ""}"
+            title=${search ? "Back to the files (Esc or ⌘F)" : "Search in folder (⌘F)"}
+            onClick=${() => (search ? closeSearch() : startSearch(null))}
+          >
+            ${Icon.search(13)}
+          </button>
           <button
             class="btn-quiet btn-small files-bar-button"
             title="New File"
@@ -706,7 +798,17 @@ export function FilesSection({ onOpenFile, onPathMoved, onOpenTerminal, onAskCla
       </div>`}
       ${rootListing?.error && html`<div class="files-error">${rootListing.error}</div>`}
 
+      ${search &&
+      html`<${FolderSearch}
+        root=${root}
+        scope=${search.scope}
+        focusSignal=${searchFocus}
+        onClearScope=${() => setSearch({ scope: null })}
+        onOpenResult=${onOpenResult}
+        onClose=${closeSearch}
+      />`}
       <div
+        hidden=${!!search}
         class="files-tree ${dropHover === "" || dragging?.target === "" ? "files-tree-drop" : ""}"
         ref=${listRef}
         tabIndex="0"
