@@ -1,4 +1,5 @@
 import { h, html, useEffect, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { useRemembered } from "../state/remember.js";
 import { Icon } from "../../shared/icons.js";
 import { StatusCard } from "../components/StatusCard.js";
 import { Toggle } from "../components/Toggle.js";
@@ -164,17 +165,18 @@ function MicrophoneRow({ value, onChange }) {
 }
 
 export function DictationStep({ onComplete, onBack, onReady } = {}) {
-  const [data, setData] = useState(null);
-  const [settings, setSettings] = useState(null);
+  // Remembered so a remount doesn't redraw from nothing; re-read underneath.
+  const [data, setData] = useRemembered("step.dictation.data", null);
+  const [settings, setSettings] = useRemembered("step.dictation.settings", null);
 
   useEffect(() => {
     if (data && settings) onReady?.();
   }, [Boolean(data && settings)]);
-  const [mic, setMic] = useState(null);
+  const [mic, setMic] = useRemembered("step.dictation.mic", null);
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState(null);
   const [promptDraft, setPromptDraft] = useState(null);
-  const [showAllModels, setShowAllModels] = useState(false);
+  const [showAllModels, setShowAllModels] = useRemembered("step.dictation.allModels", false);
   const [dictateShortcut, setDictateShortcut] = useState("Alt+D");
 
   useEffect(() => {

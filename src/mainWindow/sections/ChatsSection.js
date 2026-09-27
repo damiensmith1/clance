@@ -1,4 +1,5 @@
 import { html, useEffect, useMemo, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { useRemembered } from "../state/remember.js";
 import { Icon, Logo } from "../../shared/icons.js";
 import { SessionPeek } from "../components/SessionPeek.js";
 
@@ -202,24 +203,28 @@ export function MenuItem({ title, detail, shortcut, active, disabled, onSelect }
 }
 
 export function ChatsListSection({ onOpenChat, onNewChat }) {
-  const [sessions, setSessions] = useState([]);
-  const [agents, setAgents] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState("all");
+  // What the page was showing and what the person was doing — the lists, the
+  // search, the filter, the selected row, an open peek — survives the tab
+  // being moved or switched away from (see state/remember.js). The lists are
+  // re-read as usual; they just don't start empty.
+  const [sessions, setSessions] = useRemembered("sessions.sessions", []);
+  const [agents, setAgents] = useRemembered("sessions.agents", []);
+  const [loading, setLoading] = useRemembered("sessions.loading", true);
+  const [query, setQuery] = useRemembered("sessions.query", "");
+  const [filter, setFilter] = useRemembered("sessions.filter", "all");
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
-  const [selectedKey, setSelectedKey] = useState(null);
-  const [recentDirs, setRecentDirs] = useState([]);
-  const [defaultDirectory, setDefaultDirectory] = useState(null);
+  const [selectedKey, setSelectedKey] = useRemembered("sessions.selected", null);
+  const [recentDirs, setRecentDirs] = useRemembered("sessions.recentDirs", []);
+  const [defaultDirectory, setDefaultDirectory] = useRemembered("sessions.defaultDirectory", null);
   const [contextMenu, setContextMenu] = useState(null);
   // The session id the Peek overlay is showing, or null when closed.
-  const [peekId, setPeekId] = useState(null);
+  const [peekId, setPeekId] = useRemembered("sessions.peek", null);
   // Session ids kept at the top of the list. Held as one set rather than
   // read off each row, because a live agent whose transcript hasn't been
   // written yet has no SessionSummary to carry the flag.
-  const [pinnedIds, setPinnedIds] = useState(new Set());
+  const [pinnedIds, setPinnedIds] = useRemembered("sessions.pinned", () => new Set());
   const [toast, setToast] = useState(null);
   const rootRef = useRef(null);
   const searchRef = useRef(null);

@@ -1,8 +1,9 @@
 import { html, useEffect, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { useRemembered } from "../state/remember.js";
 import { Toggle } from "../components/Toggle.js";
 
 export function usePreferences() {
-  const [prefs, setPrefs] = useState(null);
+  const [prefs, setPrefs] = useRemembered("prefs", null);
   useEffect(() => {
     window.clanceApp.getPreferences().then(setPrefs);
   }, []);

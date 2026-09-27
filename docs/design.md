@@ -736,6 +736,26 @@ check and an on/off switch per tool (`config.enabledLocalTools`, default
 
 ### Shell and navigation
 
+**Tabs don't start over.** Moving a tab to another pane, splitting, or
+switching away and back unmounts its section, so anything in plain `useState`
+would reset — a search emptied, a peek closed, "Loading…" again.
+`state/remember.js`'s `useRemembered(key, initial)` is `useState` whose value
+lives module-level under a key instead, so a remount picks up where it was;
+sections use it for what the person was doing (Sessions' search, filter,
+selection and open peek; Dictation's search and range; Settings' groups) and
+for the data they last showed, which is still re-read underneath. It lasts as
+long as the app runs. Sections that need more — the editor's buffers, the
+Changes pane's per-repository memory, the terminal registry — keep their own.
+Hidden sections are *not* kept mounted: Sessions and the peek listen for keys
+window-wide, and a hidden one would answer them.
+
+The page area (`main.content`) belongs to the pane, not the tab, so it is
+keyed by tab — without that, one tab's scroll carried into the next shown in
+the same pane — and `useRememberedScroll` keeps each tab's scroll position,
+reapplying it as content settles and ignoring the scroll events its own
+restore causes. The session peek uses the same hook: it opens at the end the
+first time, and where it was left after that.
+
 `Shell.js` renders a floating launcher in the top-right corner — Sessions,
 Changes, Files, Search, Dictation, Settings, and a plain terminal — rather than a
 sidebar, so it takes no layout space. Sections are singleton tabs: opening

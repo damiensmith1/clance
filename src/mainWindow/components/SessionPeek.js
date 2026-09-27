@@ -1,4 +1,5 @@
 import { html, useEffect, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { useRemembered, useRememberedScroll } from "../state/remember.js";
 import { Icon } from "../../shared/icons.js";
 import { renderMarkdown, attachCopyHandler, loadMarkdownImages } from "../../shared/markdown.js";
 
@@ -114,10 +115,22 @@ function Turn({ turn, details }) {
 }
 
 export function SessionPeek({ sessionId, onClose, onOpen, onPopOut }) {
-  const [peek, setPeek] = useState(null);
+  // The transcript last read, whether tool output was showing, and where the
+  // reader was — so moving the Sessions tab, or switching away and back,
+  // keeps the peek where it was. The transcript is re-read either way.
+  const [peek, setPeek] = useRemembered(`peek.${sessionId}`, null);
   const [failed, setFailed] = useState(false);
-  const [details, setDetails] = useState(false);
+  const [details, setDetails] = useRemembered(`peek.${sessionId}.details`, false);
   const bodyRef = useRef(null);
+  // Opens at the end of the conversation the first time — where a session got
+  // to is the thing you peek for — and where it was left after that.
+  // (It's also the end `peekSession` keeps when a transcript is too long to
+  // send whole; scrolling up walks back in time.)
+  useRememberedScroll(bodyRef, peek ? `peek.${sessionId}` : null, {
+    onFirst: (element) => {
+      element.scrollTop = element.scrollHeight;
+    },
+  });
   // Whether the reader was at the end when they asked for tool output, so
   // expanding it can keep them there (see toggleDetails).
   const atEndRef = useRef(true);
@@ -146,14 +159,6 @@ export function SessionPeek({ sessionId, onClose, onOpen, onPopOut }) {
     bodyRef.current?.focus();
   }, []);
 
-  // Opens at the end of the conversation — where a session got to is the
-  // thing you peek for, and it's also the end that `peekSession` keeps when
-  // a transcript is too long to send whole. Scrolling up walks back in time.
-  useEffect(() => {
-    if (!peek || !bodyRef.current) return;
-    bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
-  }, [peek]);
-
   // Showing tool output grows every turn at once, which would otherwise
   // slide the page out from under whatever was being read. Someone at the
   // end stays at the end; someone who had scrolled up to a particular call
@@ -164,7 +169,14 @@ export function SessionPeek({ sessionId, onClose, onOpen, onPopOut }) {
     setDetails(!details);
   }
 
+  // Only for a toggle, not on mount: a peek coming back from a remount keeps
+  // the place it was left at.
+  const mountedRef = useRef(false);
   useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
+    }
     if (!bodyRef.current || !atEndRef.current) return;
     bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
   }, [details]);

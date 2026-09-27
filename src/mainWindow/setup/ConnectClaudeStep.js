@@ -1,10 +1,13 @@
 import { h, html, useState, useEffect } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { useRemembered } from "../state/remember.js";
 import { StatusCard } from "../components/StatusCard.js";
 
 const INSTALL_COMMAND = "curl -fsSL https://claude.ai/install.sh | bash";
 
 export function ConnectClaudeStep({ onComplete, onBack, onReady } = {}) {
-  const [status, setStatus] = useState(null);
+  // Remembered so a remount (Settings moved or re-selected) doesn't flash
+  // "checking…"; it's re-checked underneath.
+  const [status, setStatus] = useRemembered("step.claude.status", null);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);

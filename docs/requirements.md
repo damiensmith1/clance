@@ -412,6 +412,12 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - Tabs can be split into up to four panes by dragging to an edge (at most a
   2×2 grid), resized by dragging dividers, and reordered. The layout is
   restored on launch.
+- Moving a tab to another pane, or switching away from it and back, never
+  loses what it was doing. Sessions keeps its search, filter, selected row,
+  an open peek and where that peek was scrolled; Dictation its search and
+  date filter; Settings its open groups; every tab its scroll position. None
+  of them flashes back to "Loading…" — they redraw as they were and refresh
+  quietly.
 - A session with nothing in it yet is shown as "Clance Chat" — one name for
   that state, wherever it appears. A tab takes the conversation's real title
   as soon as it has one.

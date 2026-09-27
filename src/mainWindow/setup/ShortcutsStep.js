@@ -1,4 +1,5 @@
 import { h, html, useState, useEffect, useRef } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { useRemembered } from "../state/remember.js";
 
 // ---- accelerator <-> keyboard event ----
 
@@ -175,12 +176,12 @@ function glyphsFromMods(mods) {
 // ---- component ----
 
 export function ShortcutsStep({ onComplete, onBack, onReady } = {}) {
-  const [actions, setActions] = useState(null);
+  const [actions, setActions] = useRemembered("step.shortcuts.actions", null);
 
   useEffect(() => {
     if (actions !== null) onReady?.();
   }, [actions !== null]);
-  const [values, setValues] = useState({});
+  const [values, setValues] = useRemembered("step.shortcuts.values", {});
   const [recordingId, setRecordingId] = useState(null);
   const [liveGlyphs, setLiveGlyphs] = useState([]);
   const [error, setError] = useState(null);

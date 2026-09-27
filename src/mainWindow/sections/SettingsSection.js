@@ -1,4 +1,5 @@
 import { html, useEffect, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { useRemembered } from "../state/remember.js";
 import { LaunchAtLoginRow, DefaultDirectoryRow, usePreferences } from "../settings/PreferencesStep.js";
 import { ConnectClaudeStep } from "../setup/ConnectClaudeStep.js";
 import { PermissionsStep } from "../setup/PermissionsStep.js";
@@ -12,7 +13,7 @@ import { EditorSettingsRows, CommandLineRow } from "../settings/EditorSettings.j
 // command to install it; see src/main/updates.ts for why Clance doesn't
 // install updates itself.
 function UpdateCheck() {
-  const [check, setCheck] = useState(null);
+  const [check, setCheck] = useRemembered("settings.updateCheck", null);
   const [checking, setChecking] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -70,10 +71,10 @@ function UpdateCheck() {
 // that gives them to sessions (localToolsServer.ts). Collapsed by default: one
 // summary row, expanding to the server's health check and a switch per tool.
 function ClanceToolsGroup({ onReady }) {
-  const [tools, setTools] = useState(null);
-  const [status, setStatus] = useState(null);
-  const [expanded, setExpanded] = useState(false);
-  const [health, setHealth] = useState(null);
+  const [tools, setTools] = useRemembered("settings.tools", null);
+  const [status, setStatus] = useRemembered("settings.toolsStatus", null);
+  const [expanded, setExpanded] = useRemembered("settings.toolsExpanded", false);
+  const [health, setHealth] = useRemembered("settings.toolsHealth", null);
   const [checking, setChecking] = useState(false);
 
   useEffect(() => {
@@ -190,9 +191,12 @@ const REVEAL_WAIT_MS = 1000;
 
 export function SettingsSection() {
   const [prefs, setPrefs] = usePreferences();
-  const [version, setVersion] = useState(null);
+  const [version, setVersion] = useRemembered("settings.version", null);
   const [readySections, setReadySections] = useState([]);
   const [waitedLongEnough, setWaitedLongEnough] = useState(false);
+  // Once the page has been shown, coming back to it (a moved or re-selected
+  // tab) shows it at once: every section below remembers what it had.
+  const [shownBefore, setShownBefore] = useRemembered("settings.shown", false);
 
   useEffect(() => {
     window.clanceApp.getAppVersion().then(setVersion);
@@ -204,7 +208,10 @@ export function SettingsSection() {
     return () => setReadySections((current) => (current.includes(id) ? current : [...current, id]));
   }
 
-  const revealed = waitedLongEnough || (prefs && SECTIONS.every((id) => readySections.includes(id)));
+  const revealed = shownBefore || waitedLongEnough || (prefs && SECTIONS.every((id) => readySections.includes(id)));
+  useEffect(() => {
+    if (revealed && !shownBefore) setShownBefore(true);
+  }, [revealed]);
 
   return html`
     <div class="section-page ${revealed ? "" : "settings-pending"}">

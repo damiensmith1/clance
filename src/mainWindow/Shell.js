@@ -4,6 +4,7 @@ import { ChatsListSection, MenuItem, focusSessionSearch } from "./sections/Chats
 import { ChangesSection } from "./sections/ChangesSection.js";
 import { FilesSection } from "./sections/FilesSection.js";
 import { SearchSection, focusSearchInput } from "./sections/SearchSection.js";
+import { useRememberedScroll } from "./state/remember.js";
 import { FileSection } from "./sections/FileSection.js";
 import { SettingsSection } from "./sections/SettingsSection.js";
 import { DictationSection } from "./sections/DictationSection.js";
@@ -514,6 +515,13 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
     : [];
   const showLauncher = node.id === launcher.topRightPaneId;
   const tabListRef = useRef(null);
+  // The page area scrolls for section tabs (Sessions, Dictation, Settings).
+  // It belongs to the pane, not the tab, so it's keyed by tab below — one
+  // tab's scroll must not carry into the next — and each tab's position is
+  // remembered, so switching back or moving the tab to another pane lands
+  // where it was.
+  const contentRef = useRef(null);
+  useRememberedScroll(contentRef, activeTab ? `tab.${activeTab.id}` : null);
   // Labels come off when there isn't room for them, rather than being cut
   // to two letters and an ellipsis.
   const [compact, setCompact] = useState(false);
@@ -762,7 +770,11 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
       </div>
       ${menu && renderTabMenu()}
       ${showLauncher && launcher.banner}
-      <main class="content ${FLUSH_TAB_TYPES.has(activeTab?.type) ? "content-flush" : ""}">
+      <main
+        key=${activeTab?.id}
+        ref=${contentRef}
+        class="content ${FLUSH_TAB_TYPES.has(activeTab?.type) ? "content-flush" : ""}"
+      >
         ${activeTab &&
         renderTabContent(
           activeTab,
