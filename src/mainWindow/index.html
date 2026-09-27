@@ -209,6 +209,40 @@
       .tab-active .tab-close {
         visibility: visible;
       }
+      /* A file with unsaved edits: a dot where the ✕ goes, turning back into
+         the ✕ under the pointer, as in every macOS editor. */
+      .tab-close-x {
+        display: flex;
+      }
+      .tab-dirty-dot {
+        display: none;
+        width: 12px;
+        height: 12px;
+        align-items: center;
+        justify-content: center;
+      }
+      .tab-dirty-dot::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--text-secondary);
+      }
+      .tab-dirty .tab-close {
+        visibility: visible;
+      }
+      .tab-dirty .tab-close .tab-close-x {
+        display: none;
+      }
+      .tab-dirty .tab-close .tab-dirty-dot {
+        display: flex;
+      }
+      .tab-dirty .tab-close:hover .tab-close-x {
+        display: flex;
+      }
+      .tab-dirty .tab-close:hover .tab-dirty-dot {
+        display: none;
+      }
 
       .content {
         flex: 1;
@@ -1602,6 +1636,20 @@
         font-size: var(--text-sm);
         color: var(--text-secondary);
       }
+      .preference-select {
+        flex-shrink: 0;
+        padding: var(--space-1) var(--space-2);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-sm);
+        background: var(--surface-card);
+        color: var(--text-primary);
+        font-family: var(--font-sans);
+        font-size: var(--text-sm);
+      }
+      .preference-warning {
+        margin-top: var(--space-1);
+        color: var(--warning);
+      }
 
       /* Shortcut recorder. The field is a button rather than a text input:
          the combination is captured from real keypresses, never typed. */
@@ -2320,16 +2368,6 @@
         font-size: var(--text-xs);
         color: var(--text-tertiary);
       }
-      .file-source {
-        margin: 0;
-        padding: var(--space-4);
-        font-family: var(--font-mono);
-        font-size: var(--text-sm);
-        line-height: 1.6;
-        color: var(--text-primary);
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
       /* ---- Files explorer (see docs/design.md's "Files explorer") ------
          A sidecar like the Changes pane, so it borrows its column metrics.
          The tree is the only scrolling part; the header stays put. */
@@ -2448,6 +2486,61 @@
       .files-row-ignored {
         color: var(--text-tertiary);
       }
+      /* Writing in the tree: header buttons, inline names, drop targets. */
+      .files-bar-actions {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        margin-left: auto;
+        flex-shrink: 0;
+      }
+      .files-bar-button {
+        display: flex;
+        align-items: center;
+        gap: 1px;
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+      .files-bar-button:hover {
+        color: var(--text-primary);
+      }
+      /* A div, not a button like the other rows, so it needs the sizing a
+         button gets for free. */
+      .files-row-editing {
+        box-sizing: border-box;
+        cursor: default;
+      }
+      .files-name-input {
+        flex: 1;
+        min-width: 0;
+        margin: 1px var(--space-1) 1px 0;
+        padding: 1px var(--space-1);
+        border: 1px solid var(--signal);
+        border-radius: var(--radius-sm);
+        background: var(--surface-card);
+        color: var(--text-primary);
+        font-family: var(--font-sans);
+        font-size: var(--text-sm);
+        outline: none;
+      }
+      .files-row-drop,
+      .files-tree-drop {
+        background: var(--signal-soft);
+      }
+      .files-row-dragging {
+        opacity: 0.5;
+      }
+      .files-conflict {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+        color: var(--text-primary);
+      }
+      .files-conflict-actions {
+        display: flex;
+        gap: var(--space-1);
+      }
       .files-row-twist {
         display: flex;
         align-items: center;
@@ -2456,6 +2549,167 @@
         width: 12px;
         color: var(--text-tertiary);
       }
+      /* ---- Find in Files (see docs/design.md's "Search") ---- */
+      .search-pane {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-width: 0;
+        height: 100%;
+        min-height: 0;
+      }
+      .search-form {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        flex-shrink: 0;
+        padding: var(--space-2) var(--space-2) var(--space-1) var(--space-3);
+      }
+      .search-field {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        padding: 0 var(--space-1) 0 var(--space-2);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-sm);
+        background: var(--surface-card);
+      }
+      .search-field:focus-within {
+        border-color: var(--signal);
+      }
+      .search-field-icon {
+        display: flex;
+        color: var(--text-tertiary);
+      }
+      /* The global input style draws its own box; inside .search-field the
+         field is the box. */
+      .search-input {
+        flex: 1;
+        min-width: 0;
+        padding: var(--space-1) var(--space-1);
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+        background: transparent;
+        color: var(--text-primary);
+        font-family: var(--font-sans);
+        font-size: var(--text-sm);
+        outline: none;
+      }
+      .search-glob {
+        flex: none;
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-sm);
+        background: var(--surface-card);
+        padding: var(--space-1) var(--space-2);
+        font-size: var(--text-xs);
+      }
+      .search-toggle {
+        flex-shrink: 0;
+        min-width: 22px;
+        padding: 1px var(--space-1);
+        border: none;
+        border-radius: var(--radius-sm);
+        background: none;
+        color: var(--text-tertiary);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        cursor: pointer;
+      }
+      .search-toggle:hover {
+        background: var(--surface-hover);
+      }
+      .search-toggle.is-on {
+        background: var(--surface-active);
+        color: var(--text-primary);
+      }
+      .search-check {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .search-summary {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        padding: 2px 0;
+      }
+      .search-summary-error {
+        color: var(--danger);
+      }
+      .search-results {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding-bottom: var(--space-3);
+      }
+      .search-file,
+      .search-line {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+        width: 100%;
+        min-height: 22px;
+        border: none;
+        background: none;
+        text-align: left;
+        cursor: pointer;
+        color: var(--text-primary);
+      }
+      .search-file {
+        padding: 0 var(--space-2) 0 var(--space-2);
+        font-family: var(--font-sans);
+        font-size: var(--text-sm);
+      }
+      .search-file:hover,
+      .search-line:hover {
+        background: var(--surface-hover);
+      }
+      .search-file-name {
+        flex-shrink: 0;
+        font-weight: var(--weight-medium);
+      }
+      .search-file-dir {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .search-file-count {
+        margin-left: auto;
+        flex-shrink: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .search-line {
+        padding: 0 var(--space-2) 0 26px;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+      }
+      .search-line-no {
+        flex-shrink: 0;
+        min-width: 3ch;
+        text-align: right;
+        color: var(--text-tertiary);
+      }
+      .search-line-text {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: pre;
+      }
+      .search-line-text mark {
+        background: var(--warning-bg);
+        color: inherit;
+        outline: 1px solid var(--warning);
+        border-radius: 2px;
+      }
+
       .files-chevron {
         display: flex;
         transition: transform 90ms ease;
@@ -3111,72 +3365,87 @@
         min-height: 0;
         overflow: auto;
       }
-      /* Width auto, so it fills the pane and tracks it as the pane is
-         resized; min-width max-content, so a line longer than the pane makes
-         it scroll instead of wrapping. `width: max-content` here instead
-         shrink-wrapped to the longest line and left a changed line's tint
-         stopping halfway across the pane. */
-      .file-lines {
-        position: relative;
+      /* ---- Editor (see docs/design.md's "Editor") ---- */
+      .file-view {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+      }
+      .editor-host {
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+      }
+      .editor-host .cm-editor {
+        height: 100%;
+      }
+      .editor-host .cm-editor.cm-focused {
+        outline: none;
+      }
+      .file-dirty {
+        flex-shrink: 0;
         font-family: var(--font-mono);
         font-size: var(--text-xs);
-        min-width: max-content;
+        color: var(--signal);
       }
-      .fileline {
+      .file-banner {
         display: flex;
         align-items: center;
-        width: 100%;
-        white-space: pre;
-      }
-      /* Sticky, so scrolling a long line sideways doesn't lose the margin. */
-      .fileline-no {
-        position: sticky;
-        left: 0;
+        gap: var(--space-2);
         flex-shrink: 0;
-        padding-right: var(--space-2);
-        text-align: right;
-        color: var(--text-tertiary);
-        background: var(--app-bg);
-        user-select: none;
-      }
-      .fileline-mark {
-        width: 2ch;
-        flex-shrink: 0;
-        text-align: center;
-        color: var(--text-tertiary);
-        user-select: none;
-      }
-      .fileline-text {
-        padding-right: var(--space-4);
+        padding: var(--space-2) var(--space-3);
+        border-bottom: 1px solid var(--surface-border);
+        font-size: var(--text-md);
+        background: var(--warning-bg);
         color: var(--text-primary);
       }
-      .fileline-add {
-        background: var(--diff-add-bg);
-      }
-      .fileline-add .fileline-no {
-        background: var(--diff-add-bg);
-      }
-      .fileline-add .fileline-mark {
-        color: var(--diff-add-mark);
-      }
-      .fileline-del {
+      .file-banner-danger {
         background: var(--diff-del-bg);
       }
-      .fileline-del .fileline-no {
-        background: var(--diff-del-bg);
+      .file-fallback {
+        flex-direction: column;
+        gap: var(--space-2);
       }
-      .fileline-del .fileline-mark {
-        color: var(--diff-del-mark);
-      }
-      .fileline-hunk {
-        background: var(--diff-hunk-bg);
-      }
-      .file-truncated {
+      .file-fallback p {
         margin: 0;
-        padding: var(--space-3);
-        font-family: var(--font-sans);
-        font-size: var(--text-sm);
+      }
+      .file-fallback-actions {
+        display: flex;
+        gap: var(--space-2);
+        margin-top: var(--space-2);
+      }
+      .file-compare {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+      }
+      .file-compare-head {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        border-bottom: 1px solid var(--surface-border);
+      }
+      .file-compare-side {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
         color: var(--text-tertiary);
+        flex: 1;
+      }
+      .file-compare-body {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+      }
+      .file-compare-body .cm-mergeView {
+        height: 100%;
+      }
+      .file-compare-body .cm-merge-revert button {
+        cursor: pointer;
       }
 
       /* Syntax tokens (see src/shared/syntax.js). */

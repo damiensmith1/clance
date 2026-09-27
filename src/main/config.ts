@@ -31,6 +31,20 @@ export type ClanceConfig = {
   // into what's already there.
   enabledLocalTools: string[] | "all";
   dictation: DictationConfig;
+  // Folders the person put Clance in through something the main process
+  // owns — a folder picked in a dialog, a file or folder opened from Finder
+  // or `clance`. The editor and file operations write only inside these (and
+  // the other places roots.ts trusts); see docs/design.md's "Saving".
+  writableRoots: string[];
+  editor: EditorConfig;
+};
+
+export type EditorConfig = {
+  fontSize: number;
+  // The indent a file with none of its own gets; a file's own indentation is
+  // detected and wins.
+  tabSize: number;
+  wrap: boolean;
 };
 
 // Dictation settings (see docs/design.md's "Dictation"). `activeModel` null means no
@@ -75,6 +89,8 @@ const DEFAULT_DICTATION: DictationConfig = {
   inputDevice: null,
 };
 
+const DEFAULT_EDITOR: EditorConfig = { fontSize: 13, tabSize: 2, wrap: false };
+
 const DEFAULT_CONFIG: ClanceConfig = {
   shortcuts: { togglePopup: "Alt+Space", dictate: "Alt+D" },
   shortcutsConfigured: false,
@@ -84,6 +100,8 @@ const DEFAULT_CONFIG: ClanceConfig = {
   lastFolder: null,
   enabledLocalTools: "all",
   dictation: DEFAULT_DICTATION,
+  writableRoots: [],
+  editor: DEFAULT_EDITOR,
 };
 
 export function readConfig(): ClanceConfig {
@@ -103,6 +121,7 @@ export function readConfig(): ClanceConfig {
       // before a dictation setting existed would otherwise replace the
       // whole object and drop the new key's default.
       dictation: { ...DEFAULT_DICTATION, ...stored.dictation },
+      editor: { ...DEFAULT_EDITOR, ...stored.editor },
     };
   } catch {
     return DEFAULT_CONFIG;
@@ -148,4 +167,24 @@ export function setLastFolder(root: string | null): void {
   const config = readConfig();
   config.lastFolder = root;
   writeConfig(config);
+}
+
+const MAX_WRITABLE_ROOTS = 200;
+
+/** Most recent first, deduped and capped, like recent directories. */
+export function addWritableRoot(dir: string): void {
+  const config = readConfig();
+  config.writableRoots = [dir, ...config.writableRoots.filter((d) => d !== dir)].slice(0, MAX_WRITABLE_ROOTS);
+  writeConfig(config);
+}
+
+export function setEditorConfig(patch: Partial<EditorConfig>): EditorConfig {
+  const config = readConfig();
+  const next = { ...config.editor };
+  if (typeof patch.fontSize === "number" && patch.fontSize >= 9 && patch.fontSize <= 32) next.fontSize = patch.fontSize;
+  if (typeof patch.tabSize === "number" && [2, 4, 8].includes(patch.tabSize)) next.tabSize = patch.tabSize;
+  if (typeof patch.wrap === "boolean") next.wrap = patch.wrap;
+  config.editor = next;
+  writeConfig(config);
+  return next;
 }

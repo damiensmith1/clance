@@ -105,7 +105,7 @@ type GitRun = { stdout: string; stderr: string; code: number };
  * part of their normal contract (`diff --no-index` returns 1 when the files
  * differ, which is every time it's called).
  */
-async function git(cwd: string, args: string[], maxBuffer = MAX_DIFF_BYTES): Promise<GitRun> {
+export async function git(cwd: string, args: string[], maxBuffer = MAX_DIFF_BYTES): Promise<GitRun> {
   try {
     const { stdout, stderr } = await execFileAsync("git", ["--no-pager", ...args], {
       cwd,
@@ -124,7 +124,7 @@ async function git(cwd: string, args: string[], maxBuffer = MAX_DIFF_BYTES): Pro
   }
 }
 
-function isDirectory(path: unknown): path is string {
+export function isDirectory(path: unknown): path is string {
   if (typeof path !== "string" || !isAbsolute(path)) return false;
   try {
     return statSync(path).isDirectory();
@@ -702,33 +702,9 @@ export async function listRepos(candidates: unknown): Promise<RepoChoice[]> {
   return repos;
 }
 
-// ---- whole files -----------------------------------------------------------
+// ---- files (shared with documents.ts and files.ts) --------------------------
 
-/** A file view stops here rather than handing the renderer something it can't draw. */
-const MAX_FILE_LINES = 20000;
-/** Full-context diffs are much larger than hunk diffs, so they get their own ceiling. */
-const MAX_FILE_BYTES = 16 * 1024 * 1024;
-
-export type FileView = {
-  path: string;
-  /** For the highlighter — the extension, lowercased, with no dot. */
-  language: string;
-  /**
-   * A second way of showing this same text, if it has one. The tab offers
-   * Rendered / Raw when it's set; null means the text is the only view there
-   * is. A capability the reader declares, not something every file has.
-   */
-  renders: "markdown" | null;
-  /** The whole file, with deleted lines put back where they were. */
-  lines: DiffLine[];
-  /** Whether this file differs from the last commit at all. */
-  changed: boolean;
-  binary: boolean;
-  omitted: string | null;
-  truncated: boolean;
-};
-
-function languageOf(path: string): string {
+export function languageOf(path: string): string {
   const name = path.split("/").pop() ?? "";
   const dot = name.lastIndexOf(".");
   if (dot <= 0) {
@@ -738,7 +714,7 @@ function languageOf(path: string): string {
   return name.slice(dot + 1).toLowerCase();
 }
 
-function looksBinary(buffer: Buffer): boolean {
+export function looksBinary(buffer: Buffer): boolean {
   return buffer.subarray(0, 8192).includes(0);
 }
 
@@ -783,44 +759,6 @@ function gitWithInput(cwd: string, args: string[], input: string, maxBuffer: num
   });
 }
 
-/** Every line of a plain file, as context — nothing about it changed. */
-function readWholeFile(root: string, path: string, kind: DiffLine["kind"]): Omit<FileView, "path" | "language" | "changed" | "renders"> {
-  return readWholeFileAt(join(root, path), kind);
-}
-
-/**
- * The same read, given an absolute path that has already been checked. Files
- * reached through the Files explorer may sit outside any repository, where
- * there is no `ls-files` to vouch for them, so containment is the caller's
- * job (see `containedFile`) and this only reads.
- */
-function readWholeFileAt(full: string, kind: DiffLine["kind"]): Omit<FileView, "path" | "language" | "changed" | "renders"> {
-  let buffer: Buffer;
-  try {
-    if (statSync(full).size > MAX_FILE_BYTES) {
-      return { lines: [], binary: false, omitted: "File is too large to show", truncated: false };
-    }
-    buffer = readFileSync(full);
-  } catch {
-    return { lines: [], binary: false, omitted: "File could not be read", truncated: false };
-  }
-  if (looksBinary(buffer)) return { lines: [], binary: true, omitted: "Binary file", truncated: false };
-
-  const text = buffer.toString("utf8");
-  const raw = text.split("\n");
-  // A file ending in a newline splits into a trailing "" that isn't a line.
-  if (raw.length > 0 && raw[raw.length - 1] === "") raw.pop();
-  const truncated = raw.length > MAX_FILE_LINES;
-  const kept = truncated ? raw.slice(0, MAX_FILE_LINES) : raw;
-  const lines: DiffLine[] = kept.map((line, index) => ({
-    kind,
-    text: line,
-    oldLine: kind === "add" ? null : index + 1,
-    newLine: kind === "del" ? null : index + 1,
-  }));
-  return { lines, binary: false, omitted: null, truncated };
-}
-
 /** How many paths go to one `check-ignore`. A directory can hold thousands. */
 const CHECK_IGNORE_CHUNK = 500;
 
@@ -834,7 +772,7 @@ const CHECK_IGNORE_CHUNK = 500;
  * link sitting inside the folder and pointing at ~/.ssh/id_rsa passes every
  * test that can be made on the path as text.
  */
-function containedFile(root: unknown, path: unknown): string | null {
+export function containedFile(root: unknown, path: unknown): string | null {
   if (!isDirectory(root) || typeof path !== "string" || !path) return null;
   if (path.startsWith("/") || path.split("/").includes("..")) return null;
   try {
@@ -845,14 +783,6 @@ function containedFile(root: unknown, path: unknown): string | null {
   } catch {
     return null;
   }
-}
-
-/** A file read from a folder that isn't a repository: all context, no diff. */
-function readPlainFileView(dir: unknown, path: unknown): FileView | null {
-  const full = containedFile(dir, path);
-  if (full === null || typeof path !== "string") return null;
-  const language = languageOf(path);
-  return { path, language, renders: rendersAs(language), changed: false, ...readWholeFileAt(full, "context") };
 }
 
 /**
@@ -886,45 +816,8 @@ export async function checkIgnore(root: string, paths: string[]): Promise<Set<st
   return ignored;
 }
 
-/**
- * What a file tab is handed. A file is drawn by a *reader* chosen from its
- * path, and text is the first one rather than the shape of the feature: an
- * image has no lines, no diff, and nothing to say about a 20,000-line
- * ceiling. A reader returns its own payload and the tab draws whichever it
- * got, so adding one later means writing a reader rather than reworking file
- * tabs.
- *
- * "No reader" isn't a failure — it's the fallback, and it says what it can
- * about the file rather than apologising for it. Readers are added to this
- * union in the codebase; nothing here is loaded from a user's disk.
- *
- * A reader never executes what it reads. File content is data: it is drawn,
- * never turned into markup. SVG and HTML both carry script, and Files browses
- * any folder on the machine.
- */
-export type FileOpen =
-  | { reader: "text"; view: FileView }
-  | {
-      reader: "image";
-      path: string;
-      /** A data URL. An image is *drawn*, never injected as markup — an
-       *  `<img>` can't run the script an SVG is allowed to carry. */
-      dataUrl: string;
-      /** SVG has a text source worth reading; a PNG doesn't. */
-      source: string | null;
-      bytes: number;
-    }
-  | { reader: "none"; path: string; bytes: number | null; reason: string };
-
-/** Which extensions have a rendered view as well as a raw one. */
-function rendersAs(language: string): "markdown" | null {
-  return language === "md" || language === "markdown" || language === "mdown" || language === "mkd"
-    ? "markdown"
-    : null;
-}
-
 /** Extensions the image reader claims, and the type each is drawn as. */
-const IMAGE_TYPES: Record<string, string> = {
+export const IMAGE_TYPES: Record<string, string> = {
   png: "image/png",
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
@@ -937,145 +830,10 @@ const IMAGE_TYPES: Record<string, string> = {
 };
 
 /**
- * The image reader's own ceiling. Limits belong to a reader: 20,000 lines
- * means nothing to a photograph, and 16 MB of text is a pathological file
- * while 16 MB of camera output is a Tuesday.
+ * The image ceiling. Limits belong to a kind of file: 16 MB of text is a
+ * pathological file, while 16 MB of camera output is a Tuesday.
  */
-const MAX_IMAGE_BYTES = 24 * 1024 * 1024;
-
-async function readImage(dir: unknown, path: string, mime: string): Promise<FileOpen | null> {
-  const root = (await findRepoRoot(dir)) ?? (isDirectory(dir) ? dir : null);
-  if (!root) return null;
-  const full = containedFile(root, path);
-  if (!full) return null;
-  try {
-    const bytes = statSync(full).size;
-    if (bytes > MAX_IMAGE_BYTES) {
-      return { reader: "none", path, bytes, reason: "Image is too large to show" };
-    }
-    const buffer = readFileSync(full);
-    return {
-      reader: "image",
-      path,
-      dataUrl: `data:${mime};base64,${buffer.toString("base64")}`,
-      source: mime === "image/svg+xml" ? buffer.toString("utf8") : null,
-      bytes,
-    };
-  } catch {
-    return null;
-  }
-}
-
-/** Picks the reader for a file and reads it. One place a path is checked. */
-export async function openFileView(dir: unknown, path: unknown): Promise<FileOpen | null> {
-  // The reader is chosen from the path, before anything tries to read the
-  // file as text — an image read as text is 20,000 lines of noise.
-  if (typeof path === "string") {
-    const mime = IMAGE_TYPES[languageOf(path)];
-    // An "image" that won't read as one falls through and is treated like
-    // any other file rather than reported as missing.
-    if (mime) {
-      const image = await readImage(dir, path, mime);
-      if (image) return image;
-    }
-  }
-  const view = await getFileView(dir, path);
-  if (!view) return null;
-  if (!view.binary) return { reader: "text", view };
-  const root = (await findRepoRoot(dir)) ?? (isDirectory(dir) ? dir : null);
-  let bytes: number | null = null;
-  if (root) {
-    try {
-      bytes = statSync(join(root, view.path)).size;
-    } catch {
-      bytes = null;
-    }
-  }
-  return { reader: "none", path: view.path, bytes, reason: "No reader for this kind of file" };
-}
-
-/**
- * A whole file, with its changes in place — what a file tab shows. The tab's
- * "show diff" toggle is a rendering choice over this one payload: hiding the
- * deleted lines leaves exactly the working-tree file, so both views come from
- * a single read and can't disagree with each other.
- *
- * The trick is `-U` with a context size larger than any real file, which makes
- * git emit the entire file as one hunk instead of islands around each change.
- */
-export async function getFileView(dir: unknown, path: unknown): Promise<FileView | null> {
-  const root = await findRepoRoot(dir);
-  // Not a repository. There is no diff to show and no `ls-files` to say what
-  // belongs here, so the file is read straight from disk and the tab gets a
-  // view that is all context — which is what makes its Diff / Clean toggle
-  // disappear rather than appear with one working side.
-  if (!root) return readPlainFileView(dir, path);
-  if (typeof path !== "string" || !path || path.startsWith("/") || path.includes("..")) return null;
-
-  const status = await getStatus(root);
-  const file = status?.files.find((f) => f.path === path);
-  const language = languageOf(path);
-  const base = { path, language, renders: rendersAs(language) };
-
-  // Not in the status listing: an ordinary file nobody has touched. It still
-  // has to be inside the repo, which `ls-files` is the authority on.
-  if (!file) {
-    const known = await git(root, ["--no-optional-locks", "ls-files", "--error-unmatch", "-z", "--", path], 64 * 1024);
-    if (known.code !== 0) {
-      // A file git ignores (the Files tree lists those) isn't in `ls-files`
-      // either. It has no diff, so it reads like a file outside any
-      // repository — with the same resolved-path containment check that
-      // stands in for `ls-files` there.
-      const ignored = readPlainFileView(root, path);
-      if (ignored) return ignored;
-      // Not in this tree. A file tab open across a branch switch lands here,
-      // and "isn't in this repository any more" would be a lie — the file is
-      // fine, it just doesn't exist on the branch now checked out.
-      if (await knownToHistory(root, path)) {
-        return { ...base, changed: false, lines: [], binary: false, omitted: "Not on this branch", truncated: false };
-      }
-      return null;
-    }
-    return { ...base, changed: false, ...readWholeFile(root, path, "context") };
-  }
-
-  if (file.binary) return { ...base, changed: true, lines: [], binary: true, omitted: "Binary file", truncated: false };
-
-  // A file with nothing behind it in HEAD is all addition; a deleted one is
-  // all removal, and its content only exists in the last commit.
-  if (file.status === "untracked" || !status?.head) {
-    return { ...base, changed: true, ...readWholeFile(root, path, "add") };
-  }
-  if (file.status === "deleted") {
-    const run = await git(root, ["--no-optional-locks", "show", `HEAD:${path}`], MAX_FILE_BYTES);
-    if (run.code !== 0) return { ...base, changed: true, lines: [], binary: false, omitted: "Deleted file", truncated: false };
-    const raw = run.stdout.split("\n");
-    if (raw.length > 0 && raw[raw.length - 1] === "") raw.pop();
-    const truncated = raw.length > MAX_FILE_LINES;
-    const kept = truncated ? raw.slice(0, MAX_FILE_LINES) : raw;
-    return {
-      ...base,
-      changed: true,
-      lines: kept.map((text, index) => ({ kind: "del" as const, text, oldLine: index + 1, newLine: null })),
-      binary: false,
-      omitted: null,
-      truncated,
-    };
-  }
-
-  const args = file.from
-    ? ["--no-optional-locks", "diff", `-U${MAX_FILE_LINES}`, `HEAD:${file.from}`, "--", path]
-    : ["--no-optional-locks", "diff", `-U${MAX_FILE_LINES}`, "HEAD", "--", path];
-  const run = await git(root, args, MAX_FILE_BYTES);
-  if (run.code !== 0) {
-    return { ...base, changed: true, lines: [], binary: false, omitted: run.stderr.trim() || "Could not read the file", truncated: false };
-  }
-  const { lines, truncated } = parseUnifiedDiff(run.stdout, MAX_FILE_LINES);
-  // git reports the file as changed but the diff came back empty — a mode
-  // change, say. The file itself is still worth showing.
-  if (lines.length === 0) return { ...base, changed: false, ...readWholeFile(root, path, "context") };
-  return { ...base, changed: true, lines, binary: false, omitted: null, truncated };
-}
+export const MAX_IMAGE_BYTES = 24 * 1024 * 1024;
 
 /**
  * Every file in the repo, for the open-by-name palette. Tracked files plus
@@ -1259,7 +1017,7 @@ export async function listBranches(dir: unknown): Promise<GitBranch[]> {
  * genuinely gone. Only asked when the path isn't in the current tree, so it
  * never costs anything in the normal case.
  */
-async function knownToHistory(root: string, path: string): Promise<boolean> {
+export async function knownToHistory(root: string, path: string): Promise<boolean> {
   const run = await git(
     root,
     ["--no-optional-locks", "rev-list", "--all", "--max-count=1", "--", path],

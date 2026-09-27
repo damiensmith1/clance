@@ -16,6 +16,9 @@ cask "clance" do
   depends_on macos: :ventura
 
   app "Clance.app"
+  # `clance .` / `clance <file>` — opens files and folders in Clance, like
+  # `code .`. The script lives inside the app; see packaging/bin/clance.
+  binary "#{appdir}/Clance.app/Contents/Resources/bin/clance"
 
   # Homebrew quarantines every cask download, and Clance isn't notarized
   # (notarization needs a paid Apple Developer membership). Left quarantined,

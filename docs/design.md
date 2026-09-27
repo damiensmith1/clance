@@ -42,6 +42,8 @@ anything open-ended is handed to a Claude Code session. See "Assistant".
 | Reasoning, tools, session storage | The `claude` CLI, as background agents | See "Sessions" |
 | Terminal | `node-pty` + `xterm.js` (vendored under `src/shared/vendor/xterm/`) | |
 | Main window UI | Preact + htm, vendored as one standalone module | No CDN, no build step |
+| Editor | CodeMirror 6, bundled once into `src/shared/vendor/codemirror.mjs` | See "Editor" |
+| Search | ripgrep (`@vscode/ripgrep-darwin-arm64`) | See "Search" |
 | Markdown | `markdown-it` + five of its plugins, and `DOMPurify` (vendored as ES modules under `src/shared/vendor/markdown/`) | See "Readers" |
 | Hotkeys | Electron `globalShortcut` | No key-up events, hence press-to-toggle dictation |
 | Keyboard/mouse/window access | `@nut-tree-fork/nut-js` | Needs Accessibility |
@@ -60,7 +62,7 @@ which is also the working directory for sessions that have no project:
 
 | Path | Contents | Owner |
 |---|---|---|
-| `config.json` | Shortcuts, default directory, recent directories, the Changes pane's last repo, enabled local tools, dictation settings | `config.ts` |
+| `config.json` | Shortcuts, default directory, recent directories, the Changes pane's last repo, the Files folder, enabled local tools, dictation settings, editor settings, writable roots | `config.ts` |
 | `archived-sessions.json` | Archived session ids | `archivedSessions.ts` |
 | `window-layout.json` | Main window pane/tab tree; tabs for sections that no longer exist are dropped on restore | `windowLayout.ts` |
 | `pool.json` | The pre-warmed popup session | `agentPool.ts` |
@@ -735,7 +737,7 @@ check and an on/off switch per tool (`config.enabledLocalTools`, default
 ### Shell and navigation
 
 `Shell.js` renders a floating launcher in the top-right corner — Sessions,
-Changes, Dictation, Settings, and a plain terminal — rather than a
+Changes, Files, Search, Dictation, Settings, and a plain terminal — rather than a
 sidebar, so it takes no layout space. Sections are singleton tabs: opening
 one that's already open focuses it, in whichever pane it's in. The terminal
 button opens `$SHELL -il` in the default directory.
@@ -1034,8 +1036,9 @@ pressing the thing that opened it is a trap.
 
 ### Files explorer
 
-`sections/FilesSection.js` over `src/main/files.ts`. A sidecar like Changes,
-and read-only like it, but pointed at a *folder* rather than a repository:
+`sections/FilesSection.js` over `src/main/files.ts` (listing) and
+`src/main/fileOps.ts` (writing — see "Editor"). A sidecar like Changes, but
+pointed at a *folder* rather than a repository:
 ⌘P is a recall tool that needs a filename already, and looking around a
 project is a different act from remembering a file in it.
 
@@ -1078,11 +1081,9 @@ them apart, and the second one quietly puts `node_modules` on screen. The
 tree then lists everything and says why.
 
 **Ignored files.** The tree lists them by default (dimmed), since it's for
-looking around a folder, not recalling a tracked file. Opening one can't go
-through `ls-files`, which doesn't name ignored paths, so `getFileView` falls
-back to `readPlainFileView` against the repository root — the same
-`realpath` containment check a non-repository folder gets — before deciding
-the path is missing or only in history.
+looking around a folder, not recalling a tracked file. One opens like any
+other file — `readDocument` contains every path by resolving it, not by
+asking `ls-files` — with nothing to diff against.
 
 **Opening a file.** `resolveFile` returns the `(root, path)` a file tab opens
 with, and a file inside a repository resolves against the *repository* rather
@@ -1098,38 +1099,28 @@ Dotfiles are the one thing a file tree must not misspell.
 
 ### File tabs
 
-`sections/FileSection.js`. Clance is a read-only viewer over the code its
-sessions write: the person's job is reading, and reading a change means
-reading the code around it, which a diff alone can't give. So a file opens as
-an ordinary tab — draggable into a split, one per file, keyed
-`file:<root>:<path>` so opening the same file twice focuses the tab that is
-already there.
+`sections/FileSection.js`. A file opens as an ordinary tab — draggable into a
+split, one per file, keyed `file:<root>:<path>` so opening the same file twice
+focuses the tab that is already there. What the tab shows and whether it can
+be edited is decided by a file-type handler (see "Editor"), over a document
+the main process read (`documents.ts`).
 
-**Readers.** A tab draws whatever `openFileView` hands it, not a file it
-assumes is text. There are three: text with syntax highlighting and diff
-marks, images, and markdown. The envelope is a union, so a table over a CSV
-or a JSON tree is a new arm of it rather than a rework of file tabs. The
-shape had to change before the second reader could exist at all: a file view
-was a list of `DiffLine`s with a binary flag and a 20,000-line ceiling, none
-of which an image has an answer for.
-
-Markdown is the cheap case and shows why the split is where it is. It isn't
-a separate payload — it is the text reader with `renders: "markdown"` set, so
-Raw keeps the diff marks and Rendered is a second view over the same read,
-the way Diff / Clean already was. `shared/markdown.js` does the rendering, on **markdown-it** with its
-footnote, deflist, mark, sub and sup plugins, all vendored as dependency-free
-ES modules. It replaced a hand-rolled renderer from the old chat UI, and the
-reason is the opposite of `syntax.js`'s: highlighting is allowed to be wrong
-(an uncoloured word), but a markdown parser that is wrong loses structure —
-nested lists flattened into one line, a blockquote shown as `>` characters.
-CommonMark's edge cases are the whole job, and a tested parser has them.
-What markdown-it doesn't do are small rules in `markdown.js`: front matter
-(shown as its own source with keys picked out, never evaluated as YAML), callouts
-(`> [!NOTE]`, Obsidian's `> [!info] Title`), task-list checkboxes, GitHub
-heading ids, and Obsidian's `[[wikilinks]]` (shown, not followed — they name
-a note in a vault, not a path), `#tags` and `%%comments%%`. Code blocks go
-through `syntax.js`, with fence names mapped onto its extensions; a `diff`
-block is coloured by its first column instead.
+**Markdown.** The markdown handler's Rendered view is `shared/markdown.js`, on
+**markdown-it** with its footnote, deflist, mark, sub and sup plugins, all
+vendored as dependency-free ES modules. It replaced a hand-rolled renderer
+from the old chat UI, and the reason is the opposite of `syntax.js`'s:
+highlighting is allowed to be wrong (an uncoloured word), but a markdown
+parser that is wrong loses structure — nested lists flattened into one line,
+a blockquote shown as `>` characters. CommonMark's edge cases are the whole
+job, and a tested parser has them. What markdown-it doesn't do are small
+rules in `markdown.js`: front matter (shown as its own source with keys
+picked out, never evaluated as YAML), callouts (`> [!NOTE]`, Obsidian's
+`> [!info] Title`), task-list checkboxes, GitHub heading ids, and Obsidian's
+`[[wikilinks]]` (shown, not followed — they name a note in a vault, not a
+path), `#tags` and `%%comments%%`. Code blocks go through `syntax.js`, with
+fence names mapped onto its extensions; a `diff` block is coloured by its
+first column instead. The preview renders the buffer, not the file, so it
+follows unsaved edits.
 
 **Sanitizing.** A file tab renders the document's own raw HTML, because
 READMEs are written in it. The page it lands in can reach the preload
@@ -1143,14 +1134,14 @@ namespaces (`md-`, `tok-`, `code-`, `footnote`), so a document can't borrow
 the app's overlay classes. A session peek renders with raw HTML *escaped*: a
 reply that mentions `<Shell>` without backticks should read as text.
 
-**Images.** Nothing is fetched while rendering: the sanitizer's hook moves
-every `src` — markdown images and raw `<img>` alike — to `data-md-src`, and
-drops `srcset`. `loadMarkdownImages` then resolves each one against the
-document's own folder (`resolveDocumentPath`, which refuses absolute paths
-and anything that climbs out) and reads it through `file:open`, the same
-containment check as any file tab, as a data URL. A remote image becomes a
-link to itself instead: opening a document never calls out to whoever wrote
-it. A peek reads no images at all.
+**Images in a document.** Nothing is fetched while rendering: the
+sanitizer's hook moves every `src` — markdown images and raw `<img>` alike —
+to `data-md-src`, and drops `srcset`. `loadMarkdownImages` then resolves
+each one against the document's own folder (`resolveDocumentPath`, which
+refuses absolute paths and anything that climbs out) and reads it through
+`doc:read`, the same containment check as any file tab, as a data URL. A
+remote image becomes a link to itself instead: opening a document never
+calls out to whoever wrote it. A peek reads no images at all.
 
 **Links.** `#heading` scrolls within the document (heading ids carry an `md-`
 prefix so they can't collide with the app's own; the click handler adds it
@@ -1158,97 +1149,49 @@ back). A relative path opens that file as a tab through `openFileTab`.
 Anything else goes to `shell:open-external`, which re-parses the URL and
 opens only http, https and mailto.
 
-The image reader reads bytes and hands over a `data:` URL, drawn by an
-`<img>`. That is the safe way round: an SVG loaded as an image cannot run the
-script SVG is allowed to carry, where the same bytes inlined as markup can.
-SVG is also the one image format with a source worth reading, so it is the
-one that offers Raw — the toggle appears when a reader has two views, not on
-a schedule.
+**Images.** A bitmap is read as bytes and handed over as a `data:` URL, drawn
+by an `<img>`. That is the safe way round: an SVG loaded as an image cannot
+run the script SVG is allowed to carry, where the same bytes inlined as
+markup can. SVG is read as text instead — it's the one image with a source
+worth editing — and its Image view draws the buffer's text as a `data:` URL,
+so it follows unsaved edits too.
 
-Three things follow. *Diff is a capability, not a universal*: the change
-count, the jump controls and the Diff / Clean choice hang off `view.changed`,
-which is false for every file outside a repository, so the toggle is absent
-there for the same reason it would be absent on a photograph rather than as a
-special case. *Limits belong to a reader*: 16 MB and 20,000 lines are right
-for text and wrong for a 20 MB photograph. And *"binary" stops being a
-verdict* — it is now just a file no reader claimed, and the fallback says its
-name and size instead of the words "Binary file".
-
-The reader is picked in the main process, next to the containment check and
-the size limit, so a path is checked in one place rather than once per
-reader. A reader never executes what it reads: content is drawn, never turned
-into markup. SVG and HTML are the two formats that look like the easiest win
-and both carry script, and Files browses any folder on the machine.
-
-**One payload, two views.** The Diff / Clean segmented control picks between
-them. `getFileView` runs `diff -U<20000>`, a context
-size larger than any real file, so git emits the whole file as a single hunk
-instead of islands around each change. The "Clean" button is then a rendering
-choice over that one read: hiding the deleted lines and the marks leaves
-exactly the working-tree file. Two separate reads could disagree about what
-the file says; this can't. A file with no changes is read from disk as all
-context, an untracked one as all addition, a deleted one from `show HEAD:`.
-
-**A branch switch under an open tab.** The watcher covers `.git/HEAD` and
-`refs/`, so checking out elsewhere reloads every open file tab. When the file
-isn't on the new branch, `getFileView` asks `rev-list --all -- <path>` whether
-git has ever known it and says "Not on this branch" rather than "isn't in this
-repository any more" — the file is fine, it just isn't here. That question is
-only asked when the path is missing from the current tree, so it costs nothing
-normally.
+**A branch switch under an open tab.** Each open document's repository has
+its `.git` directory watched (see "Disk changes"), so checking out elsewhere
+re-reads every open tab in it. A file that isn't on the new branch opens as
+"Not on this branch" (`rev-list --all -- <path>` says git has known it)
+rather than "isn't there any more"; a deleted one shows its last committed
+version, read-only.
 
 **Where files open.** `paneForFileTabs` picks a pane that isn't the one
-holding Changes, preferring one that already has a file in it, so reading a
-second file doesn't split the window further and the sidecar stays visible.
-
-**Windowed.** Rows are a fixed 20 px and only the visible slice plus 40 rows
-of overscan is in the DOM, so a 10 000-line file costs what a short one does.
-The line-number gutter is `position: sticky`, so scrolling a long line
-sideways doesn't lose the margin.
-
-**Width follows the pane.** Rows fill the pane and track it as it's resized,
-and grow past it only when a line is genuinely longer, which scrolls the
-viewer horizontally rather than wrapping. Two things make that work, and
-leaving out either breaks it in opposite directions: the rows' container is
-`width: auto; min-width: max-content` (shrink-wrapping to the longest line
-instead left a changed line's tint stopping halfway across the pane), and
-`.file-section` and `.changes-pane`, as flex items of `.content-flush`, carry
-`min-width: 0` (without it a flex item's automatic minimum is its content's
-max-content width, and one long line pushed the whole viewer wider than the
-pane instead of scrolling inside it).
-
-The pane packs to the top: the file list takes the height its rows need, so
-the commit box sits under it rather than at the floor with a hole above, and
-shrinks to scroll once the rows outgrow the pane so the commit box stays on
-screen.
+holding a sidecar, preferring one that already has a file in it, so reading
+a second file doesn't split the window further and the sidecar stays
+visible.
 
 **⌘P** opens any file in the current repository by name, over `ls-files`
 (tracked, plus untracked files git isn't ignoring). Matching is on any
 subsequence of the path, ranked by how tight the match is and whether it
-landed in the filename rather than a directory. Without it the only readable
-files would be the ones an agent happened to touch, which is a diff viewer
-wearing a hat.
+landed in the filename rather than a directory.
 
 ### Syntax highlighting
 
-`src/shared/syntax.js`, hand-rolled, for the same reason the icon set and the
-layout store are: the job is narrow — colour code that is only ever read,
-never edited — and every alternative is a vendored parser per language. It
-recognises comments, strings, numbers, keywords and call sites, and leaves
-everything else plain. Being wrong should mean an uncoloured word, never a
-missing one.
+Two highlighters, for two jobs. The editor uses CodeMirror's Lezer grammars
+(see "Editor"), because editing needs a parse that keeps up with every
+keystroke. `src/shared/syntax.js` — hand-rolled, for the same reason the icon
+set and the layout store are — colours code that is only ever read: code
+blocks in rendered markdown and in a session peek. It recognises comments, strings,
+numbers, keywords and call sites, and leaves everything else plain. Being
+wrong should mean an uncoloured word, never a missing one. Both map onto the
+same `--tok-*` colours, so code reads the same everywhere.
 
-It escapes every chunk before introducing a tag of its own and emits nothing but its own fixed set of
-`<span class="tok-*">` — which is what makes the viewer's one
-`dangerouslySetInnerHTML` safe. A block-comment flag is threaded down the file
-so a multi-line comment stays one colour; it's computed for the whole file
-rather than per visible row, because a window starting mid-comment would
-otherwise highlight it as code, and a deleted line doesn't carry its state
-forward, since it isn't part of the file the next line belongs to.
+`syntax.js` escapes every chunk before introducing a tag of its own and emits
+nothing but its own fixed set of `<span class="tok-*">`. A block-comment flag
+is threaded down the text so a multi-line comment stays one colour, and a
+deleted line doesn't carry its state forward, since it isn't part of the file
+the next line belongs to.
 
 The token colours are muted enough to sit on paper and on a diff tint without
 shouting, and each clears 4.5:1 on paper.
-
 
 ### Visual design
 
@@ -1314,7 +1257,7 @@ inputs, 12 windows. Four shadows: `--shadow-menu`, `--shadow-window`,
 - Status is shown as a dot plus a mono word (`granted`, `needs you`,
   `off · optional`) rather than icons.
 - Keyboard shortcuts render as keycaps.
-- Value choices — Dictation's date ranges, a file tab's Diff / Clean — are a
+- Value choices — Dictation's date ranges, a file tab's Edit / Diff — are a
   segmented pill. A view toggle is a choice between two states, not an
   action, so it isn't a button.
 - Menus are white with `--shadow-menu`: a lowercase mono section label, an
@@ -1341,6 +1284,318 @@ font. `packaging/icon.png` (1024 px, Apple icon grid) is the app icon.
 `src/shared/brand/trayTemplate*.png` are heavier-stroked template images for
 the menu bar, which macOS recolours for light and dark. `Logo()` in
 `icons.js` renders the mark in `currentColor` inside the UI.
+
+## Editor
+
+File tabs edit. What the editor does is under Editor, File types, File
+operations, Opening files from outside, Search and Sessions and the editor
+in `requirements.md`; why is in `background.md`. This is how.
+
+| Part | Where | Owns |
+|---|---|---|
+| Documents | `src/main/documents.ts` | Reading a file with its committed version; saving it back; watching open files |
+| Writable roots | `src/main/roots.ts` | Where anything may be written |
+| File operations | `src/main/fileOps.ts` | The Files tree's create / rename / move / duplicate / trash / copy-in |
+| Opened paths | `src/main/openPaths.ts` | Finder / Dock / `clance`, and installing the command |
+| Search | `src/main/search.ts` | ripgrep, streamed |
+| Buffers | `src/mainWindow/editor/buffers.js` | Open documents, dirty state, conflicts, saving |
+| Setup | `src/mainWindow/editor/setup.js` | Languages, theme, keys, the change gutter, `.env` masking |
+| Views | `src/mainWindow/editor/views.js` | Editor pane, markdown / SVG previews, image, fallback, Compare |
+| Handlers | `src/mainWindow/handlers/` | Which views a kind of file gets |
+
+### Engine: CodeMirror 6
+
+The editor is **CodeMirror 6**, not Monaco. Monaco is VS Code's own editor,
+and it would feel identical and bring TypeScript IntelliSense, but it is ~5 MB,
+wants web workers and its own AMD loader, and is styled through a theme API
+of its own rather than CSS. CodeMirror themes with ordinary CSS — so
+`theme.css`'s custom properties apply to it the way they do to everything
+else — virtualises its own rendering, and is extended by composing
+extensions, which is the shape file-type handlers want. What it gives up is
+IntelliSense, which the requirements leave out.
+
+**Vendoring.** CodeMirror ships as ~30 npm packages that share state:
+`@codemirror/state` must exist exactly once, or its `instanceof` checks fail
+between copies. So it isn't vendored package by package the way markdown-it's
+plugins are. `scripts/build-codemirror.mjs` bundles
+`scripts/codemirror/entry.mjs` — which re-exports everything the editor uses
+— into `src/shared/vendor/codemirror.mjs` with esbuild, and the output
+(~890 KB minified, licences at the end) is committed, the same way the
+Preact + htm standalone module is. esbuild and the `@codemirror/*` packages
+are pinned dev dependencies used only by that script; the app still has no
+bundler and no build step for its own code. Updating CodeMirror means
+bumping the pins and rerunning the script.
+
+The bundle holds view, state, commands, search, language, `closeBrackets`,
+merge, and language support: `lang-javascript` (JS/TS/JSX), `lang-json`,
+`lang-css`, `lang-html`, `lang-markdown`, `lang-python`, `lang-yaml`,
+`lang-sql`, `lang-rust`, `lang-go`, and `legacy-modes` for shell, TOML,
+Swift, Dockerfile, properties (`.env`, `.ini`), Ruby, Lua, diff, the C family
+(C, C++, Java, Kotlin, C#, Scala), nginx and XML. `languageFor` in
+`setup.js` picks one from the file name; anything else edits as plain text.
+
+**Theme.** One `EditorView.theme` written against `theme.css` variables, and
+one `HighlightStyle` mapping Lezer tags onto the `--tok-*` colours `syntax.js`
+uses. The font size is the one per-user value, set as `--editor-font-size` on
+the document from the editor settings.
+
+**Keys.** CodeMirror's keymaps (default, search, history, fold, close
+brackets, Tab to indent) already match VS Code's for nearly everything; the
+additions are ⌃G for go to line, ⌥⌘F for the search panel (which has the
+replace field) and ⌥Z to toggle wrapping. App-level commands are menu items
+in `appMenu.ts`'s File menu — Save (⌘S), Save All (⌥⌘S), Reopen Closed Tab
+(⇧⌘T), Find in Files (⇧⌘F), Ask Claude About Selection (⌘L) — for the same
+reason the tab keys are: a menu accelerator is handled before a focused
+terminal (or editor) can swallow the key. ⌘Z / ⇧⌘Z stay the Edit menu's roles;
+Chromium turns them into `historyUndo` / `historyRedo` input events, which
+CodeMirror's history handles.
+
+### Documents
+
+`doc:read` (`readDocument`) returns one of:
+
+- **text** — the file with its BOM stripped and line endings normalised to
+  `\n`, what a save needs to write it back the way it was (`eol`, `bom`), a
+  sha1 of the bytes on disk (`hash`), and the **committed text** to compare
+  against: `git show HEAD:<path>` (or the old name, for a staged rename); `""`
+  for a file git has but HEAD doesn't — untracked, or a repository with no
+  commits — so all of it reads as new; `null` outside a repository and for
+  ignored files, which have nothing to compare with. Over 5 MB it is
+  `readOnly`; over 16 MB it isn't text at all. An SVG also carries a
+  `preview` data URL.
+- **image** — a bitmap's bytes as a data URL (up to 24 MB).
+- **none** — a file that isn't text (a NUL in its first 8 KB), too large, or
+  unreadable. The fallback handler's Open as Text re-reads it with `asText`,
+  read-only.
+- **missing** — not on disk but git has it: a deleted file's last committed
+  text, or "Not on this branch".
+
+Containment is `containedFile`, as before: the path is resolved (links
+included) and must stay inside the root the tab names.
+
+### Buffers
+
+A tab's document — text, undo history, selection, scroll — lives in
+`buffers.js`, a module-level registry keyed by root and path, the way
+`TerminalSection.js` keeps a terminal alive across an unmount. Each buffer
+owns its `EditorView`; `EditorPane` moves the view's DOM into itself on
+mount and out again on unmount, so switching tabs, moving one between panes
+or splitting a pane never loses unsaved edits. A buffer is created the first
+time its tab renders and released when the tab closes (`closeTabsSafely` in
+`Shell.js`), which also stops watching the file.
+
+A buffer is **dirty** when its document differs from `savedText`, the text it
+was loaded or last saved as — compared with CodeMirror's `Text.eq` on each
+change, so undoing back to the saved text clears the dot.
+
+**Edit and Diff.** Edit is the editable document, with a gutter
+(`changeGutter`) marking added, modified and deleted-at lines against the
+committed text; the comparison is `Chunk.build` from `@codemirror/merge`,
+recomputed after a 250 ms pause in typing. Diff is the merge package's
+`unifiedMergeView` against the committed text — deleted lines back in
+place, changed words marked — and is read-only, so there's never a question
+of which view a save came from. Its chunks drive the header's change count
+and ↑ / ↓. Both are one compartment swapped on the same view.
+
+**Indentation** is detected from the file (`detectIndent`: tabs, or the most
+common step between indented lines) and falls back to the editor setting.
+
+### Saving
+
+`doc:save(root, path, text, { eol, bom, baseHash, force })`:
+
+1. **Resolve and contain.** The file's real path if it exists — writing
+   through a link to its target, never replacing the link — else its
+   parent's real path plus the name. It must be inside the root, and inside
+   a writable root (below).
+2. **Detect a change.** If the file exists and its hash isn't `baseHash`,
+   nothing is written: the result carries what's on disk, and the buffer
+   shows the conflict banner. `force` skips this. A missing file is simply
+   written — how a file deleted under an open tab comes back.
+3. **Reproduce the file.** `\n` back to `\r\n` for a CRLF file, and the BOM
+   back on if it had one. A final newline is part of the text, so it
+   survives by itself.
+4. **Write atomically.** `.<name>.clance-<random>` beside the file, `fsync`,
+   the original's mode copied, then `rename` over it. A session reading the
+   file mid-save sees the old version or the new one.
+5. Return the new hash, which becomes the buffer's base.
+
+**Writable roots** (`roots.ts`). Reads accept any folder the renderer names.
+Writes don't: a path must be inside a folder picked in the main process's
+own dialog, a file's folder or repository opened from Finder or `clance`
+(both kept in `config.writableRoots`), the default session directory,
+`~/.clance`, a recent session directory, a running agent's working
+directory — or the repository around any of those. Resolved after links.
+It sits on every save, so it's ordered by cost: the places in config are
+checked first and cover nearly every save, each folder's repository is
+looked up once and remembered, and the agents' folders — which cost a
+`claude agents` subprocess, about half a second — are only asked for when
+nothing else matched, at most once a minute. (Rebuilding all of it on every
+save was what made saving take seconds.) Nothing a file contains can reach `doc:save`, only
+keystrokes can; but the page can reach the bridge, so the bridge is where
+the rule lives.
+
+**Close and quit.** Every tab close goes through `closeTabsSafely`, which
+asks Save / Don't Save / Cancel (`doc:confirm-unsaved`, a native sheet) for
+any file tab with unsaved edits; Save that hits a conflict keeps the tab
+open. The window's `close` event is held in `mainWindow.ts` and the renderer
+asked (`window:before-close`): it answers `close` at once when nothing is
+dirty, `pending` while its prompt is up, then `close` or `cancel`. A renderer
+that doesn't answer within 1.5 s — crashed, hung, still loading — doesn't
+get to keep the window open. `before-quit` takes the same path and resumes
+the quit once it's approved.
+
+### Disk changes
+
+`doc:watch` watches each open document's *directory*, not the file:
+editors and agents often save by renaming a temp file over the original,
+which a per-file watcher loses after the first save. Events are debounced
+120 ms and sent as `doc:changed`. The repository's `.git` directory is
+watched too, not recursively, for `HEAD`, `ORIG_HEAD`, `index`,
+`packed-refs` and `FETCH_HEAD` — a commit or checkout changes the committed
+text a Diff is against — and reaches every open document in the repository
+as `doc:head-changed`. Watchers are reference-counted and closed when the
+last document using one is released or its window goes away.
+
+On either event the buffer re-reads the document:
+
+- **Same hash as its base** — its own save, or nothing that matters. The
+  committed text may still have moved, so the gutter and Diff are
+  recomputed if it did.
+- **No unsaved edits** — the difference is applied as a CodeMirror change
+  (`presentableDiff`), not a document replacement, so the cursor and scroll
+  map through it; it's kept out of undo history.
+- **Unsaved edits** — nothing is touched. The banner offers *Keep Mine* (the
+  disk version becomes the base, so the next save overwrites deliberately),
+  *Take Theirs* (the buffer becomes the disk version), and *Compare*:
+  `MergeView`, disk on the left read-only, the buffer on the right, an arrow
+  per chunk to take the disk's version of it. *Use This Version* keeps the
+  right side, measured against the disk version it was reconciled with.
+- **Gone** — the buffer keeps its text and says the file was deleted;
+  saving recreates it.
+
+### File-type handlers
+
+The **main process** decides how a file may be *read* — text, image bytes,
+or nothing — next to the containment check and the size limits. The
+**renderer**'s handlers (`src/mainWindow/handlers/`) decide how it is
+*shown and edited*. A handler is `{ id, match(buffer) → score, views: [{ id,
+label, render }], defaultView, Actions? }`; the highest score wins, text
+matches any readable text at 1 and the fallback everything at 0. A view gets
+the buffer, not a file, so previews follow unsaved edits. Adding a file type
+is adding a module to `handlers/index.js`.
+
+| Handler | Views | Notes |
+|---|---|---|
+| markdown | Rendered, Source | Rendered first: a document is mostly read |
+| svg | Image, Source | The image is drawn from the buffer's text |
+| env | Source | `.env`, `.env.*`, `*.env`; a Mask values toggle |
+| text | Source | Any readable text |
+| image | Image | Bitmaps |
+| missing | Source (read-only) | Deleted, or not on this branch |
+| fallback | Info | Open in Default App, Reveal in Finder, Open as Text |
+
+`.env` masking is a `ViewPlugin` of replace decorations drawing each value as
+dots, swapped into a per-buffer compartment: display only, so copying and
+saving are unaffected. Off until asked for.
+
+Handlers are code in the app, never loaded from disk: a handler runs in a
+page that can reach the terminal bridge. A sandboxed, message-only frame for
+user handlers is an idea in `requirements.md`; the interface (a buffer in,
+DOM out) is narrow enough to move into one.
+
+### File operations
+
+IPC in `fileOps.ts`, each taking the tree's root and paths relative to it.
+The destination is resolved and must be inside the root and a writable root;
+an entry that is itself a link is renamed, moved or trashed as a link, never
+followed.
+
+| Call | Does |
+|---|---|
+| `files:create` | A file or folder; fails if the name exists |
+| `files:rename` | In place; a case-only rename is allowed |
+| `files:move` | Within the root; never into itself, never over an existing name |
+| `files:duplicate` | `name copy.ext`, `name copy 2.ext`, as Finder does |
+| `files:trash` | `shell.trashItem` — recoverable from the Trash |
+| `files:copy-in` | A Finder drop; the source may be anywhere (it's only read). With `ask`, a taken name copies nothing and comes back as a conflict; then `replace` (the old one to the Trash) or `keep-both` (`name 2.ext`) |
+
+A rename or move calls `onPathMoved`, which re-keys every open file tab at or
+under the old path (`REKEY_FILES` in the layout store) and its buffer, edits
+and all. Inline names commit on ↩ from the field's own value, cancel on Esc
+or blur, and select the name without its extension, as Finder does. Dragging
+rows onto folders uses pointer events, like tabs (see "Panes"), listened for
+on the window rather than the row: the row can leave the page mid-gesture
+when the tree re-reads, and a release it never hears would leave the tree
+stuck mid-drag. A Finder drop is native, since it comes from outside the
+window, and any ending of it — a drop elsewhere, a cancel, leaving the
+window — clears its highlight. The tree re-reads the
+directories it has open after its own changes and whenever the window comes
+back to the front — sessions create files too.
+
+### Opening from outside
+
+- **Document types.** `package.json`'s `extendInfo` declares
+  `CFBundleDocumentTypes`: `public.data` / `public.content` as Editor and
+  `public.folder` as Viewer, both rank `Alternate` — Clance is in Open With
+  for everything and the default for nothing unless the person chooses it.
+- **`open-file`** is registered at the top of `index.ts` (`openPaths.ts`),
+  before `ready`, since macOS delivers launch-time opens early; they're
+  queued until `ready`. Each is resolved — a file's root is its repository if
+  it's inside one, else its folder; a folder is itself — registered as a
+  writable root, and held until the renderer takes it (`open-paths:take`),
+  which it does on mount and whenever `open-paths-available` says more
+  arrived. Taking rather than only sending, because the window finishing
+  loading isn't the same as its tabs listening. A file opens as a tab; a
+  folder points the Files sidecar at it.
+- **`clance`** is `packaging/bin/clance`, copied into
+  `Contents/Resources/bin/` (`extraResources`). It makes its arguments
+  absolute, refuses ones that don't exist, and runs `open -b
+  dev.damiensmith.clance`, which arrives as `open-file` like any Finder open.
+  The cask links it with `binary`; Settings' Install links it into the first
+  of `/opt/homebrew/bin`, `/usr/local/bin` or `~/.local/bin` that is
+  writable, and says so if the last isn't on the login shell's `PATH`.
+
+### Search
+
+⇧⌘F opens the **Search** sidecar (`SearchSection.js`), which joins the other
+sidecars' pane. It searches the Files folder, or the Changes repository if
+Files has none. The main process runs **ripgrep** (`search.ts`) with
+`--json`, arguments as an array and the query after `-e`, so nothing typed
+can become an option: `--hidden` with `!.git`, `--max-columns 400` and a
+4 MB file limit so minified files don't flood results, `--fixed-strings`
+unless the regex toggle is on, `--no-ignore` only when asked, and the
+include / exclude globs as `-g`. Matches stream back in 60 ms batches as
+`search:results` — byte offsets turned into character ranges — and stop at
+5,000; a new query (250 ms after typing stops) kills the old process. A
+result opens through `filesResolveFile`, so a file inside a repository is
+the same tab Files or Changes would open, and `revealLine` puts the cursor
+on the match once the editor is on screen.
+
+ripgrep, rather than `git grep`, because Files browses folders that aren't
+repositories and ripgrep reads `.gitignore` itself. It isn't on a Mac by
+default, so the app ships `@vscode/ripgrep-darwin-arm64` (ripgrep 15, MIT,
+about 4.5 MB) as a dependency — Apple Silicon only, like the app.
+
+### Asking Claude
+
+⌘L takes the focused editor's selection (or the cursor's line) and writes
+`` `<absolute path>` lines a–b: `` followed by the code in a fence into a
+session's prompt, through `writeTerminal` as a bracketed paste
+(`ESC[200~ … ESC[201~`), so the CLI treats it as pasted text and doesn't
+send it. Ask Claude on a file or folder in the tree writes just its path.
+Absolute paths, because the session's working directory may not be the
+file's. The target is the session tab focused most recently (tracked in
+`Shell.js`), else any open session; with none, a new session is minted in
+the file's folder and the paste waits until its terminal output has been
+quiet for 1.2 s (at most 10 s), since text written before the CLI draws its
+prompt is lost.
+
+### Settings
+
+`config.editor` holds the font size, the default indent (for files with none
+of their own) and wrapping, changed from Settings' editor group or ⌥Z, and
+applied to every open buffer at once.
 
 ## Dictation
 
@@ -1873,6 +2128,24 @@ hour); rate limiting gets its own message, and the launch check stays silent
 on errors.
 
 ## Open questions
+
+- **Editor: hot exit.** Unsaved edits survive tab switches and pane moves,
+  and closing or quitting asks first — but a renderer reload (View › Reload)
+  or a crash loses them. Writing buffers to `~/.clance/buffers/` and
+  restoring them, as VS Code does, would close that gap.
+- **Editor: size limit.** 5 MB editable is a guess; CodeMirror handles more,
+  but a save round trip and the merge diff cost grow with the file.
+- **Ask Claude: `@` references.** A selection goes in as a path, a line range
+  and a fenced copy of the code. If the CLI resolves `@path#L10-20` to those
+  lines, that would be shorter in the prompt and stay current if the file
+  changes; unchecked.
+- **Discarding under an open buffer.** The Changes pane's Discard rewrites a
+  file without looking at open buffers. A clean one follows the disk; a
+  dirty one gets the conflict banner, which is safe, but a warning before
+  discarding would be kinder.
+- **The Files tree isn't watched.** It re-reads after its own changes and
+  when the window comes back to the front, not live while a session creates
+  files in the background.
 
 - **The ⌥A confidence threshold is unmeasured.** Per intent, and pickable
   only from real utterances by real voices — too low and the assistant acts

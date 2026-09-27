@@ -19,8 +19,9 @@ text wherever your cursor was.
 
 A main window holds the rest: every Claude Code session on the machine,
 openable as terminal tabs; a view of what those sessions have changed in a
-git repository; dictation history; installed skills and MCP servers; and
-settings.
+git repository; a file explorer and a lightweight editor over any file on the
+Mac; dictation history; and settings. It is meant to be the only development
+tool open: sessions, terminals and the code they write, in one window.
 
 ## Why it exists
 
@@ -46,14 +47,25 @@ settings.
 - **Reading the code is part of using the agent.** When the model writes the
   code, the work left for the person is reading it — and reading a change
   means reading the code around it, not just the diff. Clance already has the
-  terminal the code is run from and the sessions that wrote it, so the last
-  reason to leave the window was to go and look at the files. That makes
-  Clance a read-only IDE: a Changes pane that says what is moving, and file
-  tabs that show the whole file with its changes marked in place. It never
-  edits a file — the session does that. Committing and pushing are the exits
+  terminal the code is run from and the sessions that wrote it, so the next
+  reason to leave the window was to go and look at the files: hence a
+  Changes pane that says what is moving, and file tabs that show the whole
+  file with its changes marked in place. Committing and pushing are the exits
   from the reading loop rather than the point of it, and branching, rebasing
   and history surgery stay where they already work, in a terminal or in the
   session next door.
+- **…and so is touching it up.** Clance was first a *read-only* IDE, on the
+  grounds that the session writes the code. In use, the one reason left to
+  open another editor was the small edits that aren't worth a prompt: an
+  environment variable, a renamed constant, a line the agent got almost
+  right, a file dragged in from Finder. Leaving the window for a two-second
+  edit costs more than the edit, and asking a session to make it costs more
+  still. So Clance becomes a lightweight IDE — an editor, file operations,
+  project search and opening any file from Finder — enough that nothing else
+  needs to be open while developing. Claude is still the main author; the
+  editor is for everything around it. That is also why Clance doesn't try to
+  be VS Code: no debugger, no language servers, no extension marketplace.
+  Refactoring across a codebase is a prompt, not a menu.
 
 ## Principles
 
@@ -68,7 +80,14 @@ settings.
   the CLI's own permission prompts rather than a Clance-built approval UI.
 - **Extend through Claude Code.** Skills, MCP servers, hooks and plugins set
   up for Claude Code work in Clance unchanged. Clance doesn't define its own
-  plugin format.
+  plugin format. Its one extension point of its own is file types: how a
+  kind of file is shown and edited is a handler in a registry, added in the
+  codebase rather than loaded from disk, because anything loaded into the
+  main window can reach the bridge that types into terminals.
+- **The agent and the person share the files.** A session may be writing the
+  file that's open in an editor. Nothing either side does may silently
+  overwrite the other: saving is explicit, and a file that changed underneath
+  unsaved edits asks before anything is lost.
 
 ## Reference points
 
@@ -79,4 +98,8 @@ settings.
   picker stretched across a window is a poor way to read a changeset.
 - **VS Code's integrated terminal** — a real process in an embedded terminal
   instead of a reimplemented interface.
+- **VS Code, the editor** — the keys an engineer's hands already know (⌘S,
+  ⌘F, ⌘D, ⌥↑, ⇧⌘F) and an explorer that creates, renames and moves files,
+  without the debugger, language servers or marketplace. Lighter on purpose:
+  the heavy lifting happens in the session next door.
 - **Wispr Flow, superwhisper** — dictation that works in every app.

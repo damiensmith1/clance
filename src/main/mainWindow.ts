@@ -1,4 +1,4 @@
-import { BrowserWindow } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import { join } from "path";
 import { hidePopup } from "./popupWindow";
 import { resolveSessionId } from "./agentSessions";
@@ -6,6 +6,62 @@ import { titleForSessionId, findRecentClanceSessionId, SESSION_PLACEHOLDER_TITLE
 
 let mainWindow: BrowserWindow | null = null;
 let mainWindowReady: Promise<void> | null = null;
+
+// ---- unsaved edits on close and quit ----
+//
+// The editor's buffers live in the renderer, so closing the window (or
+// quitting) is held until the renderer says whether anything needs saving:
+// it answers "close" at once when nothing does, "pending" while its Save /
+// Don't Save / Cancel is up, then "close" or "cancel". A renderer that never
+// answers — crashed, hung, still loading — can't keep the window open.
+
+const CLOSE_REPLY_TIMEOUT_MS = 1500;
+let closeApproved = false;
+let asking = false;
+let quitAfterClose = false;
+let replyTimer: NodeJS.Timeout | null = null;
+
+function finishClose(reply: string): void {
+  asking = false;
+  if (replyTimer) clearTimeout(replyTimer);
+  replyTimer = null;
+  if (reply !== "close") {
+    quitAfterClose = false;
+    return;
+  }
+  closeApproved = true;
+  if (quitAfterClose) app.quit();
+  else mainWindow?.close();
+}
+
+function askToClose(win: BrowserWindow): void {
+  if (asking) return;
+  asking = true;
+  win.webContents.send("window:before-close");
+  replyTimer = setTimeout(() => finishClose("close"), CLOSE_REPLY_TIMEOUT_MS);
+}
+
+ipcMain.on("window:before-close-reply", (event, reply: unknown) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
+  if (reply === "pending") {
+    if (replyTimer) clearTimeout(replyTimer);
+    replyTimer = null;
+    return;
+  }
+  finishClose(typeof reply === "string" ? reply : "close");
+});
+
+/**
+ * Called from `before-quit`. True means the quit is being held while the
+ * renderer asks about unsaved edits; it resumes on its own if they're dealt
+ * with.
+ */
+export function holdQuitForUnsavedEdits(): boolean {
+  if (!mainWindow || mainWindow.isDestroyed() || closeApproved) return false;
+  quitAfterClose = true;
+  askToClose(mainWindow);
+  return true;
+}
 
 function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -39,8 +95,15 @@ function createMainWindow(): BrowserWindow {
   win.maximize();
 
   win.loadFile(join(__dirname, "../mainWindow/index.html"));
+  win.on("close", (event) => {
+    if (closeApproved) return;
+    event.preventDefault();
+    askToClose(win);
+  });
   win.on("closed", () => {
     mainWindow = null;
+    closeApproved = false;
+    asking = false;
   });
 
   return win;
@@ -60,6 +123,13 @@ export function openMainWindow(): void {
 
   mainWindow.show();
   mainWindow.focus();
+}
+
+/** Brings the main window forward and sends it `channel` once it has loaded. */
+export async function sendToMainWindow(channel: string, payload?: unknown): Promise<void> {
+  openMainWindow();
+  await mainWindowReady;
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
 }
 
 // Brings the main window forward on one of its sections (e.g. Settings, from

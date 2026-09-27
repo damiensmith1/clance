@@ -1,4 +1,4 @@
-import { app, ipcMain, Menu, BrowserWindow, shell } from "electron";
+import { app, ipcMain, Menu, BrowserWindow, shell, dialog } from "electron";
 import { join } from "path";
 import { createTray, updateTrayState } from "./tray";
 import { registerHotkey, unregisterAllHotkeys, isValidAccelerator } from "./hotkey";
@@ -10,7 +10,7 @@ import {
   isPopupSessionName,
   sessionMintArgs,
 } from "./popupWindow";
-import { openMainWindow, openMainWindowSection, openSessionInMainWindow } from "./mainWindow";
+import { openMainWindow, openMainWindowSection, openSessionInMainWindow, holdQuitForUnsavedEdits } from "./mainWindow";
 import { checkForUpdates, openReleasePage } from "./updates";
 import { createAppMenu } from "./appMenu";
 import { ensureSessionCwd, SESSION_CWD } from "./paths";
@@ -21,7 +21,7 @@ import {
   getDefaultDirectory,
   addRecentDirectory,
   setLastGitRepo,
-  DEFAULT_VOCABULARY, setLastFolder } from "./config";
+  DEFAULT_VOCABULARY, setLastFolder, setEditorConfig } from "./config";
 import { pickDirectory } from "./directoryPicker";
 import { connectClaude, disconnectClaude, openInstallDocs } from "./claudeAuth";
 import {
@@ -62,7 +62,6 @@ import {
   getStatus as getGitStatus,
   getFileDiff,
   listFiles,
-  openFileView,
   listCommits,
   listBranches,
   getRemote,
@@ -76,9 +75,15 @@ import {
   findRepoRoot,
   listRepos,
   watchRepo,
+  isDirectory,
 } from "./git";
+import { createEntry, renameEntry, moveEntry, duplicateEntry, trashEntry, copyIn } from "./fileOps";
 import { listFolders, resolveFolder, listDirectory, resolveFile, folderRepo } from "./files";
 import { readWindowLayout, writeWindowLayout } from "./windowLayout";
+import { readDocument, saveDocument, watchDocument, unwatchDocument, resolveContained } from "./documents";
+import { registerRoot } from "./roots";
+import { startSearch, cancelSearch } from "./search";
+import { listenForOpenedPaths, flushOpenedPaths, takeOpenedPaths, cliStatus, installCli } from "./openPaths";
 import { getHud } from "./dictationWindow";
 import {
   toggleDictation,
@@ -106,6 +111,10 @@ import {
   transcriptStats,
   TranscriptFilter,
 } from "./dictationStore";
+
+// Before anything else: macOS delivers files opened from Finder (or the
+// `clance` command) during launch, before `ready`.
+listenForOpenedPaths();
 
 app.dock?.show();
 // A packaged build gets its Dock icon from the bundle (build.mac.icon); a dev
@@ -207,6 +216,8 @@ app.whenReady().then(async () => {
   }
 
   if (process.env.CLANCE_FORCE_MAIN_WINDOW) openMainWindow();
+  // Anything opened from Finder or `clance` while launching.
+  flushOpenedPaths();
 });
 
 // Only reopens the main window for a "no windows at all" activation — a
@@ -238,6 +249,10 @@ app.on("activate", () => {
 });
 
 app.on("will-quit", unregisterAllHotkeys);
+// Unsaved edits in the editor are asked about before anything quits.
+app.on("before-quit", (event) => {
+  if (holdQuitForUnsavedEdits()) event.preventDefault();
+});
 
 // Keep the app running from the tray with no windows open.
 app.on("window-all-closed", () => {});
@@ -569,11 +584,60 @@ ipcMain.handle("files:resolve-file", (_event, root: unknown, path: unknown) => r
 
 ipcMain.handle("files:folder-repo", (_event, root: unknown) => folderRepo(root));
 
-// A file tab's one read. The reader is picked here, beside the containment
-// check and the size limit, so a path is checked in one place rather than
-// once per reader.
-ipcMain.handle("file:open", (_event, dir: unknown, path: unknown) => openFileView(dir, path));
+// The tree's write side (fileOps.ts): every path is checked there.
+ipcMain.handle("files:create", (_event, root: unknown, parent: unknown, name: unknown, kind: unknown) =>
+  createEntry(root, parent, name, kind)
+);
+ipcMain.handle("files:rename", (_event, root: unknown, path: unknown, name: unknown) => renameEntry(root, path, name));
+ipcMain.handle("files:move", (_event, root: unknown, path: unknown, dest: unknown) => moveEntry(root, path, dest));
+ipcMain.handle("files:duplicate", (_event, root: unknown, path: unknown) => duplicateEntry(root, path));
+ipcMain.handle("files:trash", (_event, root: unknown, path: unknown) => trashEntry(root, path));
+ipcMain.handle("files:copy-in", (_event, root: unknown, dest: unknown, sources: unknown, onConflict: unknown) =>
+  copyIn(root, dest, sources, onConflict)
+);
+
 ipcMain.handle("file:reveal", (_event, path: unknown) => revealFile(path));
+
+// ---- editor (see docs/design.md's "Editor") ---------------------------------
+ipcMain.handle("doc:read", (_event, dir: unknown, path: unknown, asText: unknown) => readDocument(dir, path, asText));
+ipcMain.handle("doc:save", (_event, root: unknown, path: unknown, text: unknown, options: unknown) =>
+  saveDocument(root, path, text, (options ?? {}) as Record<string, unknown>)
+);
+ipcMain.handle("doc:watch", (event, root: unknown, path: unknown) => watchDocument(event.sender, root, path));
+ipcMain.handle("doc:unwatch", (event, root: unknown, path: unknown) => unwatchDocument(event.sender, root, path));
+ipcMain.handle("doc:open-default-app", async (_event, root: unknown, path: unknown) => {
+  const full = resolveContained(root, path);
+  return full ? (await shell.openPath(full)) === "" : false;
+});
+// Save / Don't Save / Cancel for one or more files with unsaved edits, as a
+// sheet on the window that asked.
+ipcMain.handle("doc:confirm-unsaved", async (event, names: unknown) => {
+  const list = Array.isArray(names) ? names.filter((n): n is string => typeof n === "string") : [];
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const message =
+    list.length === 1
+      ? `Do you want to save the changes you made to ${list[0]}?`
+      : `Do you want to save the changes you made to ${list.length} files?`;
+  const options: Electron.MessageBoxOptions = {
+    type: "warning",
+    message,
+    detail: list.length > 1 ? list.join("\n") : "Your changes will be lost if you don't save them.",
+    buttons: ["Save", "Cancel", "Don't Save"],
+    defaultId: 0,
+    cancelId: 1,
+  };
+  const { response } = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
+  return response === 0 ? "save" : response === 2 ? "discard" : "cancel";
+});
+ipcMain.handle("open-paths:take", () => takeOpenedPaths());
+ipcMain.on("search:start", (event, id: unknown, root: unknown, options: unknown) => startSearch(event.sender, id, root, options));
+ipcMain.on("search:cancel", (event) => cancelSearch(event.sender));
+ipcMain.handle("cli:status", () => cliStatus());
+ipcMain.handle("cli:install", () => installCli());
+ipcMain.handle("editor:get-config", () => readConfig().editor);
+ipcMain.handle("editor:set-config", (_event, patch: unknown) =>
+  setEditorConfig((patch && typeof patch === "object" ? patch : {}) as Record<string, never>)
+);
 
 // A link clicked in a rendered markdown file. The URL arrives from a file
 // that may have been cloned a minute ago, so it is parsed and rebuilt here
@@ -645,7 +709,13 @@ ipcMain.handle("popup:open-new-in-directory", (_event, dir: string) => openNewSe
 // Shared by the popup's "New session in..." flow and Settings' default-
 // directory field — see directoryPicker.ts. Anchored to whichever window
 // actually invoked it, same pattern as "terminal:reparent" below.
-ipcMain.handle("dialog:pick-directory", (event) => pickDirectory(BrowserWindow.fromWebContents(event.sender)));
+// A folder picked here was chosen by the person in a dialog the main process
+// owns, so it becomes somewhere the editor may write (roots.ts).
+ipcMain.handle("dialog:pick-directory", async (event) => {
+  const dir = await pickDirectory(BrowserWindow.fromWebContents(event.sender));
+  if (dir) await registerRoot(dir);
+  return dir;
+});
 
 ipcMain.handle("config:get-recent-directories", () => readConfig().recentDirectories);
 
@@ -728,14 +798,16 @@ ipcMain.handle(
 // resolution `getLoginShellPath()` does for spawning `claude` itself.
 ipcMain.handle(
   "terminal:create-shell",
-  (event, payload: { terminalId: string; cols: number; rows: number }) => {
+  (event, payload: { terminalId: string; cols: number; rows: number; cwd?: unknown }) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) return;
+    // A folder from the Files tree's Open in Terminal; anything else (or
+    // nothing) starts where sessions do.
     return createPtySession(
       payload.terminalId,
       process.env.SHELL || "/bin/zsh",
       ["-il"],
-      getDefaultDirectory(),
+      isDirectory(payload.cwd) ? payload.cwd : getDefaultDirectory(),
       win,
       payload.cols,
       payload.rows

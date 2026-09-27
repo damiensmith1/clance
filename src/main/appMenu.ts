@@ -12,7 +12,17 @@ function browserWindowFor(win: BaseWindow | undefined): BrowserWindow | null {
 
 // Tab commands only mean something in the main window; anywhere else the
 // keystroke does nothing rather than acting on some other window's tabs.
-function sendTabCommand(target: BaseWindow | undefined, command: "close-tab" | "next-tab" | "prev-tab"): void {
+type WindowCommand =
+  | "close-tab"
+  | "next-tab"
+  | "prev-tab"
+  | "save"
+  | "save-all"
+  | "reopen-tab"
+  | "find-in-files"
+  | "ask-claude";
+
+function sendTabCommand(target: BaseWindow | undefined, command: WindowCommand): void {
   const win = browserWindowFor(target);
   if (win && isMainWindow(win)) win.webContents.send("window-command", command);
 }
@@ -62,6 +72,33 @@ export function createAppMenu(): Menu {
     {
       label: "Clance",
       submenu: [{ role: "about" }, { type: "separator" }, { role: "quit" }],
+    },
+    // The editor's commands. Menu accelerators, like the tab keys below, so a
+    // focused terminal can't swallow them; each is a no-op outside the main
+    // window, and Save does nothing unless the focused tab is a file.
+    {
+      label: "File",
+      submenu: [
+        { label: "Save", accelerator: "CommandOrControl+S", click: (_item, win) => sendTabCommand(win, "save") },
+        { label: "Save All", accelerator: "Alt+CommandOrControl+S", click: (_item, win) => sendTabCommand(win, "save-all") },
+        { type: "separator" },
+        {
+          label: "Reopen Closed Tab",
+          accelerator: "Shift+CommandOrControl+T",
+          click: (_item, win) => sendTabCommand(win, "reopen-tab"),
+        },
+        {
+          label: "Find in Files",
+          accelerator: "Shift+CommandOrControl+F",
+          click: (_item, win) => sendTabCommand(win, "find-in-files"),
+        },
+        { type: "separator" },
+        {
+          label: "Ask Claude About Selection",
+          accelerator: "CommandOrControl+L",
+          click: (_item, win) => sendTabCommand(win, "ask-claude"),
+        },
+      ],
     },
     {
       label: "Edit",

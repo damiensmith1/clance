@@ -1,0 +1,23 @@
+#!/bin/sh
+# clance [path ...] — open files or folders in Clance, like `code .`.
+# With no arguments, opens the current folder. Paths are made absolute here
+# and handed to macOS, which delivers them to Clance as an open-file event —
+# the same way a Finder "Open With" does (see docs/design.md, "Opening from
+# outside"). Installed by the Homebrew cask, or from Clance's Settings.
+
+[ $# -eq 0 ] && set -- .
+
+for arg do
+  case "$arg" in
+    /*) path="$arg" ;;
+    *) path="$PWD/$arg" ;;
+  esac
+  if [ ! -e "$path" ]; then
+    echo "clance: $arg: no such file or folder" >&2
+    exit 1
+  fi
+  set -- "$@" "$path"
+  shift
+done
+
+exec open -b dev.damiensmith.clance "$@"

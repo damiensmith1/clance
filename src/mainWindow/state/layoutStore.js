@@ -332,6 +332,27 @@ function reduce(state, action) {
       return { ...state, root, activePaneId };
     }
 
+    // A file or folder renamed or moved in the Files tree: every file tab at or
+    // under the old absolute path follows it, keeping its place and its id's
+    // shape (`file:<root>:<path>`), so dedup on open still finds it.
+    case "REKEY_FILES": {
+      let changed = false;
+      const remap = (node) => {
+        if (node.type !== "leaf") return { ...node, children: node.children.map(remap) };
+        let activeTabId = node.activeTabId;
+        const tabs = node.tabs.map((tab) => {
+          const moved = movedFileTab(tab, action.fromAbs, action.toAbs);
+          if (!moved) return tab;
+          changed = true;
+          if (activeTabId === tab.id) activeTabId = moved.id;
+          return moved;
+        });
+        return { ...node, tabs, activeTabId };
+      };
+      const root = remap(state.root);
+      return changed ? { ...state, root } : state;
+    }
+
     case "MOVE_TAB": {
       const { tabId, fromPaneId, toPaneId, toIndex } = action;
       const fromPane = findPane(state.root, fromPaneId);
@@ -432,7 +453,7 @@ export function dispatch(action) {
 // a renderer-only refresh rather than a full app restart — so keep its id
 // stable and let createPtySession's own "already exists" check (main
 // process) sort out whether there's really something to reattach to.
-const KNOWN_TAB_TYPES = new Set(["chats", "changes", "files", "file", "dictation", "settings", "terminal"]);
+const KNOWN_TAB_TYPES = new Set(["chats", "changes", "files", "search", "file", "dictation", "settings", "terminal"]);
 
 // Drops anything that doesn't look like a well-formed node, falling back
 // to `initialState()`.
@@ -495,6 +516,31 @@ export function closeTab(paneId, tabId) {
 
 export function closeTabs(paneId, tabIds, focusTabId) {
   dispatch({ type: "CLOSE_TABS", paneId, tabIds, focusTabId });
+}
+
+/**
+ * Where a file tab goes when `fromAbs` becomes `toAbs`, or null if it isn't
+ * at or under it. The tab keeps its root when the new path is still inside
+ * it; otherwise the file's own folder becomes its root.
+ */
+export function movedFileTab(tab, fromAbs, toAbs) {
+  if (tab.type !== "file") return null;
+  const abs = `${tab.repoRoot}/${tab.path}`;
+  if (abs !== fromAbs && !abs.startsWith(`${fromAbs}/`)) return null;
+  const nextAbs = toAbs + abs.slice(fromAbs.length);
+  let repoRoot = tab.repoRoot;
+  let path;
+  if (nextAbs.startsWith(`${repoRoot}/`)) {
+    path = nextAbs.slice(repoRoot.length + 1);
+  } else {
+    repoRoot = nextAbs.slice(0, nextAbs.lastIndexOf("/"));
+    path = nextAbs.slice(nextAbs.lastIndexOf("/") + 1);
+  }
+  return { ...tab, id: `file:${repoRoot}:${path}`, repoRoot, path, label: path.split("/").pop() };
+}
+
+export function rekeyFileTabs(fromAbs, toAbs) {
+  dispatch({ type: "REKEY_FILES", fromAbs, toAbs });
 }
 
 export function renameTab(paneId, tabId, label) {

@@ -8,6 +8,7 @@ Clance adds local MCP "computer use" tools (screenshot, selection, typing,
 clicking), a main window for all Claude Code sessions on the machine, and
 system-wide on-device dictation (whisper.cpp).
 
+
 See `docs/` for background, requirements and design — that's the source of
 truth for scope, architecture, and open questions, not this file.
 

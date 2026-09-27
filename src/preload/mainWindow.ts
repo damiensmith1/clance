@@ -54,8 +54,8 @@ contextBridge.exposeInMainWorld("clanceApp", {
   openInWidget: (args: string[]) => ipcRenderer.invoke("popup:open-with-args", args),
   createTerminal: (terminalId: string, command: string, args: string[], cols: number, rows: number) =>
     ipcRenderer.invoke("terminal:create", { terminalId, command, args, cols, rows }),
-  createShellTerminal: (terminalId: string, cols: number, rows: number) =>
-    ipcRenderer.invoke("terminal:create-shell", { terminalId, cols, rows }),
+  createShellTerminal: (terminalId: string, cols: number, rows: number, cwd: string | null = null) =>
+    ipcRenderer.invoke("terminal:create-shell", { terminalId, cols, rows, cwd }),
   writeTerminal: (terminalId: string, data: string) =>
     ipcRenderer.send("terminal:input", { terminalId, data }),
   resizeTerminal: (terminalId: string, cols: number, rows: number) =>
@@ -117,8 +117,58 @@ contextBridge.exposeInMainWorld("clanceApp", {
   // ---- git (see docs/design.md's "Changes pane") ----
   gitStatus: (dir: string) => ipcRenderer.invoke("git:status", dir),
   gitFileDiff: (dir: string, path: string) => ipcRenderer.invoke("git:file-diff", dir, path),
-  openFileView: (dir: string, path: string) => ipcRenderer.invoke("file:open", dir, path),
   revealFile: (path: string) => ipcRenderer.invoke("file:reveal", path),
+
+  // ---- editor (see docs/design.md's "Editor") ----
+  docRead: (dir: string, path: string, asText = false) => ipcRenderer.invoke("doc:read", dir, path, asText),
+  docSave: (root: string, path: string, text: string, options: unknown) =>
+    ipcRenderer.invoke("doc:save", root, path, text, options),
+  docWatch: (root: string, path: string) => ipcRenderer.invoke("doc:watch", root, path),
+  docUnwatch: (root: string, path: string) => ipcRenderer.invoke("doc:unwatch", root, path),
+  docOpenDefaultApp: (root: string, path: string) => ipcRenderer.invoke("doc:open-default-app", root, path),
+  docConfirmUnsaved: (names: string[]) => ipcRenderer.invoke("doc:confirm-unsaved", names),
+  onDocChanged: (callback: (payload: { root: string; path: string }) => void) => {
+    const listener = (_event: unknown, payload: { root: string; path: string }) => callback(payload);
+    ipcRenderer.on("doc:changed", listener);
+    return () => ipcRenderer.removeListener("doc:changed", listener);
+  },
+  onDocHeadChanged: (callback: (payload: { root: string }) => void) => {
+    const listener = (_event: unknown, payload: { root: string }) => callback(payload);
+    ipcRenderer.on("doc:head-changed", listener);
+    return () => ipcRenderer.removeListener("doc:head-changed", listener);
+  },
+  // Closing the window or quitting asks here first (see mainWindow.ts).
+  onBeforeClose: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on("window:before-close", listener);
+    return () => ipcRenderer.removeListener("window:before-close", listener);
+  },
+  replyBeforeClose: (reply: "close" | "cancel" | "pending") => ipcRenderer.send("window:before-close-reply", reply),
+  // Files and folders opened from Finder or `clance` (see openPaths.ts).
+  takeOpenedPaths: () => ipcRenderer.invoke("open-paths:take"),
+  onOpenedPaths: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on("open-paths-available", listener);
+    return () => ipcRenderer.removeListener("open-paths-available", listener);
+  },
+  // Find in Files (see search.ts): results stream back as events.
+  searchStart: (id: number, root: string, options: unknown) => ipcRenderer.send("search:start", id, root, options),
+  searchCancel: () => ipcRenderer.send("search:cancel"),
+  onSearchResults: (callback: (payload: { id: number; matches: unknown[] }) => void) => {
+    const listener = (_event: unknown, payload: { id: number; matches: unknown[] }) => callback(payload);
+    ipcRenderer.on("search:results", listener);
+    return () => ipcRenderer.removeListener("search:results", listener);
+  },
+  onSearchDone: (callback: (payload: { id: number; count: number; capped: boolean; error: string | null }) => void) => {
+    const listener = (_event: unknown, payload: { id: number; count: number; capped: boolean; error: string | null }) =>
+      callback(payload);
+    ipcRenderer.on("search:done", listener);
+    return () => ipcRenderer.removeListener("search:done", listener);
+  },
+  cliStatus: () => ipcRenderer.invoke("cli:status"),
+  cliInstall: () => ipcRenderer.invoke("cli:install"),
+  editorGetConfig: () => ipcRenderer.invoke("editor:get-config"),
+  editorSetConfig: (patch: unknown) => ipcRenderer.invoke("editor:set-config", patch),
   openExternalUrl: (url: string) => ipcRenderer.invoke("shell:open-external", url),
   gitListFiles: (dir: string) => ipcRenderer.invoke("git:list-files", dir),
   gitLog: (dir: string, limit?: number) => ipcRenderer.invoke("git:log", dir, limit),
@@ -134,6 +184,14 @@ contextBridge.exposeInMainWorld("clanceApp", {
     ipcRenderer.invoke("files:list-directory", root, path, showIgnored),
   filesResolveFile: (root: string, path: string) => ipcRenderer.invoke("files:resolve-file", root, path),
   filesFolderRepo: (root: string) => ipcRenderer.invoke("files:folder-repo", root),
+  filesCreate: (root: string, parent: string, name: string, kind: "file" | "folder") =>
+    ipcRenderer.invoke("files:create", root, parent, name, kind),
+  filesRename: (root: string, path: string, name: string) => ipcRenderer.invoke("files:rename", root, path, name),
+  filesMove: (root: string, path: string, dest: string) => ipcRenderer.invoke("files:move", root, path, dest),
+  filesDuplicate: (root: string, path: string) => ipcRenderer.invoke("files:duplicate", root, path),
+  filesTrash: (root: string, path: string) => ipcRenderer.invoke("files:trash", root, path),
+  filesCopyIn: (root: string, dest: string, sources: string[], onConflict: "ask" | "replace" | "keep-both") =>
+    ipcRenderer.invoke("files:copy-in", root, dest, sources, onConflict),
   gitStage: (dir: string, paths: string[]) => ipcRenderer.invoke("git:stage", dir, paths),
   gitUnstage: (dir: string, paths: string[]) => ipcRenderer.invoke("git:unstage", dir, paths),
   gitDiscard: (dir: string, paths: string[]) => ipcRenderer.invoke("git:discard", dir, paths),

@@ -3,10 +3,24 @@ import { Icon } from "../shared/icons.js";
 import { ChatsListSection, MenuItem, focusSessionSearch } from "./sections/ChatsSection.js";
 import { ChangesSection } from "./sections/ChangesSection.js";
 import { FilesSection } from "./sections/FilesSection.js";
+import { SearchSection, focusSearchInput } from "./sections/SearchSection.js";
 import { FileSection } from "./sections/FileSection.js";
 import { SettingsSection } from "./sections/SettingsSection.js";
 import { DictationSection } from "./sections/DictationSection.js";
 import { TerminalSection, nextTerminalId, destroyTerminal } from "./sections/TerminalSection.js";
+import {
+  loadEditorConfig,
+  release as releaseBuffer,
+  isDirty,
+  onDirtyChange,
+  dirtyBuffers,
+  peek as peekBuffer,
+  save as saveBuffer,
+  saveAll as saveAllBuffers,
+  rekey as rekeyBuffer,
+  acquire as acquireBuffer,
+  revealLine,
+} from "./editor/buffers.js";
 import {
   getState,
   subscribe,
@@ -23,12 +37,15 @@ import {
   resizeSplit,
   findPane,
   canSplitAt,
+  movedFileTab,
+  rekeyFileTabs,
 } from "./state/layoutStore.js";
 
 const LAUNCHER_ITEMS = [
   { id: "chats", label: "Sessions", icon: "chat" },
   { id: "changes", label: "Changes", icon: "gitBranch" },
   { id: "files", label: "Files", icon: "folder" },
+  { id: "search", label: "Search", icon: "search" },
   { id: "dictation", label: "Dictation", icon: "mic" },
   { id: "settings", label: "Settings", icon: "gear" },
 ];
@@ -36,7 +53,7 @@ const LAUNCHER_ITEMS = [
 // Sections read *alongside* the work rather than instead of it, so they open
 // in a pane beside it. The second one to open joins the first's pane as a tab
 // rather than taking another quarter of the window.
-const SIDECARS = new Set(["changes", "files"]);
+const SIDECARS = new Set(["changes", "files", "search"]);
 
 // How often an unnamed session tab asks whether its conversation has a name
 // yet. Only runs while at least one tab is still unnamed.
@@ -62,7 +79,7 @@ function findSplitContainingTab(node, tabId) {
 // Tab types that fill their pane themselves rather than sitting in the
 // padded, 880px-wide content column — a terminal, a file and the Changes
 // sidecar all want every pixel.
-const FLUSH_TAB_TYPES = new Set(["terminal", "file", "changes", "files"]);
+const FLUSH_TAB_TYPES = new Set(["terminal", "file", "changes", "files", "search"]);
 
 // Below this much room per tab, a label can only be shown as a few clipped
 // letters, which says less than the icon does on its own. Measured against
@@ -82,6 +99,62 @@ const DRAG_THRESHOLD_PX = 4;
 // hit-test, computed independently (see the comment in hitTest() for why).
 const OUTER_FRACTION = 0.1;
 const INNER_FRACTION = 0.18;
+
+// ---- closing tabs ----
+//
+// Every way a tab closes — its ✕, ⌘W, the tab menu's bulk closes — comes
+// through `closeTabsSafely`, so each one asks about unsaved edits the same
+// way and ends what the tab held: a terminal's pty (a tab switch keeps it
+// alive, so closing has to end it explicitly; a session's background agent
+// goes on running either way) and a file's buffer.
+
+// Most recent last, for ⇧⌘T. A plain shell's pty is gone once its tab
+// closes, so there's nothing to reopen and it isn't remembered.
+const closedTabs = [];
+const MAX_CLOSED_TABS = 20;
+
+function rememberClosed(tab, paneId) {
+  if (tab.type === "terminal" && !tab.args?.length) return;
+  closedTabs.push({ tab, paneId });
+  if (closedTabs.length > MAX_CLOSED_TABS) closedTabs.shift();
+}
+
+/** Save / Don't Save / Cancel for any of `tabs` with unsaved edits. */
+async function confirmUnsaved(tabs) {
+  const dirty = tabs.filter((tab) => tab.type === "file" && isDirty(tab.repoRoot, tab.path));
+  if (dirty.length === 0) return true;
+  const choice = await window.clanceApp.docConfirmUnsaved(dirty.map((tab) => tab.path));
+  if (choice === "cancel") return false;
+  if (choice === "discard") return true;
+  for (const tab of dirty) {
+    const buffer = peekBuffer(tab.repoRoot, tab.path);
+    // A save that hit a conflict (or failed) keeps the tab open, with the
+    // banner saying why.
+    if (!buffer || (await saveBuffer(buffer)) !== "saved") return false;
+  }
+  return true;
+}
+
+function endTab(tab, paneId) {
+  if (tab.type === "terminal") destroyTerminal(tab.terminalId);
+  if (tab.type === "file") releaseBuffer(tab.repoRoot, tab.path);
+  rememberClosed(tab, paneId);
+}
+
+async function closeTabsSafely(paneId, tabs, focusTabId) {
+  if (tabs.length === 0) return false;
+  const current = getState();
+  const pane = findPane(current.root, paneId);
+  if (!pane) return false;
+  // The store keeps the only pane from losing its last tab to a single close;
+  // don't end a tab that won't actually go.
+  if (tabs.length === 1 && current.root.type === "leaf" && pane.tabs.length <= 1) return false;
+  if (!(await confirmUnsaved(tabs))) return false;
+  tabs.forEach((tab) => endTab(tab, paneId));
+  if (tabs.length === 1) closeTab(paneId, tabs[0].id);
+  else closeTabs(paneId, tabs.map((tab) => tab.id), focusTabId);
+  return true;
+}
 
 // Every leaf pane in the tree, left to right.
 function leavesOf(node, out = []) {
@@ -287,14 +360,21 @@ function FilePalette({ onPick, onClose }) {
   `;
 }
 
-function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut, openSection, openFileTab) {
+function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut, openSection, openFileTab, launcher) {
   switch (tab.type) {
     case "chats":
       return html`<${ChatsListSection} onOpenChat=${openChatTab} onNewChat=${openNewChatTab} />`;
     case "changes":
       return html`<${ChangesSection} onOpenFile=${openFileTab} />`;
     case "files":
-      return html`<${FilesSection} onOpenFile=${openFileTab} />`;
+      return html`<${FilesSection}
+        onOpenFile=${openFileTab}
+        onPathMoved=${launcher.onPathMoved}
+        onOpenTerminal=${launcher.openShellTab}
+        onAskClaude=${launcher.askClaudeAbout}
+      />`;
+    case "search":
+      return html`<${SearchSection} onOpenResult=${launcher.openSearchResult} />`;
     case "file":
       return html`<${FileSection} repoRoot=${tab.repoRoot} path=${tab.path} onOpenFile=${openFileTab} />`;
     case "settings":
@@ -304,7 +384,13 @@ function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut, openSectio
       // duplicated here, so the tab needs a way to send the user there.
       return html`<${DictationSection} onOpenSettings=${() => openSection("settings")} />`;
     case "terminal":
-      return html`<${TerminalSection} terminalId=${tab.terminalId} args=${tab.args} shell=${tab.shell} onPopOut=${onPopOut} />`;
+      return html`<${TerminalSection}
+        terminalId=${tab.terminalId}
+        args=${tab.args}
+        shell=${tab.shell}
+        cwd=${tab.cwd}
+        onPopOut=${onPopOut}
+      />`;
     default:
       return null;
   }
@@ -505,13 +591,8 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
     });
   }
 
-  // Same as the tab's own ✕, for however many tabs: a terminal tab keeps its
-  // pty alive across a mere tab switch, so closing it has to end it
-  // explicitly. The session behind it is a background agent and goes on
-  // running either way.
   function closeMany(tabs, focusTab) {
-    tabs.forEach((tab) => tab.type === "terminal" && destroyTerminal(tab.terminalId));
-    closeTabs(node.id, tabs.map((tab) => tab.id), focusTab?.id);
+    return closeTabsSafely(node.id, tabs, focusTab?.id);
   }
 
   // A file tab's path on disk. `repoRoot` is the folder it was opened from
@@ -531,9 +612,8 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
   // "done with this" means both. `attach <agentId>` is the only shape a
   // Clance session tab has; stopping by that id is what the Sessions tab's
   // Stop does too.
-  function closeAndStop(tab) {
-    closeMany([tab]);
-    window.clanceApp.stopAgent(tab.args[1]);
+  async function closeAndStop(tab) {
+    if (await closeMany([tab])) window.clanceApp.stopAgent(tab.args[1]);
   }
 
   function renderTabMenu() {
@@ -604,7 +684,9 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
             (tab, i) => html`
               <button
                 key=${tab.id}
-                class="tab ${tab.id === node.activeTabId ? "tab-active" : ""} ${compact ? "tab-compact" : ""}"
+                class="tab ${tab.id === node.activeTabId ? "tab-active" : ""} ${compact ? "tab-compact" : ""} ${
+                  tab.type === "file" && isDirty(tab.repoRoot, tab.path) ? "tab-dirty" : ""
+                }"
                 onPointerDown=${(e) => {
                   hideTip();
                   startDrag(e, tab, node.id);
@@ -620,16 +702,11 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
                   onPointerDown=${(e) => e.stopPropagation()}
                   onClick=${(e) => {
                     e.stopPropagation();
-                    // Terminal tabs keep their pty/xterm alive across a mere
-                    // tab-switch unmount (see TerminalSection.js's registry)
-                    // — this ✕ is the one place that means "actually end
-                    // this session", so tear it down explicitly rather than
-                    // relying on the component's now-nondestructive unmount.
-                    if (tab.type === "terminal") destroyTerminal(tab.terminalId);
-                    closeTab(node.id, tab.id);
+                    closeTabsSafely(node.id, [tab]);
                   }}
                 >
-                  ${Icon.close(12)}
+                  <span class="tab-close-x">${Icon.close(12)}</span>
+                  <span class="tab-dirty-dot" aria-label="Unsaved changes"></span>
                 </span>
               </button>
             `
@@ -681,7 +758,8 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
           // bare reference here is a ReferenceError that throws during
           // render and leaves the whole window stuck on "Loading…".
           launcher.openSection,
-          launcher.openFileTab
+          launcher.openFileTab,
+          launcher
         )}
         ${dragTab &&
         splittableEdges.length > 0 &&
@@ -714,6 +792,8 @@ export function Shell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [updateCopied, setUpdateCopied] = useState(false);
   const [dragTab, setDragTab] = useState(null);
+  // Set once Ask Claude is wired (below); the launcher calls through it.
+  const askClaudeAboutRef = useRef(null);
   const paneAreaRef = useRef(null);
   const previewRef = useRef(null);
 
@@ -1044,7 +1124,8 @@ export function Shell() {
 
   // One tab per file, keyed by repo and path so opening the same file twice
   // focuses the tab that's already there rather than making a second copy.
-  function openFileTab(repoRoot, path) {
+  // `line`, when given, puts the cursor there (a search result).
+  function openFileTab(repoRoot, path, line = null) {
     openTab(
       {
         id: `file:${repoRoot}:${path}`,
@@ -1056,6 +1137,15 @@ export function Shell() {
       },
       { paneId: paneForFileTabs() }
     );
+    if (line) revealLine(acquireBuffer(repoRoot, path), line);
+  }
+
+  // A search result is relative to the folder searched; a file inside a
+  // repository opens against the repository, the same tab Files or Changes
+  // would open.
+  async function openSearchResult(root, path, line) {
+    const resolved = await window.clanceApp.filesResolveFile(root, path);
+    if (resolved) openFileTab(resolved.root, resolved.path, line);
   }
 
   // ⌘W. The store keeps the window from ever being empty, so the last tab
@@ -1068,14 +1158,37 @@ export function Shell() {
     const tab = pane?.tabs.find((t) => t.id === pane.activeTabId);
     if (!pane || !tab) return;
     if (current.root.type === "leaf" && pane.tabs.length <= 1) {
+      // Closing the window asks about unsaved edits itself (see the
+      // before-close handler below).
       window.close();
       return;
     }
-    // Same as the tab's own ✕: a terminal tab keeps its pty alive across a
-    // mere tab switch, so closing it has to end it explicitly. The session
-    // behind it is a background agent and goes on running either way.
-    if (tab.type === "terminal") destroyTerminal(tab.terminalId);
-    closeTab(pane.id, tab.id);
+    closeTabsSafely(pane.id, [tab]);
+  }
+
+  // The file tab that has focus, if the focused pane is showing one.
+  function activeFileTab() {
+    const current = getState();
+    const pane = findPane(current.root, current.activePaneId);
+    const tab = pane?.tabs.find((t) => t.id === pane.activeTabId);
+    return tab?.type === "file" ? tab : null;
+  }
+
+  function saveActive() {
+    const tab = activeFileTab();
+    const buffer = tab && peekBuffer(tab.repoRoot, tab.path);
+    if (buffer) saveBuffer(buffer);
+  }
+
+  // ⇧⌘T: the most recently closed tab, back in the pane it left if that pane
+  // still exists. A session tab reattaches with a fresh terminal.
+  function reopenClosedTab() {
+    const entry = closedTabs.pop();
+    if (!entry) return;
+    const { tab, paneId } = entry;
+    const target = findPane(getState().root, paneId) ? paneId : getState().activePaneId;
+    const reopened = tab.type === "terminal" ? { ...tab, terminalId: nextTerminalId() } : tab;
+    openTab(reopened, { paneId: target });
   }
 
   // ⌃⇥ / ⇧⌃⇥, within the pane that has focus — a pane is its own tab strip,
@@ -1098,6 +1211,134 @@ export function Shell() {
       if (command === "close-tab") closeActiveTab();
       else if (command === "next-tab") cycleTab(1);
       else if (command === "prev-tab") cycleTab(-1);
+      else if (command === "save") saveActive();
+      else if (command === "save-all") saveAllBuffers();
+      else if (command === "reopen-tab") reopenClosedTab();
+      else if (command === "ask-claude") askAboutSelection();
+      else if (command === "find-in-files") {
+        openSection("search");
+        focusSearchInput();
+      }
+    });
+  }, []);
+
+  // ---- Ask Claude (⌘L) ----
+  //
+  // A reference to code goes into a session's prompt — as a bracketed paste,
+  // so the CLI takes it as pasted text and doesn't send it. It goes to the
+  // session tab used most recently; with none open, a new session starts in
+  // the file's folder and the paste waits until it's ready.
+
+  const lastSessionRef = useRef(null);
+  useEffect(() => {
+    const pane = findPane(state.root, state.activePaneId);
+    const tab = pane?.tabs.find((t) => t.id === pane.activeTabId);
+    if (tab?.type === "terminal" && tab.args?.[0] === "attach") lastSessionRef.current = tab.id;
+  }, [state]);
+
+  function sessionTarget() {
+    const tabs = listTabs(getState().root);
+    return (
+      tabs.find(({ tab }) => tab.id === lastSessionRef.current) ??
+      tabs.find(({ tab }) => tab.type === "terminal" && tab.args?.[0] === "attach") ??
+      null
+    );
+  }
+
+  function bracketedPaste(terminalId, text) {
+    window.clanceApp.writeTerminal(terminalId, `\x1b[200~${text}\x1b[201~`);
+  }
+
+  // A new session's CLI takes a moment to draw its prompt, and text written
+  // before then is lost — so the paste waits for its output to go quiet.
+  function pasteWhenReady(terminalId, text) {
+    let done = false;
+    let quiet = null;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      stop();
+      clearTimeout(quiet);
+      clearTimeout(giveUp);
+      bracketedPaste(terminalId, text);
+    };
+    const stop = window.clanceApp.onTerminalData(({ terminalId: id }) => {
+      if (id !== terminalId) return;
+      clearTimeout(quiet);
+      quiet = setTimeout(finish, 1200);
+    });
+    const giveUp = setTimeout(finish, 10000);
+  }
+
+  async function askClaude(text, dir) {
+    const target = sessionTarget();
+    if (target) {
+      activateTab(target.paneId, target.tab.id);
+      bracketedPaste(target.tab.terminalId, text);
+      return;
+    }
+    const terminalId = await openNewChatTab(dir);
+    if (terminalId) pasteWhenReady(terminalId, text);
+  }
+
+  // The focused editor's selection, or the line the cursor is on.
+  function askAboutSelection() {
+    const tab = activeFileTab();
+    const view = tab && peekBuffer(tab.repoRoot, tab.path)?.view;
+    if (!tab || !view) return;
+    const { from, to } = view.state.selection.main;
+    const doc = view.state.doc;
+    const first = doc.lineAt(from);
+    const last = doc.lineAt(to > from && doc.lineAt(to).from === to ? to - 1 : to);
+    const code = from === to ? first.text : doc.sliceString(first.from, last.to);
+    const lines = first.number === last.number ? `line ${first.number}` : `lines ${first.number}–${last.number}`;
+    const abs = `${tab.repoRoot}/${tab.path}`;
+    askClaude(`\`${abs}\` ${lines}:\n\`\`\`\n${code}\n\`\`\`\n`, tab.repoRoot);
+  }
+
+  askClaudeAboutRef.current = ({ path, directory }) =>
+    askClaude(`\`${path}\` `, directory ? path : path.slice(0, path.lastIndexOf("/")));
+
+  // Tabs show a dot while their file has unsaved edits.
+  const [, setDirtyTick] = useState(0);
+  useEffect(() => onDirtyChange(() => setDirtyTick((n) => n + 1)), []);
+
+  useEffect(() => {
+    loadEditorConfig();
+  }, []);
+
+  // Files and folders opened from Finder or `clance`: a file opens as a tab,
+  // a folder points Files at it. Taken on mount (anything opened during
+  // launch is waiting) and whenever more arrive.
+  useEffect(() => {
+    async function take() {
+      const opened = (await window.clanceApp.takeOpenedPaths()) ?? [];
+      for (const item of opened) {
+        if (item.kind === "file") {
+          openFileTab(item.root, item.path);
+        } else {
+          await window.clanceApp.filesSetLastFolder(item.root);
+          openSection("files");
+          window.dispatchEvent(new CustomEvent("clance:files-folder", { detail: item.root }));
+        }
+      }
+    }
+    take();
+    return window.clanceApp.onOpenedPaths(take);
+  }, []);
+
+  // Closing the window or quitting asks here first (mainWindow.ts holds the
+  // close until this answers): nothing to save closes at once; otherwise one
+  // Save / Don't Save / Cancel covers every file with unsaved edits.
+  useEffect(() => {
+    return window.clanceApp.onBeforeClose(async () => {
+      const dirty = dirtyBuffers();
+      if (dirty.length === 0) return window.clanceApp.replyBeforeClose("close");
+      window.clanceApp.replyBeforeClose("pending");
+      const choice = await window.clanceApp.docConfirmUnsaved(dirty.map((buffer) => buffer.path));
+      if (choice === "cancel") return window.clanceApp.replyBeforeClose("cancel");
+      if (choice === "save" && !(await saveAllBuffers())) return window.clanceApp.replyBeforeClose("cancel");
+      window.clanceApp.replyBeforeClose("close");
     });
   }, []);
 
@@ -1131,8 +1372,9 @@ export function Shell() {
       const { id, name } = await window.clanceApp.spawnNewAgent([], dir);
       openTab(
         { id: terminalId, type: "terminal", label: name, icon: "terminal", terminalId, args: ["attach", id] },
-        { paneId: state.activePaneId }
+        { paneId: getState().activePaneId }
       );
+      return terminalId;
     } finally {
       openingRef.current.delete(key);
     }
@@ -1143,12 +1385,25 @@ export function Shell() {
   // `claude` themselves, project commands, or anything else, alongside
   // Clance-launched sessions. No background agent to mint first (unlike
   // openNewChatTab above), so this opens synchronously.
-  function openShellTab() {
+  // `cwd` is set by the Files tree's Open in Terminal; the launcher's button
+  // opens in the default directory.
+  function openShellTab(cwd = null) {
     const terminalId = nextTerminalId();
+    const label = cwd ? cwd.split("/").filter(Boolean).pop() : "Terminal";
     openTab(
-      { id: terminalId, type: "terminal", label: "Terminal", icon: "terminal", terminalId, shell: true },
-      { paneId: state.activePaneId }
+      { id: terminalId, type: "terminal", label, icon: "terminal", terminalId, shell: true, ...(cwd ? { cwd } : {}) },
+      { paneId: getState().activePaneId }
     );
+  }
+
+  // A file or folder renamed or moved in the Files tree: open tabs, and the
+  // buffers behind them (with any unsaved edits), follow it.
+  function onPathMoved(fromAbs, toAbs) {
+    for (const { tab } of listTabs(getState().root)) {
+      const moved = movedFileTab(tab, fromAbs, toAbs);
+      if (moved) rekeyBuffer(tab.repoRoot, tab.path, moved.repoRoot, moved.path);
+    }
+    rekeyFileTabs(fromAbs, toAbs);
   }
 
   async function openChatTab(session) {
@@ -1205,6 +1460,9 @@ export function Shell() {
 
   const launcher = {
     openFileTab,
+    openSearchResult,
+    onPathMoved,
+    askClaudeAbout: (...args) => askClaudeAboutRef.current?.(...args),
     topRightPaneId,
     claudeConnected,
     activeSectionId: activeTab?.type,

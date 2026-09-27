@@ -35,7 +35,7 @@ function getOffscreenHost() {
   return offscreenHost;
 }
 
-function getOrCreateEntry(terminalId, { shell, args }) {
+function getOrCreateEntry(terminalId, { shell, args, cwd }) {
   const existing = registry.get(terminalId);
   if (existing) return existing;
 
@@ -81,7 +81,7 @@ function getOrCreateEntry(terminalId, { shell, args }) {
   fitAddon.fit();
 
   if (shell) {
-    window.clanceApp.createShellTerminal(terminalId, term.cols, term.rows);
+    window.clanceApp.createShellTerminal(terminalId, term.cols, term.rows, cwd ?? null);
   } else {
     window.clanceApp.createTerminal(terminalId, "claude", args, term.cols, term.rows);
   }
@@ -165,11 +165,11 @@ export function destroyTerminal(terminalId) {
   window.clanceApp.killTerminal(terminalId);
 }
 
-export function TerminalSection({ terminalId, args = [], shell = false, onPopOut }) {
+export function TerminalSection({ terminalId, args = [], shell = false, cwd = null, onPopOut }) {
   const containerRef = useRef(null);
 
   useEffect(() => {
-    const entry = getOrCreateEntry(terminalId, { shell, args });
+    const entry = getOrCreateEntry(terminalId, { shell, args, cwd });
     const container = containerRef.current;
     container.appendChild(entry.termHost);
     entry.fitAddon.fit();

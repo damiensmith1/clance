@@ -197,42 +197,33 @@ Sessions Clance starts get these tools when Accessibility is granted:
 
 ## Files
 
-- Any file in the current repository, or in the folder the Files explorer is
-  pointed at, can be opened as a tab and read — Clance is a read-only viewer
-  over the code a session is writing. It never edits a file.
+- Any file in the current repository, in the folder the Files explorer is
+  pointed at, or opened from Finder, can be opened as a tab — and edited,
+  where it's text (see Editor).
 - ⌘P opens a file by name from anywhere in the main window, matching on any
   subsequence of its path, over every tracked file and every untracked one git
   isn't ignoring.
-- A file tab shows the whole file, syntax highlighted, with its changes marked
-  in place: added lines, and deleted lines put back where they were.
-- A Diff / Clean choice switches between the marks and the file exactly as it
-  stands on disk. Both views come from one read, so they can't disagree about
-  what the file says.
-- A changed file's tab says how many changes it has and can jump between
-  them, since a change can be a long way down a long file.
+- A file tab shows the whole file, syntax highlighted, with lines changed
+  since the last commit marked in the gutter. An **Edit / Diff** choice
+  switches to the file with its deleted lines put back where they were, a
+  count of changes, and jumping between them, since a change can be a long
+  way down a long file.
 - A file tab follows the file: a session writing to it while it's open updates
-  what's shown.
+  what's shown (see Editor for when there are unsaved edits).
 - One tab per file — opening the same file again focuses the tab that's
-  already there. Files open beside the Changes pane rather than over it.
-- A file is drawn by a **reader** chosen from its path: text with syntax
-  highlighting, images, or markdown. A table over a CSV or a JSON tree would
-  each be another. A reader returns its own payload, so a file view is not a
-  list of lines with a diff on it, and whether a file has a Diff / Clean
-  choice at all is something its reader says.
+  already there. Files open beside the sidecars rather than over them.
 - An image opens in a tab of its own and is shown at its size, fit to the
-  pane, with its file size in the header. A transparent one reads as
-  transparent rather than as whatever colour the page happens to be.
-- A markdown file opens rendered, with a **Rendered / Raw** choice. Raw is
-  the source with its changes marked in place, so a changed document can
-  still be read as a diff. A file whose reader has only one view never shows
-  the choice — an SVG offers Image / Raw, a PNG offers nothing, a `.ts` is
-  only itself.
+  pane. A transparent one reads as transparent rather than as whatever colour
+  the page happens to be.
+- A markdown file opens rendered, with a **Rendered / Source** choice; the
+  rendered view follows unsaved edits.
 - Rendered markdown covers CommonMark and GitHub's extensions (tables, task
   lists, strikethrough, autolinks, footnotes, `> [!NOTE]` alerts), definition
   lists, `==mark==` / `~sub~` / `^sup^`, and Obsidian's callouts, wikilinks,
-  `#tags` and `%%comments%%`. Front matter shows as its YAML source — fenced, monospace, keys picked out — rather than run together into a paragraph. Code
-  blocks are highlighted and have a Copy button; a `diff` block is coloured
-  by line. Math and Mermaid show as their source.
+  `#tags` and `%%comments%%`. Front matter shows as its YAML source — fenced,
+  monospace, keys picked out — rather than run together into a paragraph.
+  Code blocks are highlighted and have a Copy button; a `diff` block is
+  coloured by line. Math and Mermaid show as their source.
 - Raw HTML in a document renders, sanitized: anything that can run code —
   scripts, event handlers, `javascript:` URLs, iframes, objects, forms,
   `<style>`, SVG — is removed, so opening a document is never running it.
@@ -244,17 +235,15 @@ Sessions Clance starts get these tools when Accessibility is granted:
   relative path opens that file in a tab. Anything else opens in the
   browser, only if it is http, https or mailto, and the URL is re-parsed
   before it is opened rather than handed over as it was written.
-- A file no reader claims says what it can about itself — its name, its size —
-  rather than apologising. So does one larger than its reader will open.
-- A reader never executes what it reads. File content is drawn, never turned
+- A file tab never executes what it shows. File content is drawn, never turned
   into live markup, because a folder being browsed may have been cloned a
   minute ago and SVG and HTML both carry script. Rendered markdown is the one
   place a file's own HTML reaches the page, and only through the sanitizer.
-- Readers are added in the codebase. Clance loads nothing from a user's disk
-  to render a file, and this isn't a plugin surface.
 - A file tab open when the branch changes under it follows the branch. If the
   file doesn't exist on the new branch it says so, which is different from
   saying the file is gone — a file git has never heard of says that instead.
+  A file deleted since the last commit shows its last committed version,
+  read-only.
 
 ## Files explorer
 
@@ -285,18 +274,131 @@ Sessions Clance starts get these tools when Accessibility is granted:
   folder is never readable through Files, including through a link inside it:
   paths are resolved before they are checked, because a link pointing at
   `~/.ssh/id_rsa` passes every test made on a path as text.
-- Files never writes. Moving, renaming or creating a file is a capability the
-  model may be given later, and it would arrive as a local MCP tool gated by
-  Claude Code's own approval prompt — not as a button in the tree.
+- Files writes too: see File operations.
+
+## Editor
+
+- A text file's tab is an editor. The same tab reads and edits; there is no
+  separate "edit mode" to enter.
+- The keys are VS Code's, since that's what an engineer's hands already know:
+  ⌘S save, ⌥⌘S save all, ⌘Z / ⇧⌘Z, ⌘F find, ⌥⌘F replace, ⌘G / ⇧⌘G next and
+  previous match, ⌃G go to line, ⌘D add next occurrence, ⌘-click add cursor,
+  ⌥-drag column selection,
+  ⌘/ toggle comment, ⌘] / ⌘[ indent, ⌥↑ / ⌥↓ move line, ⇧⌥↓ duplicate line,
+  ⇧⌘K delete line, ⌥Z toggle wrap. Bracket matching, auto-closing brackets,
+  auto-indent and code folding are on.
+- Syntax highlighting while editing covers at least TypeScript / JavaScript
+  (and JSX), JSON, CSS, HTML, Markdown, Python, shell, YAML, TOML, SQL, Rust,
+  Go, Swift, Dockerfile and `.env`. Anything else edits as plain text.
+- Lines changed since the last commit are marked in the gutter while editing.
+  Diff is read-only, so a save never has two views to come from.
+- Saving is manual. There is no auto-save: a session may be writing the same
+  file, and a save nobody asked for is how one side's work disappears.
+- A tab with unsaved edits shows a dot in place of its ✕. Closing it — ✕, ⌘W,
+  Close Other Tabs, closing the window, quitting — asks Save / Don't Save /
+  Cancel. Unsaved edits survive switching tabs and moving a tab between panes.
+- A file that changes on disk while open:
+  - With no unsaved edits, the tab follows it, as today, keeping the cursor
+    and scroll position.
+  - With unsaved edits, a banner says so and offers **Keep mine** (the next
+    save overwrites), **Take theirs** (discard mine) and **Compare** (theirs
+    and mine side by side, taking changes across either way). Nothing is
+    reloaded or overwritten until one is chosen.
+  - A save never silently overwrites a version it hasn't seen. If the file
+    changed since it was loaded, saving opens the same choice instead.
+  - A file deleted on disk while open says so; saving recreates it.
+- Saving keeps the file's line endings, its final newline or lack of one, a
+  UTF-8 byte-order mark if it had one, and its permissions. A save is atomic:
+  a session reading the file mid-save sees the old version or the new one,
+  never half of each.
+- Indentation (tabs or spaces, and width) is detected from the file. Settings
+  has the editor font size, the default indent and whether lines wrap.
+- Some views stay read-only and say why: a deleted file's last committed
+  version, a file not on the current branch, a file over the editor's size
+  limit, and anything that isn't text.
+
+## File types
+
+- A file opens with a **handler** chosen from its name, and its contents
+  where the name isn't enough. A handler decides how that kind of file is
+  shown, whether it can be edited, and which views it offers (Rendered /
+  Source, Image / Source).
+- Handlers at first:
+  - **Text and code** — the editor.
+  - **Markdown** — the editor, with the rendered view (everything under Files)
+    as a second view that follows unsaved edits live.
+  - **Images** — shown as today. An SVG adds an editable Source view.
+  - **`.env` files** — the editor with `.env` highlighting, and a toggle that
+    masks every value (for screen sharing). Masking changes what's shown,
+    never what's saved.
+  - **Everything else** — the name, size and kind, with **Open in Default
+    App**, **Reveal in Finder** and **Open as Text**.
+- Adding a file type means adding one handler module to a registry, without
+  touching file tabs. Handlers live in the codebase; none are loaded from disk.
+
+## File operations
+
+- The Files tree creates, renames, duplicates, moves and deletes: New File,
+  New Folder, Rename (inline), Duplicate, Delete, and dragging an entry onto a
+  folder to move it. All are in the entry's right-click menu, with New File
+  and New Folder also on the folder header.
+- Delete moves to the macOS Trash, never straight to deletion.
+- Dragging files from Finder onto a folder in the tree copies them in. A name
+  that's taken asks Replace / Keep Both / Cancel, as Finder does.
+- The right-click menu also offers Copy Path, Copy Relative Path, Reveal in
+  Finder, Open in Terminal (a shell tab in that folder) and Ask Claude.
+- Open tabs follow renames and moves. A file deleted from the tree with a tab
+  open leaves the tab saying the file is gone, with its unsaved edits intact.
+- Every write stays inside the folder or repository it was made from, checked
+  in the main process after resolving links, the same as reads. Nothing a
+  file contains can cause a write; only the person's own actions do.
+
+## Opening files from outside
+
+- Any file or folder can be opened in Clance from Finder: Open With, dragging
+  onto the Dock icon, or making Clance the default app for a type. Clance
+  offers itself for every kind of file but makes itself the default for
+  nothing unless asked.
+- `clance <path>` opens a file or folder from a terminal, and `clance`
+  alone opens the current folder. The Homebrew cask installs the command;
+  Settings offers to install it otherwise, and says if where it went isn't on
+  the shell's `PATH`.
+- A file inside a git repository opens against that repository, so it
+  arrives with its changes marked. Anything else opens with its own folder
+  as the root. A folder opens in the Files sidecar.
+- Opening a file launches Clance if it isn't running and shows the file once
+  the window is ready. Opening several at once opens each as a tab.
+
+## Search
+
+- ⇧⌘F searches the contents of every file under the Files folder (or the
+  current repository), skipping what git ignores unless asked not to.
+- Case, whole-word and regular-expression toggles, and include / exclude
+  globs.
+- Results stream in as they're found, grouped by file with the matching line,
+  and a new query cancels the old one. ↩ or a click opens the file with the
+  match selected. Results stop at 5,000 and say so.
+- It opens from the launcher as a sidecar, like Changes and Files.
+
+## Sessions and the editor
+
+- Selecting code and pressing ⌘L puts a reference to it — the file's path,
+  the line range and the selected code — into a session's prompt, without
+  sending it. With nothing selected it's the cursor's line. It goes to the session
+  tab used most recently; with none open, a new session starts in the file's
+  repository.
+- Ask Claude on a file or folder in the tree does the same for the whole
+  path.
+- ⇧⌘T reopens the most recently closed tab.
 
 ## Main window
 
 - Opens from the Dock icon or the menu-bar menu. While setup is incomplete it
   opens on launch.
-- A launcher opens Sessions, Changes, Files, Dictation, Settings, or a
-  plain shell terminal. Changes and Files are sidecars: they open in a pane
-  of its own on the right when the window can take one, and files open as
-  tabs beside it. The second sidecar to open joins the first's pane as a tab
+- A launcher opens Sessions, Changes, Files, Search, Dictation, Settings, or
+  a plain shell terminal. Changes, Files and Search are sidecars: they open
+  in a pane of their own on the right when the window can take one, and files
+  open as tabs beside it. A later sidecar joins the first's pane as a tab
   rather than taking another quarter of the window. Sections open as tabs;
   reopening one focuses it.
 - Tabs can be split into up to four panes by dragging to an edge (at most a
@@ -407,6 +509,8 @@ Sessions Clance starts get these tools when Accessibility is granted:
   and the update check.
 - **Light when idle.** No background capture of any kind; one spare `claude`
   process is kept warm.
+- **Editing keeps up.** Typing has no perceptible lag in a 10,000-line file,
+  and a 1 MB file opens in well under a second.
 
 ## Out of scope
 
@@ -418,20 +522,31 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - Clance writing or deleting session transcripts.
 - A full git client: history and graph views, branching, merging, rebasing,
   stashing, conflict resolution or anything that rewrites history.
-- Editing files. Clance reads code; the session writes it.
-- Cross-file search. The Files explorer reaches a file you can see; search
-  is a second navigation model with its own ranking and result UI, and a tree
-  doesn't imply one.
-- Anything else an editor does beyond opening a file and reading it: editing,
-  creating, renaming, moving or deleting, a preview that isn't a file tab,
-  drag and drop between folders, or more than one folder open at once.
-- A plugin marketplace or installer.
+- A debugger, a test-runner UI, or refactoring tools. Changes across a
+  codebase are a prompt to a session.
+- Language servers: completion, go-to-definition, hover types and
+  diagnostics (see Ideas).
+- Auto-save.
+- More than one folder open in Files at once.
+- Remote development (SSH, containers) and notebooks.
+- A plugin marketplace or installer, and file-type handlers or extensions
+  loaded from disk.
 - Self-updating.
 - For dictation: speaking responses aloud, non-English-first transcription,
   meeting recording, speaker diarization, transcribing audio files, and live
   two-way voice conversation with the model.
 
 ## Ideas (not committed)
+
+- **Language servers** — completion, go-to-definition and diagnostics for the
+  languages used most, started per repository on demand.
+- **User handlers, sandboxed** — file-type handlers loaded from
+  `~/.clance/handlers`, run in a sandboxed frame that talks to Clance only by
+  message, so a handler can't reach the terminal bridge.
+- **More handlers** — a table over a CSV, a tree over JSON, a hex view.
+- **Command palette** (⇧⌘P) over every command and setting.
+- **Replace across files** from the search results.
+- **Vim keybindings** as an editor setting.
 
 - **Quick Ask** — a separate fast path using the Agent SDK for read-only
   questions and `write_field`, escalating to a full session by starting a new
