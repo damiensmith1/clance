@@ -2473,12 +2473,12 @@
         gap: var(--space-1);
         width: 100%;
         padding-right: var(--space-2);
-        min-height: 22px;
+        min-height: 24px;
         background: transparent;
         border: none;
         color: var(--text-primary);
         font-family: var(--font-sans);
-        font-size: var(--text-sm);
+        font-size: var(--text-md);
         text-align: left;
         cursor: pointer;
       }
@@ -2722,10 +2722,20 @@
       .files-chevron.is-open {
         transform: rotate(90deg);
       }
+      /* Material Icon Theme's icons (src/shared/fileIcons.js), drawn as
+         images: coloured by file type, the way VS Code's tree reads. */
       .files-row-icon {
         display: flex;
         flex-shrink: 0;
-        color: var(--text-tertiary);
+        margin-right: 2px;
+      }
+      .files-row-icon img {
+        width: 16px;
+        height: 16px;
+      }
+      /* Ignored files keep their icon but dim with their name. */
+      .files-row-ignored .files-row-icon img {
+        opacity: 0.55;
       }
       /* The pane is a quarter of the window, so a name truncates rather than
          wrapping. It truncates at the end: `direction: rtl` would put the

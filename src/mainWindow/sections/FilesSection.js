@@ -1,6 +1,7 @@
 import { html, useEffect, useMemo, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
 import { Icon } from "../../shared/icons.js";
 import { MenuItem } from "./ChatsSection.js";
+import { fileIconUrl, folderIconUrl } from "../../shared/fileIcons.js";
 import { useTabState, useTabScroll } from "../state/tabState.js";
 
 // The Files explorer: a narrow pane like Changes, browsing any folder on the
@@ -595,7 +596,9 @@ export function FilesSection({ onOpenFile, onPathMoved, onOpenTerminal, onAskCla
     return html`
       <div class="files-row files-row-editing" style=${`padding-left: ${6 + depth * 11}px`}>
         <span class="files-row-twist"></span>
-        <span class="files-row-icon">${editing.kind === "folder" ? Icon.folder(13) : Icon.file(13)}</span>
+        <span class="files-row-icon">
+          <img src=${editing.kind === "folder" ? folderIconUrl(editing.value || "", false) : fileIconUrl(editing.value || "")} alt="" />
+        </span>
         <input
           class="files-name-input"
           value=${editing.value}
@@ -742,7 +745,7 @@ export function FilesSection({ onOpenFile, onPathMoved, onOpenTerminal, onAskCla
                   : ""}
               </span>
               <span class="files-row-icon">
-                ${isDir ? (expanded.has(entry.path) ? Icon.folderOpen(13) : Icon.folder(13)) : Icon.file(13)}
+                <img src=${isDir ? folderIconUrl(entry.name, expanded.has(entry.path)) : fileIconUrl(entry.name)} alt="" />
               </span>
               <span class="files-row-name">${entry.name}</span>
               ${entry.symlink && html`<span class="files-row-tag">link</span>`}

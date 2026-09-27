@@ -44,6 +44,7 @@ anything open-ended is handed to a Claude Code session. See "Assistant".
 | Main window UI | Preact + htm, vendored as one standalone module | No CDN, no build step |
 | Editor | CodeMirror 6, bundled once into `src/shared/vendor/codemirror.mjs` | See "Editor" |
 | Search | ripgrep (`@vscode/ripgrep-darwin-arm64`) | See "Search" |
+| File icons | A subset of Material Icon Theme (MIT), vendored by `scripts/build-file-icons.mjs` | See "Files explorer" |
 | Markdown | `markdown-it` + five of its plugins, and `DOMPurify` (vendored as ES modules under `src/shared/vendor/markdown/`) | See "Readers" |
 | Hotkeys | Electron `globalShortcut` | No key-up events, hence press-to-toggle dictation |
 | Keyboard/mouse/window access | `@nut-tree-fork/nut-js` | Needs Accessibility |
@@ -1157,6 +1158,17 @@ null rather than an empty set when git fails, because "git could not tell"
 and "nothing is ignored" are indistinguishable to a caller that can't tell
 them apart, and the second one quietly puts `node_modules` on screen. The
 tree then lists everything and says why.
+
+**Icons.** Rows carry file-type icons from Material Icon Theme — the ones VS
+Code users know — via `src/shared/fileIcons.js`: an exact file name first
+(`package.json`, `.gitignore`, `CLAUDE.md`), then the longest known extension
+(`test.ts` before `ts`), then a plain file; folders by name (`src`, `docs`,
+`.github`), open or closed. The full theme is ~1,250 SVGs and 5 MB, so
+`scripts/build-file-icons.mjs` copies only the icons the common names map to
+(~230, under 1 MB) plus a trimmed map, into `src/shared/vendor/file-icons/`;
+which icon a name gets is the theme's own manifest, and the script's lists
+only choose which names are worth shipping. The SVGs are drawn with `<img>`,
+so nothing in them can run.
 
 **Ignored files.** The tree lists them by default (dimmed), since it's for
 looking around a folder, not recalling a tracked file. One opens like any

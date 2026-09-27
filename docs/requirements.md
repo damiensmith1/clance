@@ -264,6 +264,8 @@ Sessions Clance starts get these tools when Accessibility is granted:
   switcher does: the default session directory, recently used directories,
   wherever running agents are working, and any other folder. It reopens on
   the folder it was last pointed at, independently of the Changes repository.
+- Rows have VS Code-style file-type icons (Material Icon Theme), by file
+  name, extension and folder name.
 - Directories expand and collapse, one level read at a time. Which are open
   is remembered per folder for as long as the app is running.
 - Every file in the folder is listed, including ones git ignores; those are
