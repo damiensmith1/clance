@@ -495,6 +495,10 @@ function rehydrateNode(node) {
     // empty tab.
     const tabs = node.tabs
       .filter((tab) => KNOWN_TAB_TYPES.has(tab?.type))
+      // A first session in an untrusted folder (a plain `claude`, not a
+      // background agent) ended with the app; bringing the tab back would
+      // start another, empty one.
+      .filter((tab) => !(tab.type === "terminal" && !tab.shell && tab.cwd))
       .map((tab) => (tab.type === "terminal" && !tab.shell ? { ...tab, terminalId: nextTerminalId() } : tab))
       // A file tab's view state used to be saved as `view`; it's `state.view` now.
       .map(({ view, ...tab }) => (view && !tab.state?.view ? { ...tab, state: { ...tab.state, view } } : tab));

@@ -54,6 +54,9 @@ contextBridge.exposeInMainWorld("clanceApp", {
   openInWidget: (args: string[]) => ipcRenderer.invoke("popup:open-with-args", args),
   createTerminal: (terminalId: string, command: string, args: string[], cols: number, rows: number) =>
     ipcRenderer.invoke("terminal:create", { terminalId, command, args, cols, rows }),
+  // A plain `claude` in a folder not trusted yet, to show its trust prompt.
+  createFirstSessionTerminal: (terminalId: string, cols: number, rows: number, cwd: string) =>
+    ipcRenderer.invoke("terminal:create-first-session", { terminalId, cols, rows, cwd }),
   createShellTerminal: (terminalId: string, cols: number, rows: number, cwd: string | null = null) =>
     ipcRenderer.invoke("terminal:create-shell", { terminalId, cols, rows, cwd }),
   writeTerminal: (terminalId: string, data: string) =>

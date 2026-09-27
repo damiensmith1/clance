@@ -1509,7 +1509,26 @@ export function Shell() {
       // close can never kill the underlying process.
       // The agent is named in the main process, which hands the name back so
       // the tab can wear it without the renderer knowing the string.
-      const { id, name } = await window.clanceApp.spawnNewAgent([], dir);
+      const spawned = await window.clanceApp.spawnNewAgent([], dir);
+      if (spawned.untrusted) {
+        // Claude Code hasn't been trusted in this folder, and a background
+        // agent can't ask. A plain `claude` there shows the trust prompt,
+        // and is the session once it's accepted.
+        openTab(
+          {
+            id: terminalId,
+            type: "terminal",
+            label: spawned.cwd.split("/").filter(Boolean).pop(),
+            icon: "terminal",
+            terminalId,
+            args: [],
+            cwd: spawned.cwd,
+          },
+          { paneId: mainPaneId() }
+        );
+        return terminalId;
+      }
+      const { id, name } = spawned;
       openTab(
         { id: terminalId, type: "terminal", label: name, icon: "terminal", terminalId, args: ["attach", id] },
         { paneId: mainPaneId() }

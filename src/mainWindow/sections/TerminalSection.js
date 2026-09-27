@@ -82,6 +82,9 @@ function getOrCreateEntry(terminalId, { shell, args, cwd }) {
 
   if (shell) {
     window.clanceApp.createShellTerminal(terminalId, term.cols, term.rows, cwd ?? null);
+  } else if (cwd) {
+    // A folder not trusted yet: `claude` itself, to show the trust prompt.
+    window.clanceApp.createFirstSessionTerminal(terminalId, term.cols, term.rows, cwd);
   } else {
     window.clanceApp.createTerminal(terminalId, "claude", args, term.cols, term.rows);
   }
@@ -243,7 +246,7 @@ export function TerminalSection({ terminalId, args = [], shell = false, cwd = nu
       <div class="terminal-tab-body">
         <div ref=${containerRef} style=${{ width: "100%", height: "100%" }}></div>
       </div>
-      <${TerminalStatusLine} args=${args} shell=${shell} onPopOut=${onPopOut} />
+      <${TerminalStatusLine} args=${args} shell=${shell} cwd=${cwd} onPopOut=${onPopOut} />
     </div>
   `;
 }
@@ -259,7 +262,7 @@ function shortTime(iso) {
 // The line under an open session: its folder, when it started, and the
 // pop-out action. A session tab's args are `attach <agentId>`, so its folder
 // and start time come from the agent listing.
-function TerminalStatusLine({ args, shell, onPopOut }) {
+function TerminalStatusLine({ args, shell, cwd, onPopOut }) {
   const [agent, setAgent] = useState(null);
   const agentId = args[0] === "attach" ? args[1] : null;
 
@@ -274,7 +277,8 @@ function TerminalStatusLine({ args, shell, onPopOut }) {
     };
   }, [agentId]);
 
-  const folder = agent?.cwd ? agent.cwd.replace(/^\/Users\/[^/]+/, "~") : shell ? "shell" : "";
+  const where = agent?.cwd ?? (!shell ? cwd : null);
+  const folder = where ? where.replace(/^\/Users\/[^/]+/, "~") : shell ? "shell" : "";
   return html`
     <div class="terminal-status">
       ${folder && html`<span>${folder}</span>`}

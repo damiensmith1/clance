@@ -37,7 +37,7 @@ async function claudeExecOptions(cwd: string = SESSION_CWD): Promise<{ cwd: stri
 // prints "extra arguments ignored" for anything appended there — so
 // appending settings at that end, as an earlier version of this file did,
 // silently never took effect.)
-function cliSettingsArgs(): string[] {
+export function cliSettingsArgs(): string[] {
   // Clance's embedded terminal always renders on a light background (see
   // popup.js / TerminalSection.js xterm themes). Left unset, the CLI
   // defaults to dark-theme-tuned colors and emits several UI colors (diff
@@ -92,16 +92,34 @@ function stripAnsi(text: string): string {
 // and returns its short id, parsed off the first line of stdout
 // ("backgrounded · <id> · <name>"). Never through a shell string — args is
 // a real argv array, same reasoning as ptyManager's pty.spawn.
+/** `claude --bg` refuses a folder whose trust prompt hasn't been accepted. */
+export class UntrustedWorkspaceError extends Error {
+  constructor(readonly cwd: string) {
+    super(`Claude Code hasn't been trusted in ${cwd} yet`);
+  }
+}
+
+function isUntrusted(error: unknown): boolean {
+  const e = error as { stdout?: unknown; stderr?: unknown; message?: unknown };
+  return /workspace not trusted/i.test(`${e?.stdout ?? ""}\n${e?.stderr ?? ""}\n${e?.message ?? ""}`);
+}
+
 export async function spawnBackgroundAgent(
   name: string,
   claudeArgs: string[] = [],
   cwd: string = SESSION_CWD
 ): Promise<string> {
-  const { stdout } = await execFileAsync(
-    "claude",
-    ["--bg", "-n", name, ...claudeArgs, ...cliSettingsArgs()],
-    await claudeExecOptions(cwd)
-  );
+  let stdout: string;
+  try {
+    ({ stdout } = await execFileAsync(
+      "claude",
+      ["--bg", "-n", name, ...claudeArgs, ...cliSettingsArgs()],
+      await claudeExecOptions(cwd)
+    ));
+  } catch (error) {
+    if (isUntrusted(error)) throw new UntrustedWorkspaceError(cwd);
+    throw error;
+  }
   const match = stripAnsi(stdout).match(/backgrounded\s*·\s*(\S+)\s*·/);
   if (!match) throw new Error(`Couldn't parse a session id from "claude --bg" output: ${stdout}`);
   return match[1];

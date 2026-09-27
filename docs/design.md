@@ -99,7 +99,15 @@ started:
 
 - `spawnBackgroundAgent(name, args, cwd)` runs `claude --bg -n <name> …` and
   parses the short id from stdout (`backgrounded · <id> · <name>`, with ANSI
-  codes stripped — they're emitted even when piped).
+  codes stripped — they're emitted even when piped). In a folder whose trust
+  prompt hasn't been accepted, `claude --bg` exits with "Workspace not
+  trusted"; that becomes `UntrustedWorkspaceError`, `agents:spawn-new`
+  returns `{ untrusted, cwd }`, and the renderer opens a terminal tab with
+  that `cwd` and no args, which `terminal:create-first-session` runs as a
+  plain `claude` there — same mint args and settings as a background agent —
+  so the prompt is shown and the session continues in that tab. Those tabs
+  are dropped when the layout is restored, since their process ended with
+  the app.
 - `resolveOpenArgs(sessionId, name, mcpArgs)` decides how to open an existing
   session. A live agent is attached as-is. A stopped agent already in
   `claude agents --json --all` is attached if it was minted in the session's
@@ -2351,8 +2359,9 @@ on errors.
 - **Confirm before inserting a transcript?** Immediate insert matches the
   reference apps; a confirm step would be safer for a misrecognition pasted
   into something irreversible.
-- **Silent mint failures.** If `claude --bg` fails (auth, CLI missing), a
-  main-window "New Session" does nothing visible — there's no error surface
+- **Silent mint failures.** If `claude --bg` fails for any reason other than
+  an untrusted folder (auth, CLI missing), a main-window "New Session" does
+  nothing visible — there's no error surface
   to route it to.
 - **Background agent lifetime** across Clance quitting, sleep and reboot
   hasn't been verified, and the full set of `status`/`state` values from

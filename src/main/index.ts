@@ -55,7 +55,7 @@ import {
   getPtyBuffer,
   warmLoginShellPath,
 } from "./ptyManager";
-import { resolveOpenArgs, resolveSessionId, spawnBackgroundAgent, stopAgent, listAgents } from "./agentSessions";
+import { resolveOpenArgs, resolveSessionId, spawnBackgroundAgent, stopAgent, listAgents, cliSettingsArgs, UntrustedWorkspaceError } from "./agentSessions";
 import { isPoolSpareId } from "./agentPool";
 import { copyDroppedFile } from "./dropFiles";
 import {
@@ -442,12 +442,17 @@ ipcMain.handle("agents:spawn-new", async (_event, claudeArgs: string[], cwd?: st
   // until its conversation has a name belongs to one definition
   // (chatHistory.ts), and it's returned so the tab that opens onto this
   // agent can show the same thing without repeating the string.
-  const id = await spawnBackgroundAgent(
-    SESSION_PLACEHOLDER_TITLE,
-    [...claudeArgs, ...mcpArgs],
-    cwd || getDefaultDirectory()
-  );
-  return { id, name: SESSION_PLACEHOLDER_TITLE };
+  const dir = cwd || getDefaultDirectory();
+  try {
+    const id = await spawnBackgroundAgent(SESSION_PLACEHOLDER_TITLE, [...claudeArgs, ...mcpArgs], dir);
+    return { id, name: SESSION_PLACEHOLDER_TITLE };
+  } catch (error) {
+    // A folder Claude Code hasn't been trusted in: a background agent can't
+    // show the trust prompt, so the renderer opens a plain `claude` in a
+    // terminal there instead ("terminal:create-first-session" below).
+    if (error instanceof UntrustedWorkspaceError) return { untrusted: true, cwd: dir };
+    throw error;
+  }
 });
 
 // Guards against shelling out `claude stop` with no real id (seen live:
@@ -827,6 +832,22 @@ ipcMain.handle(
       payload.cols,
       payload.rows
     );
+  }
+);
+
+// The first session in a folder Claude Code hasn't been trusted in yet: a
+// plain interactive `claude` there, which shows the trust prompt (a
+// background agent can't) and, once it's accepted, is the session. Given the
+// same tools and settings a background mint gets. After this, sessions in
+// the folder are background agents like any other.
+ipcMain.handle(
+  "terminal:create-first-session",
+  async (event, payload: { terminalId: string; cols: number; rows: number; cwd: unknown }) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || !isDirectory(payload.cwd)) return;
+    addRecentDirectory(payload.cwd);
+    const args = [...(await sessionMintArgs("window")), ...cliSettingsArgs()];
+    return createPtySession(payload.terminalId, "claude", args, payload.cwd, win, payload.cols, payload.rows);
   }
 );
 

@@ -101,6 +101,13 @@ Sessions Clance starts get these tools when Accessibility is granted:
 
 - Every session Clance opens runs as a Claude Code background agent, so
   closing a tab, the widget or Clance itself never ends a conversation.
+- The one exception is the first session in a folder Claude Code hasn't been
+  trusted in yet. A background agent can't show the trust prompt, so Clance
+  opens a plain `claude` in a terminal tab there instead: accept the prompt
+  and that is the session. It's interactive, so closing the tab ends it, and
+  it isn't brought back on relaunch. Sessions in the folder after that are
+  background agents as usual. Clance never accepts the prompt on anyone's
+  behalf.
 - The Sessions tab lists, in one searchable table with project, state and
   last-updated columns:
   - every running background agent on the machine first, marked when it's
