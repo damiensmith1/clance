@@ -1,6 +1,6 @@
 cask "clance" do
-  version "0.5.1"
-  sha256 "1daf33f88556b4ea34661ade8e10991495565575a162f3b38d086a1c3f2fa112"
+  version "0.5.2"
+  sha256 "97da480e69356e912d76ad4aee034a2c5825ae364cb8c3cd9c4ac13fabb3ac28"
 
   url "https://github.com/damiensmith1/clance/releases/download/v#{version}/Clance-#{version}-arm64.zip"
   name "Clance"
