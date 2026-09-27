@@ -29,13 +29,18 @@ the text at your cursor.
   tabs you can split into panes. Sessions run as Claude Code background
   agents, so closing a window never ends one, and each can be resumed with
   `claude --resume` in a terminal.
-- **Read the code your sessions write.** A Changes pane shows what has moved
-  in a git repository and updates as files change on disk, so a session
-  working in it is watched rather than checked on. A Files explorer browses
-  any folder on your Mac, repository or not. Open any file as a tab to read
-  it whole, syntax highlighted, with its changes marked in place, then stage,
-  commit and push from the same pane. Clance never edits a file — the session
-  does that.
+- **Read and review the code your sessions write.** A Changes pane shows
+  what has moved in a git repository and updates as files change on disk, so
+  a session working in it is watched rather than checked on. Open a changed
+  file to see its diff inline, then stage, commit and push from the same pane.
+- **A small editor.** A Files explorer browses any folder on your Mac,
+  repository or not, and can create, rename, move and delete files. Open a
+  file as a tab to edit it — syntax highlighting, find and replace, its
+  uncommitted changes marked in the gutter, and a warning rather than a
+  silent overwrite if a session changed it on disk while you were editing.
+  Markdown renders as a preview, Find in Files (⇧⌘F) searches the whole
+  folder, and ⌘L asks a session about the selected code. Open files from
+  Finder or with `clance <path>` in a terminal.
 - **On-device dictation.** Works in any app, powered by
   [whisper.cpp](https://github.com/ggml-org/whisper.cpp). Clance recommends a
   speech model for your Mac, and keeps a searchable history of everything
@@ -46,6 +51,10 @@ the text at your cursor.
 ![Every Claude Code session on your Mac in the main window](docs/images/sessions.png)
 
 ![Two sessions side by side in split panes](docs/images/split.png)
+
+![Editing a file beside the Files explorer](docs/images/editor.png)
+
+![Reviewing a diff in the editor, with the Changes pane beside it](docs/images/changes.png)
 
 ![Dictating into a Mail reply](docs/images/dictation.png)
 
@@ -112,10 +121,14 @@ beside your work rather than over it.
 |---|---|
 | ⌘K | Search every session on your Mac, or start a new one |
 | ⌘P | Open a file in the current repository by name |
+| ⌘S / ⌥⌘S | Save the file / save all |
+| ⇧⌘F | Find in files |
+| ⌘L | Ask a session about the selected code |
 | ⌘N | New session |
 | Space | Peek at the selected session without opening it |
 | ⌘⌫ | Archive the selected session, or stop it if it's running |
 | ⌘W / ⌃⇥ | Close the active tab / move between tabs |
+| ⇧⌘T | Reopen the last closed tab |
 
 ## Privacy
 
