@@ -940,6 +940,14 @@ file headers rather than assuming they only appear at the top: a patch can
 cover more than one file, and a header read as content shows up as garbled
 context lines.
 
+**Surviving a remount.** Moving the pane, splitting it, or switching away
+from its tab and back unmounts `ChangesSection`. What it knew is kept
+module-level per repository (`memory` in the file) — status, history,
+branches, remote, the open row and its diff, the draft message, the seen
+baseline for "new" marks, the list's scroll — so a remount draws from it at
+once and the usual refresh runs behind it, without the "Reading…" state. The
+same idea as the editor's buffers and the terminal registry.
+
 **Watching.** `watchRepo` is what makes the pane live rather than something to
 refresh by hand. One recursive `fs.watch` per repo — on macOS that's FSEvents,
 so a whole worktree costs one watcher — debounced 300 ms, because a commit or

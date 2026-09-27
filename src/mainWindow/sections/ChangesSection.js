@@ -44,13 +44,36 @@ function splitPath(path) {
 /** Lines an inline peek draws before it defers to the file tab. */
 const PEEK_LINES = 120;
 
+// ---- surviving a remount ----
+//
+// Moving the pane, splitting, or switching away from its tab and back all
+// unmount this section. Everything it knew — per repository: the status,
+// history, branches, remote, which row is open, the draft commit message,
+// what's been seen, the list's scroll — is kept here, module-level, so it comes
+// back drawn at once and then refreshes quietly, instead of starting over
+// behind "Reading…". Same idea as the editor's buffers and the terminals'
+// registry.
+const memory = { repos: null, root: undefined, byRoot: new Map(), peeks: new Map() };
+
+function rememberedRepo(root) {
+  let entry = memory.byRoot.get(root);
+  if (!entry) {
+    entry = { status: null, commits: null, branches: null, remote: null, expanded: null, message: "", seen: new Map(), newPaths: new Set(), scroll: 0 };
+    memory.byRoot.set(root, entry);
+  }
+  return entry;
+}
+
 /** A compact diff under a row — a peek, for when opening a tab is more than the question deserves. */
 function InlinePeek({ repoRoot, path }) {
-  const [diff, setDiff] = useState(null);
+  // The last diff read for this row, shown while it's read again.
+  const key = `${repoRoot}\0${path}`;
+  const [diff, setDiff] = useState(() => memory.peeks.get(key) ?? null);
 
   useEffect(() => {
     let cancelled = false;
     window.clanceApp.gitFileDiff(repoRoot, path).then((next) => {
+      memory.peeks.set(key, next);
       if (!cancelled) setDiff(next);
     });
     return () => {
@@ -263,32 +286,53 @@ function FileRow({ file, isNew, expanded, repoRoot, onOpen, onToggleStage, onTog
 }
 
 export function ChangesSection({ onOpenFile }) {
-  const [repos, setRepos] = useState([]);
-  const [root, setRoot] = useState(null);
-  const [status, setStatus] = useState(null);
-  const [loaded, setLoaded] = useState(false);
-  const [expanded, setExpanded] = useState(null);
-  const [message, setMessage] = useState("");
+  // Whatever the pane knew before it was last unmounted (see `memory`).
+  const initial = memory.root ? memory.byRoot.get(memory.root) ?? null : null;
+  const [repos, setRepos] = useState(memory.repos ?? []);
+  const [root, setRoot] = useState(memory.root ?? null);
+  const [status, setStatus] = useState(initial?.status ?? null);
+  const [loaded, setLoaded] = useState(Boolean(initial?.status));
+  const [expanded, setExpanded] = useState(initial?.expanded ?? null);
+  const [message, setMessage] = useState(initial?.message ?? "");
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
   const [note, setNote] = useState(null);
-  const [newPaths, setNewPaths] = useState(() => new Set());
+  const [newPaths, setNewPaths] = useState(() => initial?.newPaths ?? new Set());
   // Which header menu is open, if any: "repo" or "branch". One at a time, so
   // opening one closes the other without a second piece of state to keep in
   // step with the first.
   const [menu, setMenu] = useState(null);
-  const [branches, setBranches] = useState(null);
+  const [branches, setBranches] = useState(initial?.branches ?? null);
   const [copied, setCopied] = useState(null);
   const [agentWorking, setAgentWorking] = useState(false);
-  const [commits, setCommits] = useState(null);
-  const [remote, setRemote] = useState(null);
+  const [commits, setCommits] = useState(initial?.commits ?? null);
+  const [remote, setRemote] = useState(initial?.remote ?? null);
 
   // path → signature at the moment the user last had eyes on that file. A ref
   // rather than state: it's a baseline for comparison, and writing it should
-  // never itself cause a render.
-  const seenRef = useRef(new Map());
+  // never itself cause a render. Kept with the repository's memory.
+  const seenRef = useRef(initial?.seen ?? new Map());
   const rootRef = useRef(null);
   const repoRef = useRef(null);
+  const listRef = useRef(null);
+
+  // Everything worth keeping goes back into memory as it changes.
+  useEffect(() => {
+    if (!root) return;
+    Object.assign(rememberedRepo(root), { status, commits, branches, remote, expanded, message, newPaths, seen: seenRef.current });
+  }, [root, status, commits, branches, remote, expanded, message, newPaths]);
+
+  // The file list's scroll, put back once the rows are drawn.
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list || !root) return;
+    list.scrollTop = rememberedRepo(root).scroll;
+    const onScroll = () => {
+      rememberedRepo(root).scroll = list.scrollTop;
+    };
+    list.addEventListener("scroll", onScroll);
+    return () => list.removeEventListener("scroll", onScroll);
+  }, [root, loaded]);
 
   async function refresh(targetRoot = rootRef.current) {
     if (!targetRoot) return;
@@ -317,7 +361,11 @@ export function ChangesSection({ onOpenFile }) {
         window.clanceApp.gitGetLastRepo(),
       ]);
       if (cancelled) return;
+      memory.repos = list;
       setRepos(list);
+      // Coming back to a pane that already had a repository keeps it; only a
+      // first open picks one.
+      if (memory.root !== undefined) return;
       setRoot(last ?? list[0]?.root ?? null);
       if (!last && !list[0]) setLoaded(true);
     })();
@@ -330,17 +378,22 @@ export function ChangesSection({ onOpenFile }) {
   // the filesystem events; this just re-reads status when one gets through.
   useEffect(() => {
     rootRef.current = root;
-    seenRef.current = new Map();
-    setNewPaths(new Set());
-    setExpanded(null);
-    setStatus(null);
-    setLoaded(false);
+    if (root !== null) memory.root = root;
+    // A repository seen before comes back as it was, then refreshes; a new
+    // one starts empty.
+    const entry = root ? rememberedRepo(root) : null;
+    seenRef.current = entry?.seen ?? new Map();
+    setNewPaths(entry?.newPaths ?? new Set());
+    setExpanded(entry?.expanded ?? null);
+    setMessage(entry?.message ?? "");
+    setStatus(entry?.status ?? null);
+    setLoaded(Boolean(entry?.status));
     setError(null);
     if (!root) return;
 
-    setCommits(null);
-    setBranches(null);
-    setRemote(null);
+    setCommits(entry.commits);
+    setBranches(entry.branches);
+    setRemote(entry.remote);
     setMenu(null);
     window.clanceApp.gitRemote(root).then((next) => {
       if (rootRef.current === root) setRemote(next);
@@ -647,7 +700,7 @@ export function ChangesSection({ onOpenFile }) {
         </button>`}
       </div>
 
-      <div class="changes-list">
+      <div class="changes-list" ref=${listRef}>
         ${loaded && files.length === 0
           ? html`<p class="changes-clean">Working tree clean.</p>`
           : files.map(

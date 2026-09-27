@@ -150,6 +150,10 @@ Sessions Clance starts get these tools when Accessibility is granted:
   session directory, recently used directories, wherever the running agents
   are working, and any other folder. It reopens on the repository it was last
   pointed at.
+- Moving the pane, splitting it, or switching away from its tab and back
+  never makes it start over: it redraws at once as it was — the files, the
+  history, the open row, a half-written commit message, where the list was
+  scrolled — and refreshes quietly underneath.
 - The header gives the repository and its branch, marks when a session is
   working there, and carries Fetch, with Pull and Push only when there is
   something to pull or push. A merge, rebase or cherry-pick in progress is
