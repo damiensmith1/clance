@@ -3304,13 +3304,33 @@
         height: 100%;
         min-height: 0;
       }
+      /* A fixed height, the one a bare path and status line needs: the controls
+         that come and go (Edit / Diff once a file changes, Rendered / Source,
+         the change jumps) are sized to fit inside it, so typing the first
+         change doesn't make the header grow and shove the file down. */
       .file-head {
         display: flex;
         align-items: center;
         gap: var(--space-2);
         flex-shrink: 0;
-        padding: var(--space-2) var(--space-3);
+        box-sizing: border-box;
+        height: 34px;
+        padding: 0 var(--space-3);
         border-bottom: 1px solid var(--surface-border);
+      }
+      .file-head .segmented {
+        padding: 2px;
+        border-radius: var(--radius-md);
+      }
+      .file-head .segmented-item {
+        height: 20px;
+        padding: 0 var(--space-2);
+        border-radius: var(--radius-sm);
+        font-size: var(--text-xs);
+      }
+      .file-head .btn-small {
+        height: 22px;
+        font-size: var(--text-xs);
       }
       .file-path {
         font-family: var(--font-mono);

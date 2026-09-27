@@ -1241,6 +1241,13 @@ re-reads every open tab in it. A file that isn't on the new branch opens as
 rather than "isn't there any more"; a deleted one shows its last committed
 version, read-only.
 
+**A header that doesn't move.** The file tab's header (`.file-head`) has a
+fixed height — the one a bare path and status need — and the controls that
+come and go inside it (Edit / Diff once a file has changes, Rendered /
+Source, the change jumps, Mask values) use a compact size that fits it. Before,
+the Edit / Diff pill appearing on the first keystroke grew the header and
+pushed the file down under the cursor.
+
 **Where files open.** In the largest pane (see "Where tabs open") — so a file
 clicked in Files or Changes over on the right opens beside it, leaving the
 list where it was.
