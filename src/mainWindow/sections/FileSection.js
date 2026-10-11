@@ -177,14 +177,14 @@ export function FileSection({ repoRoot, path, onOpenFile, onOpenInFlow }) {
         doc?.kind === "text" &&
         html`<button
           class="btn-quiet btn-small"
-          title="Read the code at the cursor as cards in a flow, with what it calls and what calls it"
+          title="Read the code at the cursor in lode: cards with what it calls and what calls it"
           onClick=${() => {
             const view = buffer.view;
             const line = view ? view.state.doc.lineAt(view.state.selection.main.head).number : null;
             onOpenInFlow(repoRoot, path, line);
           }}
         >
-          Flow
+          lode
         </button>`}
         ${handler.views.length > 1 &&
         html`<${ViewChoice} views=${handler.views} current=${current.id} onChoose=${setViewId} />`}

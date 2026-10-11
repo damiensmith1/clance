@@ -96,11 +96,12 @@ function flowFor(tab) {
   project.tabs.add(tab.id);
   const host = {
     openView: (request) => current?.openFlowTab(tab.root, { ...request, newTab: true }),
-    openSource: (file, line) => current?.openFileTab(tab.root, file, line ?? null),
+    // A card's title: the real file tab, even with this flow showing.
+    openSource: (file, line) => current?.openFileTab(tab.root, file, line ?? null, { flow: false }),
     syntax,
     syntaxCss: SYNTAX_CSS,
     storage: serviceStorage(project.connection),
-    empty: "Open a file or symbol: search above, “Open in Flow” in Files, or “Flow” on a file tab.",
+    empty: "Open a file or symbol: search above, “Open in lode” in Files, or “lode” on a file tab.",
     // Not on the whole window: Clance has other panes. The tab forwards keys
     // only while focus is in it (onFlowKey).
     keys: false,
@@ -197,7 +198,11 @@ export function FlowSection({ tab, launcher }) {
 
   // The tab's label follows what it shows: its question, else its first card.
   useEffect(() => {
-    const full = flow.asked ? `/ ${flow.asked.question}` : flow.cards()[0]?.node.name;
+    // An empty canvas (cleared, or nothing opened yet) goes back to the
+    // default, the project folder's name, unless a question is being asked.
+    const cards = flow.cards();
+    const folder = tab.root.split("/").filter(Boolean).pop();
+    const full = !cards.length && flow.asked?.status !== "asking" ? folder : flow.asked ? `/ ${flow.asked.question}` : cards[0]?.node.name;
     const label = full && full.length > 40 ? `${full.slice(0, 39)}…` : full;
     if (label && label !== tab.label) launcher.renameTab(tab.id, label);
   });

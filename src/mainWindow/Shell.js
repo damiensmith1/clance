@@ -312,7 +312,7 @@ function tabLabel(tab) {
 // path — the label is only a basename, and two tabs called `index.ts` are
 // otherwise indistinguishable.
 function tabTitle(tab) {
-  if (tab.type === "flow") return `${tab.label} · flow in ${tab.root.replace(/^\/Users\/[^/]+/, "~")}`;
+  if (tab.type === "flow") return `${tab.label} · lode in ${tab.root.replace(/^\/Users\/[^/]+/, "~")}`;
   if (tab.type === "file") {
     const full = tab.repoRoot ? `${tab.repoRoot}/${tab.path}` : tab.path;
     return full.replace(/^\/Users\/[^/]+/, "~");
@@ -831,7 +831,7 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
             <button class="launcher-item" title="New Terminal" onClick=${() => launcher.openShellTab()}>
               ${Icon.terminal(15)}
             </button>
-            <button class="launcher-item" title="New Flow (the Files folder's code as cards)" onClick=${() => launcher.newFlow()}>
+            <button class="launcher-item" title="New lode tab (the Files folder's code as cards)" onClick=${() => launcher.newFlow()}>
               ${Icon.flow(15)}
             </button>
             ${LAUNCHER_ITEMS.map(
@@ -1262,7 +1262,15 @@ export function Shell() {
   // One tab per file, keyed by repo and path so opening the same file twice
   // focuses the tab that's already there rather than making a second copy.
   // `line`, when given, puts the cursor there (a search result).
-  function openFileTab(repoRoot, path, line = null) {
+  //
+  // Unless a Flow tab is showing where the file would open (the main pane)
+  // and the file is in its project: then it opens there as a card instead —
+  // the symbol at `line`, else the whole file. `{ flow: false }` always
+  // opens the file tab (a card's title, which is how a flow gets to the
+  // editor).
+  function openFileTab(repoRoot, path, line = null, { flow = true } = {}) {
+    const flowTab = flow ? visibleFlowTab() : null;
+    if (flowTab) return void openInFlowTab(flowTab, repoRoot, path, line);
     openTab(
       {
         id: `file:${repoRoot}:${path}`,
@@ -1278,6 +1286,24 @@ export function Shell() {
       { paneId: mainPaneId() }
     );
     if (line) revealLine(acquireBuffer(repoRoot, path), line);
+  }
+
+  // The Flow tab showing in the main pane, if one is.
+  function visibleFlowTab() {
+    const pane = findPane(getState().root, mainPaneId());
+    const tab = pane?.tabs.find((t) => t.id === pane.activeTabId);
+    return tab?.type === "flow" ? tab : null;
+  }
+
+  async function openInFlowTab(flowTab, repoRoot, path, line) {
+    const real = await window.clanceApp.lodeOpen(repoRoot);
+    const abs = real ? `${real}/${path}` : null;
+    const flow = flowOf(flowTab.id);
+    // Outside the flow's project (or a flow not drawn yet): the file tab.
+    if (!abs || !flow || !abs.startsWith(`${flowTab.root}/`)) return openFileTab(repoRoot, path, line, { flow: false });
+    const file = abs.slice(flowTab.root.length + 1);
+    const symbol = line ? await symbolAt(flowTab.root, file, line) : null;
+    await flow.show(symbol?.id ?? file);
   }
 
   // A search result is relative to the folder searched; a file inside a
@@ -1475,7 +1501,7 @@ export function Shell() {
       const opened = (await window.clanceApp.takeOpenedPaths()) ?? [];
       for (const item of opened) {
         if (item.kind === "file") {
-          openFileTab(item.root, item.path);
+          openFileTab(item.root, item.path, null, { flow: false });
         } else {
           await window.clanceApp.filesSetLastFolder(item.root);
           openSection("files");

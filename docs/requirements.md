@@ -426,17 +426,20 @@ Sessions Clance starts get these tools when Accessibility is granted:
   path.
 - ⇧⌘T reopens the most recently closed tab.
 
-## Flow tabs
+## lode tabs
 
-- A Flow tab shows a project's code as cards on a canvas (lode): a symbol's
+- A lode tab shows a project's code as cards on a canvas (lode): a symbol's
   code with arrows to what it calls and what calls it, folds that open in
   place, and git changes marked when asked. Cards can be edited in place.
-- Open a flow from a file or folder in the Files tree (Open in Flow), from
-  a file tab (Flow: the symbol at the cursor), or the launcher (the Files
+- Open a flow from a file or folder in the Files tree (Open in lode), from
+  a file tab (lode: the symbol at the cursor), or the launcher (the Files
   folder). A flow for a folder that already has one opens in it.
 - The tab's search finds a symbol by name, or with `/` builds the flow
   that answers a question.
 - A card's title opens the file in a file tab at that line.
+- While a lode tab is showing in the main pane, opening a file (Files,
+  Changes, search, ⌘P) adds it to that flow as a card instead of opening a
+  file tab, when the file is in the flow's project.
 - Ask Claude pastes the cards (or the selected ones) into a session as
   context, without sending it; copy context puts the same on the clipboard.
 - Reading a project never freezes the window, and a canvas comes back as it

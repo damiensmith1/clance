@@ -710,7 +710,7 @@ export function FilesSection({ onOpenFile, onOpenResult, onPathMoved, onOpenTerm
           onSelect=${act(() => (entry && !(entry.directory && !entry.symlink) ? window.clanceApp.revealFile(abs) : window.clanceApp.revealFolder(abs)))}
         />
         <${MenuItem} title="Open in Terminal" onSelect=${act(() => onOpenTerminal?.(folder))} />
-        <${MenuItem} title="Open in Flow" onSelect=${act(() => openInFlow(entry))} />
+        <${MenuItem} title="Open in lode" onSelect=${act(() => openInFlow(entry))} />
         ${onAskClaude && html`<${MenuItem} title="Ask Claude About This" onSelect=${act(() => onAskClaude({ path: abs, directory: !entry || entry.directory }))} />`}
       </div>
     `;

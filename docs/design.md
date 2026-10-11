@@ -54,7 +54,7 @@ anything open-ended is handed to a Claude Code session. See "Assistant".
 | Dictation history | `node:sqlite` + FTS5 | Built into Electron's Node — no second native addon to rebuild |
 | Git | The `git` binary, via `execFile` | See "Changes pane" |
 | Syntax highlighting | Hand-rolled (`src/shared/syntax.js`) | See "Syntax highlighting" |
-| Code graph (Flow tabs) | lode (`lode-graph` on npm, pinned): its core in a utility process per project, its `<lode-flow>` canvas bundled once into `src/shared/vendor/lode-views.mjs` | See "Flow tabs" |
+| Code graph (lode tabs) | lode (`lode-graph` on npm, pinned): its core in a utility process per project, its `<lode-flow>` canvas bundled once into `src/shared/vendor/lode-views.mjs` | See "lode tabs" |
 | Packaging | `electron-builder`, self-signed | See "Packaging and distribution" |
 
 ### Local data
@@ -1759,9 +1759,12 @@ the file's folder and the paste waits until its terminal output has been
 quiet for 1.2 s (at most 10 s), since text written before the CLI draws its
 prompt is lost.
 
-### Flow tabs
+### lode tabs
 
-A Flow tab reads a project's code as cards on a canvas: a symbol's code,
+(Called lode in the UI; in code the tab type, section and IPC keep the
+name `flow`: `FlowSection.js`, `type: "flow"`, `flow:focused`.)
+
+A lode tab reads a project's code as cards on a canvas: a symbol's code,
 with arrows to what it calls and what calls it, folds that open in place,
 git changes marked. The graph and the canvas are lode's
 (`lode-graph` on npm, github.com/damiensmith1/lode-graph); everything
@@ -1778,7 +1781,7 @@ built on lode's API, which is how lode is meant to be hosted.
   change notices and events go back to every window using it. Requests
   sent while it's still reading wait in the worker. A worker that fails
   tells its tabs (`lode:status`); the next message starts a new one. The
-  last Flow tab for a folder closing stops its worker (`lode:release`), as
+  last lode tab for a folder closing stops its worker (`lode:release`), as
   does quitting. Folders are keyed by their real path (`lode:open`).
 - **The canvas** is lode's views bundle, vendored like CodeMirror
   (`scripts/build-lode-views.mjs` → `src/shared/vendor/lode-views.mjs`;
@@ -1792,7 +1795,8 @@ built on lode's API, which is how lode is meant to be hosted.
   `--lode-*` tokens, set from Clance's theme in `index.html`. The canvas is
   saved in lode's cache with the project (`serviceStorage`, under the tab's
   `stateKey`), so it survives a relaunch and ⇧⌘T; the tab's label follows
-  what it shows (its question, else its first card).
+  what it shows (its question, else its first card; with the canvas empty,
+  the project folder's name, as a new tab starts).
 - **Keys.** All of lode's keys (`DEFAULT_KEYS`), but only while focus is in
   the tab, since Clance has other panes (`keys: false` keeps lode off the
   window; the tab forwards them). lode stops a click on the canvas from
@@ -1815,11 +1819,17 @@ built on lode's API, which is how lode is meant to be hosted.
   which gives lode its judge (`jevJudge`); lode never reads a `.env` of its
   own inside Clance. A Settings field for it is still to come: an app
   opened from the Dock has no shell environment.
-- **Ways in:** Open in Flow on a file or folder in the Files tree (a file
-  against its repository, a folder as its own flow), Flow in a file tab's
+- **Files open as cards while a flow is showing.** Opening a file from
+  anywhere (Files, Changes, search, ⌘P) while a lode tab is the main
+  pane's showing tab adds it to that flow as a card, if it's in the flow's
+  project: the symbol at the line for a search result, else the whole
+  file. Otherwise, and from a card's title, it opens the file tab as
+  always (`openFileTab(…, { flow: false })`).
+- **Ways in:** Open in lode on a file or folder in the Files tree (a file
+  against its repository, a folder as its own flow), lode in a file tab's
   header (the symbol at the cursor, via lode's `symbolAt`, else the whole
-  file), and the launcher's Flow button (the Files folder). A request goes
-  to the most recent Flow tab for that folder, or a new one.
+  file), and the launcher's lode button (the Files folder). A request goes
+  to the most recent lode tab for that folder, or a new one.
 
 ### Settings
 
