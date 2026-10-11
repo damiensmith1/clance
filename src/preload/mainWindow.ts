@@ -170,6 +170,21 @@ contextBridge.exposeInMainWorld("clanceApp", {
     ipcRenderer.on("search:done", listener);
     return () => ipcRenderer.removeListener("search:done", listener);
   },
+  // ---- Flow tabs: a project's lode (see src/main/lode.ts) ----
+  // lodeOpen gives the folder's real path, the key for the rest.
+  lodeOpen: (root: string) => ipcRenderer.invoke("lode:open", root),
+  lodeSend: (root: string, message: unknown) => ipcRenderer.send("lode:msg", root, message),
+  lodeRelease: (root: string) => ipcRenderer.send("lode:release", root),
+  onLodeMessage: (callback: (payload: { root: string; message: unknown }) => void) => {
+    const listener = (_event: unknown, payload: { root: string; message: unknown }) => callback(payload);
+    ipcRenderer.on("lode:msg", listener);
+    return () => ipcRenderer.removeListener("lode:msg", listener);
+  },
+  onLodeStatus: (callback: (payload: { root: string; state: string; error?: string }) => void) => {
+    const listener = (_event: unknown, payload: { root: string; state: string; error?: string }) => callback(payload);
+    ipcRenderer.on("lode:status", listener);
+    return () => ipcRenderer.removeListener("lode:status", listener);
+  },
   cliStatus: () => ipcRenderer.invoke("cli:status"),
   cliInstall: () => ipcRenderer.invoke("cli:install"),
   editorGetConfig: () => ipcRenderer.invoke("editor:get-config"),

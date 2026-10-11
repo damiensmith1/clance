@@ -175,6 +175,15 @@ export const Icon = {
         <path d="M17 11.2c0 3-2.4 4.6-5.6 5.1" />`
     ),
 
+  // A Flow tab: code as cards, linked.
+  flow: (size = 16) =>
+    svg(
+      size,
+      html`<rect x="3" y="4" width="7" height="6" rx="1.5" />
+        <rect x="14" y="14" width="7" height="6" rx="1.5" />
+        <path d="M10 7h3a2 2 0 0 1 2 2v5" />`
+    ),
+
   file: (size = 16) =>
     svg(
       size,

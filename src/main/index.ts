@@ -58,6 +58,7 @@ import {
 import { resolveOpenArgs, resolveSessionId, spawnBackgroundAgent, stopAgent, listAgents, cliSettingsArgs, UntrustedWorkspaceError } from "./agentSessions";
 import { isPoolSpareId } from "./agentPool";
 import { copyDroppedFile } from "./dropFiles";
+import { lodeSend, lodeRelease, stopAllLodes } from "./lode";
 import {
   getStatus as getGitStatus,
   getFileDiff,
@@ -249,6 +250,7 @@ app.on("activate", () => {
 });
 
 app.on("will-quit", unregisterAllHotkeys);
+app.on("will-quit", stopAllLodes);
 // Unsaved edits in the editor are asked about before anything quits.
 app.on("before-quit", (event) => {
   if (holdQuitForUnsavedEdits()) event.preventDefault();
@@ -683,6 +685,11 @@ ipcMain.on("search:start", (event, id: unknown, root: unknown, options: unknown,
   startSearch(event.sender, id, root, options, scope);
 });
 ipcMain.on("search:cancel", (event, id: unknown) => cancelSearch(event.sender, id));
+// Flow tabs' code graphs (see lode.ts): the folder a lode runs for (its
+// real path, the key messages use), then messages both ways.
+ipcMain.handle("lode:open", (_event, root: unknown) => resolveFolder(root));
+ipcMain.on("lode:msg", (event, root: unknown, message: unknown) => lodeSend(event.sender, root, message));
+ipcMain.on("lode:release", (event, root: unknown) => lodeRelease(event.sender, root));
 ipcMain.handle("cli:status", () => cliStatus());
 ipcMain.handle("cli:install", () => installCli());
 ipcMain.handle("editor:get-config", () => readConfig().editor);

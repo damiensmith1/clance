@@ -54,6 +54,7 @@ anything open-ended is handed to a Claude Code session. See "Assistant".
 | Dictation history | `node:sqlite` + FTS5 | Built into Electron's Node — no second native addon to rebuild |
 | Git | The `git` binary, via `execFile` | See "Changes pane" |
 | Syntax highlighting | Hand-rolled (`src/shared/syntax.js`) | See "Syntax highlighting" |
+| Code graph (Flow tabs) | lode (`lode-graph` on npm, pinned): its core in a utility process per project, its `<lode-flow>` canvas bundled once into `src/shared/vendor/lode-views.mjs` | See "Flow tabs" |
 | Packaging | `electron-builder`, self-signed | See "Packaging and distribution" |
 
 ### Local data
@@ -1758,6 +1759,61 @@ the file's folder and the paste waits until its terminal output has been
 quiet for 1.2 s (at most 10 s), since text written before the CLI draws its
 prompt is lost.
 
+### Flow tabs
+
+A Flow tab reads a project's code as cards on a canvas: a symbol's code,
+with arrows to what it calls and what calls it, folds that open in place,
+git changes marked. The graph and the canvas are lode's
+(`lode-graph` on npm, github.com/damiensmith1/lode-graph); everything
+around the canvas is Clance's,
+built on lode's API, which is how lode is meant to be hosted.
+
+- **lode per project, off the main thread.** `src/main/lode.ts` starts one
+  lode for a project folder the first time a window talks to it, in an
+  Electron utility process (`lodeWorker.ts`): indexing a large repository
+  is seconds of synchronous work. The worker builds the graph (lode's
+  `GraphStore` with `pluginFor`: TS/JS, Ruby, Python), watches the folder
+  and answers lode's message protocol (`serveMessages`). Main only relays:
+  `lode:msg` from the window goes to that folder's worker, and replies,
+  change notices and events go back to every window using it. Requests
+  sent while it's still reading wait in the worker. A worker that fails
+  tells its tabs (`lode:status`); the next message starts a new one. The
+  last Flow tab for a folder closing stops its worker (`lode:release`), as
+  does quitting. Folders are keyed by their real path (`lode:open`).
+- **The canvas** is lode's views bundle, vendored like CodeMirror
+  (`scripts/build-lode-views.mjs` → `src/shared/vendor/lode-views.mjs`;
+  rerun after updating `lode-graph`). `sections/FlowSection.js` keeps each tab's
+  `<lode-flow>` and one connection per project (`MessageConnection` over
+  the relay) in registries, like terminals, so switching tabs only detaches
+  the canvas; closing the tab ends it (`destroyFlow`).
+- **Clance as lode's host.** A card's title opens the file tab at that line
+  (`openSource` → `openFileTab`). Code is coloured by Clance's own
+  highlighter, a line at a time (`syntax`). lode's colours are its
+  `--lode-*` tokens, set from Clance's theme in `index.html`. The canvas is
+  saved in lode's cache with the project (`serviceStorage`, under the tab's
+  `stateKey`), so it survives a relaunch and ⇧⌘T; the tab's label follows
+  what it shows (its question, else its first card). lode's keys work only
+  while focus is in the tab (the tab forwards them; `keys: false` keeps
+  lode off the window), since Clance has other panes; `/` goes to the
+  tab's search.
+- **Clance's toolbar** above the canvas: search (a symbol by name, or `/`
+  and a question, which lode builds into a flow with Jev), the card count, undo, zoom,
+  fit, git changes on or off, copy context, **Ask Claude** and clear. Ask
+  Claude takes `flow.context()` (the cards, or the selected ones, with how
+  they connect and any changes, sized for a model) and pastes it into a
+  session as Asking Claude does, instead of lode's own explain panel.
+- **Keys are Clance's to give.** The Jev key for `/` questions comes from
+  Clance's environment (`TYPESAFE_API_KEY`), or in a dev run from the
+  repo's `.env`, which nothing else reads. `lode.ts` hands it to the worker,
+  which gives lode its judge (`jevJudge`); lode never reads a `.env` of its
+  own inside Clance. A Settings field for it is still to come: an app
+  opened from the Dock has no shell environment.
+- **Ways in:** Open in Flow on a file or folder in the Files tree (a file
+  against its repository, a folder as its own flow), Flow in a file tab's
+  header (the symbol at the cursor, via lode's `symbolAt`, else the whole
+  file), and the launcher's Flow button (the Files folder). A request goes
+  to the most recent Flow tab for that folder, or a new one.
+
 ### Settings
 
 `config.editor` holds the font size, the default indent (for files with none
@@ -2295,6 +2351,7 @@ hour); rate limiting gets its own message, and the launch check stays silent
 on errors.
 
 ## Open questions
+
 
 - **Editor: hot exit.** Unsaved edits survive tab switches and pane moves,
   and closing or quitting asks first — but a renderer reload (View › Reload)

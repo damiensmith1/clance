@@ -47,7 +47,7 @@ function parentOf(path) {
 
 const DRAG_THRESHOLD_PX = 4;
 
-export function FilesSection({ onOpenFile, onOpenResult, onPathMoved, onOpenTerminal, onAskClaude }) {
+export function FilesSection({ onOpenFile, onOpenResult, onPathMoved, onOpenTerminal, onAskClaude, onOpenFlow, onOpenInFlow }) {
   const [byRoot] = useTabState("files.byRoot", () => new Map());
   function cacheFor(folder) {
     if (!byRoot.has(folder)) byRoot.set(folder, { expanded: new Set(), selected: null, dirs: new Map() });
@@ -397,6 +397,14 @@ export function FilesSection({ onOpenFile, onOpenResult, onPathMoved, onOpenTerm
     return path ? `${root}/${path}` : root;
   }
 
+  // Read a file in a flow, against its repository (as it opens in a file
+  // tab), or a folder as a flow of its own.
+  async function openInFlow(entry) {
+    if (!entry || (entry.directory && !entry.symlink)) return onOpenFlow?.(absolute(entry?.path ?? ""));
+    const resolved = await window.clanceApp.filesResolveFile(root, entry.path);
+    if (resolved) onOpenInFlow?.(resolved.root, resolved.path);
+  }
+
   function startCreate(kind, entry) {
     const parent = dirFor(entry);
     if (parent) expand(parent);
@@ -702,6 +710,7 @@ export function FilesSection({ onOpenFile, onOpenResult, onPathMoved, onOpenTerm
           onSelect=${act(() => (entry && !(entry.directory && !entry.symlink) ? window.clanceApp.revealFile(abs) : window.clanceApp.revealFolder(abs)))}
         />
         <${MenuItem} title="Open in Terminal" onSelect=${act(() => onOpenTerminal?.(folder))} />
+        <${MenuItem} title="Open in Flow" onSelect=${act(() => openInFlow(entry))} />
         ${onAskClaude && html`<${MenuItem} title="Ask Claude About This" onSelect=${act(() => onAskClaude({ path: abs, directory: !entry || entry.directory }))} />`}
       </div>
     `;

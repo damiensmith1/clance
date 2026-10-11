@@ -15,6 +15,7 @@ import { FileSection } from "./sections/FileSection.js";
 import { SettingsSection } from "./sections/SettingsSection.js";
 import { DictationSection } from "./sections/DictationSection.js";
 import { TerminalSection, nextTerminalId, destroyTerminal } from "./sections/TerminalSection.js";
+import { FlowSection, destroyFlow, flowOf, setFlowStart, symbolAt } from "./sections/FlowSection.js";
 import {
   loadEditorConfig,
   release as releaseBuffer,
@@ -93,7 +94,7 @@ function findSplitContainingTab(node, tabId) {
 // Tab types that fill their pane themselves rather than sitting in the
 // padded, 880px-wide content column — a terminal, a file and the Changes
 // Files and Changes panes all want every pixel.
-const FLUSH_TAB_TYPES = new Set(["terminal", "file", "changes", "files"]);
+const FLUSH_TAB_TYPES = new Set(["terminal", "file", "changes", "files", "flow"]);
 
 // Below this much room per tab, a label can only be shown as a few clipped
 // letters, which says less than the icon does on its own. Measured against
@@ -167,6 +168,7 @@ function endTab(tab, paneId) {
   rememberClosed(tab, paneId);
   if (tab.type === "terminal") destroyTerminal(tab.terminalId);
   if (tab.type === "file") releaseBuffer(tab.repoRoot, tab.path);
+  if (tab.type === "flow") destroyFlow(tab.id);
   dropTabState(tab.id);
 }
 
@@ -310,6 +312,7 @@ function tabLabel(tab) {
 // path — the label is only a basename, and two tabs called `index.ts` are
 // otherwise indistinguishable.
 function tabTitle(tab) {
+  if (tab.type === "flow") return `${tab.label} · flow in ${tab.root.replace(/^\/Users\/[^/]+/, "~")}`;
   if (tab.type === "file") {
     const full = tab.repoRoot ? `${tab.repoRoot}/${tab.path}` : tab.path;
     return full.replace(/^\/Users\/[^/]+/, "~");
@@ -450,6 +453,8 @@ function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut, openSectio
         onPathMoved=${launcher.onPathMoved}
         onOpenTerminal=${launcher.openShellTab}
         onAskClaude=${launcher.askClaudeAbout}
+        onOpenFlow=${(dir) => launcher.openFlowTab(dir, { newTab: true })}
+        onOpenInFlow=${launcher.openInFlow}
       />`;
     case "file":
       // Keyed by tab: without it two file tabs in one pane share a component
@@ -459,7 +464,11 @@ function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut, openSectio
         repoRoot=${tab.repoRoot}
         path=${tab.path}
         onOpenFile=${openFileTab}
+        onOpenInFlow=${launcher.openInFlow}
       />`;
+    case "flow":
+      // Keyed by tab: each Flow tab has its own canvas (see FlowSection.js).
+      return html`<${FlowSection} key=${tab.id} tab=${tab} launcher=${launcher} />`;
     case "settings":
       return html`<${SettingsSection} />`;
     case "dictation":
@@ -821,6 +830,9 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
             ></span>
             <button class="launcher-item" title="New Terminal" onClick=${() => launcher.openShellTab()}>
               ${Icon.terminal(15)}
+            </button>
+            <button class="launcher-item" title="New Flow (the Files folder's code as cards)" onClick=${() => launcher.newFlow()}>
+              ${Icon.flow(15)}
             </button>
             ${LAUNCHER_ITEMS.map(
               (item) => html`
@@ -1555,6 +1567,47 @@ export function Shell() {
     );
   }
 
+  // A Flow tab for a project folder: the most recent one for that folder
+  // reads `request` ({ id, ids, ask, diff }), or a new one does (with
+  // `newTab`, or when the folder has none). Ids are relative to the folder.
+  async function openFlowTab(root, request = {}) {
+    const real = await window.clanceApp.lodeOpen(root);
+    if (!real) return;
+    const { newTab, ...start } = request;
+    const existing = newTab ? null : listTabs(getState().root).filter((entry) => entry.tab.type === "flow" && entry.tab.root === real).pop();
+    if (existing) {
+      activateTab(existing.paneId, existing.tab.id);
+      const flow = flowOf(existing.tab.id);
+      if (!flow) return setFlowStart(existing.tab.id, start);
+      if (start.diff) await flow.setDiff(start.diff);
+      if (start.ask) return void flow.ask(start.ask);
+      const ids = [...(start.id ? [start.id] : []), ...(start.ids ?? [])];
+      if (ids.length) await flow.showAll(ids);
+      return;
+    }
+    const key = Math.random().toString(36).slice(2, 10);
+    const id = `flow:${key}`;
+    setFlowStart(id, start);
+    openTab(
+      { id, type: "flow", label: real.split("/").filter(Boolean).pop(), icon: "flow", root: real, stateKey: `clance-flow-${key}` },
+      { paneId: mainPaneId() }
+    );
+  }
+
+  // A file in a flow: the symbol at `line` (a file tab's cursor), else the
+  // whole file.
+  async function openInFlow(root, path, line = null) {
+    const real = await window.clanceApp.lodeOpen(root);
+    if (!real) return;
+    const symbol = line ? await symbolAt(real, path, line) : null;
+    await openFlowTab(real, { id: symbol?.id ?? path });
+  }
+
+  function renameTabById(tabId, label) {
+    const entry = listTabs(getState().root).find((candidate) => candidate.tab.id === tabId);
+    if (entry) renameTab(entry.paneId, tabId, label);
+  }
+
   // A file or folder renamed or moved in the Files tree: open tabs, and the
   // buffers behind them (with any unsaved edits), follow it.
   function onPathMoved(fromAbs, toAbs) {
@@ -1629,6 +1682,16 @@ export function Shell() {
     activeSectionId: activeTab?.type,
     openSection,
     openShellTab,
+    openFlowTab,
+    openInFlow,
+    // A flow of the folder Files last showed; without one, Files, to pick it.
+    newFlow: async () => {
+      const folder = await window.clanceApp.filesGetLastFolder();
+      if (folder) openFlowTab(folder, { newTab: true });
+      else openSection("files");
+    },
+    askClaude,
+    renameTab: renameTabById,
     banner,
   };
 

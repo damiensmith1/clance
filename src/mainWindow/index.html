@@ -3346,6 +3346,132 @@
          at the default min-width:auto, its minimum size is its content's
          max-content width, and one long line of code would push the whole
          viewer wider than the pane instead of scrolling inside it. */
+      /* ---- Flow tabs (sections/FlowSection.js) ----------------------------
+         lode's canvas, <lode-flow>, under Clance's own toolbar. lode's
+         colours are --lode-* tokens, set here from Clance's theme; they reach
+         into its shadow DOM. */
+      .flow-section {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-width: 0;
+        height: 100%;
+        min-height: 0;
+      }
+      .flow-bar {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        flex-shrink: 0;
+        box-sizing: border-box;
+        height: 38px;
+        padding: 0 var(--space-3);
+        border-bottom: 1px solid var(--surface-border);
+      }
+      .flow-bar .btn-small {
+        height: 22px;
+        font-size: var(--text-xs);
+      }
+      .flow-bar .flow-on {
+        color: var(--success);
+      }
+      .flow-bar-spacer {
+        flex: 1;
+      }
+      .flow-count {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        white-space: nowrap;
+      }
+      .flow-search {
+        position: relative;
+        width: 300px;
+        min-width: 140px;
+        flex-shrink: 1;
+      }
+      .flow-search input {
+        box-sizing: border-box;
+        width: 100%;
+        height: 24px;
+        padding: 0 var(--space-2);
+        border: 1px solid var(--surface-border);
+        border-radius: var(--radius-sm);
+        background: var(--surface-card);
+        color: var(--text-primary);
+        font-family: var(--font-sans);
+        font-size: var(--text-sm);
+        outline: none;
+      }
+      .flow-search input:focus {
+        border-color: var(--divider-strong);
+      }
+      .flow-results {
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 0;
+        width: 420px;
+        max-height: 50vh;
+        overflow: auto;
+      }
+      .flow-asked {
+        flex-shrink: 0;
+        padding: 6px var(--space-3);
+        border-bottom: 1px solid var(--surface-border);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-primary);
+        background: var(--surface-bg);
+      }
+      .flow-asked-how {
+        color: var(--text-tertiary);
+      }
+      .flow-host {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        outline: none;
+      }
+      .flow-host > lode-flow {
+        height: 100%;
+      }
+      .flow-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: var(--space-4);
+        background: var(--app-bg);
+        color: var(--text-tertiary);
+        font-size: var(--text-md);
+        text-align: center;
+        z-index: 1;
+      }
+      .flow-error {
+        color: var(--danger);
+      }
+      lode-flow {
+        --lode-bg: var(--app-bg);
+        --lode-surface: var(--surface-card);
+        --lode-sunken: var(--surface-bg);
+        --lode-fg: var(--text-primary);
+        --lode-muted: var(--text-secondary);
+        --lode-faint: var(--text-tertiary);
+        --lode-line-number: var(--text-tertiary);
+        --lode-border: var(--surface-border);
+        --lode-outline: var(--divider-strong);
+        --lode-added: var(--success);
+        --lode-removed: var(--danger);
+        --lode-font: var(--font-sans);
+        --lode-mono: var(--font-mono);
+        --lode-syntax-keyword: var(--tok-keyword);
+        --lode-syntax-string: var(--tok-string);
+        --lode-syntax-number: var(--tok-number);
+        --lode-syntax-title: var(--tok-call);
+        --lode-syntax-comment: var(--tok-comment);
+      }
+
       .file-section {
         display: flex;
         flex-direction: column;

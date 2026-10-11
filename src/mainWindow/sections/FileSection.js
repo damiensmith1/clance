@@ -53,7 +53,7 @@ function Banner({ tone = "warning", children }) {
   return html`<div class="file-banner file-banner-${tone}" role="status">${children}</div>`;
 }
 
-export function FileSection({ repoRoot, path, onOpenFile }) {
+export function FileSection({ repoRoot, path, onOpenFile, onOpenInFlow }) {
   // Where this tab was left — scroll, cursor, view, Edit or Diff — is the
   // tab's persisted `view` state (state/tabState.js): it seeds a new buffer
   // (after a relaunch, or ⇧⌘T), and the buffer reports every change back.
@@ -173,6 +173,19 @@ export function FileSection({ repoRoot, path, onOpenFile }) {
                 : hasHead && html`<span class="file-unchanged">unchanged</span>`}
         <span class="file-head-spacer"></span>
         ${Actions && html`<${Actions} buffer=${buffer} />`}
+        ${onOpenInFlow &&
+        doc?.kind === "text" &&
+        html`<button
+          class="btn-quiet btn-small"
+          title="Read the code at the cursor as cards in a flow, with what it calls and what calls it"
+          onClick=${() => {
+            const view = buffer.view;
+            const line = view ? view.state.doc.lineAt(view.state.selection.main.head).number : null;
+            onOpenInFlow(repoRoot, path, line);
+          }}
+        >
+          Flow
+        </button>`}
         ${handler.views.length > 1 &&
         html`<${ViewChoice} views=${handler.views} current=${current.id} onChoose=${setViewId} />`}
         ${isSource &&
