@@ -3451,6 +3451,50 @@
       .flow-error {
         color: var(--danger);
       }
+      .flow-keys {
+        position: absolute;
+        top: var(--space-3);
+        right: var(--space-3);
+        z-index: 2;
+        max-width: 460px;
+        padding: var(--space-3);
+        border-radius: var(--radius-lg);
+        background: var(--surface-card);
+        box-shadow: var(--shadow-menu);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+      .flow-keys-title {
+        margin-bottom: var(--space-2);
+        font-weight: var(--weight-medium);
+      }
+      .flow-keys-row {
+        display: flex;
+        gap: var(--space-3);
+        padding: 2px 0;
+      }
+      .flow-keys-keys {
+        flex: none;
+        width: 130px;
+      }
+      .flow-keys kbd {
+        display: inline-block;
+        min-width: 16px;
+        margin-right: 2px;
+        padding: 0 4px;
+        border-radius: var(--radius-sm);
+        background: var(--surface-bg);
+        box-shadow: inset 0 -1px 0 var(--surface-border);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        text-align: center;
+      }
+      .flow-keys-note {
+        margin-top: var(--space-2);
+        font-weight: normal;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
       lode-flow {
         --lode-bg: var(--app-bg);
         --lode-surface: var(--surface-card);

@@ -175,6 +175,8 @@ contextBridge.exposeInMainWorld("clanceApp", {
   lodeOpen: (root: string) => ipcRenderer.invoke("lode:open", root),
   lodeSend: (root: string, message: unknown) => ipcRenderer.send("lode:msg", root, message),
   lodeRelease: (root: string) => ipcRenderer.send("lode:release", root),
+  // Whether focus is on a Flow tab's canvas, so the menu's ⌘Z is its undo.
+  setFlowFocused: (focused: boolean) => ipcRenderer.send("flow:focused", focused),
   onLodeMessage: (callback: (payload: { root: string; message: unknown }) => void) => {
     const listener = (_event: unknown, payload: { root: string; message: unknown }) => callback(payload);
     ipcRenderer.on("lode:msg", listener);

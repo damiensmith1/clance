@@ -1792,10 +1792,17 @@ built on lode's API, which is how lode is meant to be hosted.
   `--lode-*` tokens, set from Clance's theme in `index.html`. The canvas is
   saved in lode's cache with the project (`serviceStorage`, under the tab's
   `stateKey`), so it survives a relaunch and ⇧⌘T; the tab's label follows
-  what it shows (its question, else its first card). lode's keys work only
-  while focus is in the tab (the tab forwards them; `keys: false` keeps
-  lode off the window), since Clance has other panes; `/` goes to the
-  tab's search.
+  what it shows (its question, else its first card).
+- **Keys.** All of lode's keys (`DEFAULT_KEYS`), but only while focus is in
+  the tab, since Clance has other panes (`keys: false` keeps lode off the
+  window; the tab forwards them). lode stops a click on the canvas from
+  moving focus (so panning doesn't select text), so the tab takes focus on
+  pointerdown, and takes it back when Esc leaves a card's code. `/` goes to
+  the tab's search; `?` (or the toolbar's ?) lists the keys from lode's
+  `COMMAND_HELP`. ⌘Z is the menu's Undo, which is the flow's undo while
+  the canvas has focus (the tab reports it: `flow:focused`) and the native
+  undo elsewhere, including in a card's code, where lode's editing takes
+  it. In a card's code, ⌘S saves the card (lode's own key).
 - **Clance's toolbar** above the canvas: search (a symbol by name, or `/`
   and a question, which lode builds into a flow with Jev), the card count, undo, zoom,
   fit, git changes on or off, copy context, **Ask Claude** and clear. Ask

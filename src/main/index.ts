@@ -12,7 +12,7 @@ import {
 } from "./popupWindow";
 import { openMainWindow, openMainWindowSection, openSessionInMainWindow, holdQuitForUnsavedEdits } from "./mainWindow";
 import { checkForUpdates, openReleasePage } from "./updates";
-import { createAppMenu } from "./appMenu";
+import { createAppMenu, setFlowFocused } from "./appMenu";
 import { ensureSessionCwd, SESSION_CWD } from "./paths";
 import { getSetupStatus } from "./setupStatus";
 import {
@@ -690,6 +690,7 @@ ipcMain.on("search:cancel", (event, id: unknown) => cancelSearch(event.sender, i
 ipcMain.handle("lode:open", (_event, root: unknown) => resolveFolder(root));
 ipcMain.on("lode:msg", (event, root: unknown, message: unknown) => lodeSend(event.sender, root, message));
 ipcMain.on("lode:release", (event, root: unknown) => lodeRelease(event.sender, root));
+ipcMain.on("flow:focused", (event, focused: unknown) => setFlowFocused(event.sender.id, focused === true));
 ipcMain.handle("cli:status", () => cliStatus());
 ipcMain.handle("cli:install", () => installCli());
 ipcMain.handle("editor:get-config", () => readConfig().editor);

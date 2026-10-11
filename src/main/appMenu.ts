@@ -19,8 +19,26 @@ type WindowCommand =
   | "save"
   | "save-all"
   | "reopen-tab"
-  | "find-in-files"
-  | "ask-claude";
+  | "find-in-files" 
+  | "ask-claude"
+  | "flow-undo";
+
+// Main windows whose focus is on a Flow tab's canvas (not in a card's code):
+// there ⌘Z is the flow's undo (cards, folds, layout), which the native undo
+// the menu would otherwise run can't reach. Reported by FlowSection.js.
+const flowFocused = new Set<number>();
+
+export function setFlowFocused(webContentsId: number, focused: boolean): void {
+  if (focused) flowFocused.add(webContentsId);
+  else flowFocused.delete(webContentsId);
+}
+
+function undo(target: BaseWindow | undefined): void {
+  const win = browserWindowFor(target);
+  if (!win) return;
+  if (isMainWindow(win) && flowFocused.has(win.webContents.id)) win.webContents.send("window-command", "flow-undo");
+  else win.webContents.undo();
+}
 
 function sendTabCommand(target: BaseWindow | undefined, command: WindowCommand): void {
   const win = browserWindowFor(target);
@@ -103,7 +121,8 @@ export function createAppMenu(): Menu {
     {
       label: "Edit",
       submenu: [
-        { role: "undo" },
+        // Not role "undo": the same, except on a Flow tab's canvas (see undo).
+        { label: "Undo", accelerator: "CommandOrControl+Z", click: (_item, win) => undo(win) },
         { role: "redo" },
         { type: "separator" },
         { role: "cut" },

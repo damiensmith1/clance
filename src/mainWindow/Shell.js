@@ -1314,6 +1314,13 @@ export function Shell() {
     return tab?.type === "file" ? tab : null;
   }
 
+  function activeTabOfType(type) {
+    const current = getState();
+    const pane = findPane(current.root, current.activePaneId);
+    const tab = pane?.tabs.find((t) => t.id === pane.activeTabId);
+    return tab?.type === type ? tab : null;
+  }
+
   function saveActive() {
     const tab = activeFileTab();
     const buffer = tab && peekBuffer(tab.repoRoot, tab.path);
@@ -1353,6 +1360,7 @@ export function Shell() {
       else if (command === "prev-tab") cycleTab(-1);
       else if (command === "save") saveActive();
       else if (command === "save-all") saveAllBuffers();
+      else if (command === "flow-undo") flowOf(activeTabOfType("flow")?.id)?.run("undo");
       else if (command === "reopen-tab") reopenClosedTab();
       else if (command === "ask-claude") askAboutSelection();
       else if (command === "find-in-files") {

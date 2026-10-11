@@ -3,6 +3,7 @@ import {
   ASK_EVENT,
   CHANGE_EVENT,
   CLOSE_EVENT,
+  COMMAND_HELP,
   DEFAULT_KEYS,
   DIRTY_EVENT,
   MessageConnection,
@@ -145,6 +146,8 @@ export function FlowSection({ tab, launcher }) {
   const project = projectFor(tab.root);
   const [, redraw] = useState(0);
   const [ready, setReady] = useState(project.ready ?? false);
+  const [help, setHelp] = useState(false);
+  const toggleHelp = (open = !help) => setHelp(open);
 
   useEffect(() => {
     hostRef.current.appendChild(flow);
@@ -152,6 +155,25 @@ export function FlowSection({ tab, launcher }) {
     const events = [CHANGE_EVENT, SELECT_EVENT, DIRTY_EVENT, ASK_EVENT, OPEN_EVENT, CLOSE_EVENT];
     for (const name of events) flow.addEventListener(name, bump);
     project.listeners.add(bump);
+    // Keys go to the tab while focus is in it. lode keeps a click on the
+    // canvas (panning, dragging a card) from moving focus, so the tab takes
+    // it on pointerdown; and leaving a card's code (Esc) gives it back. The
+    // menu hears whether the canvas has focus, for ⌘Z (appMenu.ts).
+    const host = hostRef.current;
+    const takeFocus = (event) => {
+      if (!inCode(event)) host.focus({ preventScroll: true });
+    };
+    const report = () => {
+      const on = host.matches(":focus-within") && !host.querySelector("lode-flow")?.shadowRoot?.activeElement?.isContentEditable;
+      window.clanceApp.setFlowFocused?.(on);
+    };
+    const leftCode = (event) => {
+      report();
+      if (event.composedPath()[0]?.isContentEditable && !event.relatedTarget) setTimeout(() => !document.activeElement || document.activeElement === document.body ? host.focus({ preventScroll: true }) : null, 0);
+    };
+    host.addEventListener("pointerdown", takeFocus, true);
+    host.addEventListener("focusin", report);
+    host.addEventListener("focusout", leftCode);
     // Ready once lode has read the project (the first answer).
     if (!project.ready)
       void project.api
@@ -162,6 +184,10 @@ export function FlowSection({ tab, launcher }) {
         })
         .catch(() => {});
     return () => {
+      host.removeEventListener("pointerdown", takeFocus, true);
+      host.removeEventListener("focusin", report);
+      host.removeEventListener("focusout", leftCode);
+      window.clanceApp.setFlowFocused?.(false);
       for (const name of events) flow.removeEventListener(name, bump);
       project.listeners.delete(bump);
       // Detach only: the canvas lives on until the tab closes.
@@ -179,7 +205,7 @@ export function FlowSection({ tab, launcher }) {
   const failed = project.status;
   return html`
     <div class="flow-section">
-      <${FlowBar} flow=${flow} project=${project} root=${tab.root} launcher=${launcher} ready=${ready} />
+      <${FlowBar} flow=${flow} project=${project} root=${tab.root} launcher=${launcher} ready=${ready} onKeys=${() => toggleHelp()} />
       ${flow.asked &&
       html`<div class="flow-asked">
         / ${flow.asked.question}
@@ -189,8 +215,14 @@ export function FlowSection({ tab, launcher }) {
         class="flow-host"
         ref=${hostRef}
         tabindex="0"
-        onKeyDown=${(event) => onFlowKey(event, flow, () => hostRef.current?.closest(".flow-section")?.querySelector(".flow-search input")?.focus())}
+        onKeyDown=${(event) =>
+          onFlowKey(event, flow, {
+            focusSearch: () => hostRef.current?.closest(".flow-section")?.querySelector(".flow-search input")?.focus(),
+            toggleHelp,
+            helpOpen: help,
+          })}
       >
+        ${help && html`<${KeysHelp} onClose=${() => setHelp(false)} />`}
         ${!ready && !failed && html`<div class="flow-overlay">Reading ${tab.root.replace(/^\/Users\/[^/]+/, "~")}…</div>`}
         ${failed && html`<div class="flow-overlay flow-error">Couldn't read this project: ${failed}</div>`}
       </div>
@@ -211,11 +243,22 @@ function keyMatches(key, event) {
   return name === "Space" ? event.key === " " : event.key.toLowerCase() === name.toLowerCase();
 }
 
-function onFlowKey(event, flow, focusSearch) {
-  const typing = event.composedPath().some((t) => t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)));
-  if (typing) return;
+const inCode = (event) => event.composedPath().some((t) => t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)));
+
+// ⌘Z on the canvas is the menu's Undo (see appMenu.ts), which hands it to
+// the flow (flow-undo). In a card's code, ⌘Z and ⌘S are lode's own.
+function onFlowKey(event, flow, { focusSearch, toggleHelp, helpOpen }) {
+  if (inCode(event)) return;
+  if (event.key === "Escape" && helpOpen) {
+    event.preventDefault();
+    return toggleHelp(false);
+  }
   const command = Object.keys(DEFAULT_KEYS).find((c) => DEFAULT_KEYS[c].some((k) => keyMatches(k, event)));
-  if (!command || command === "help") return;
+  if (!command) return;
+  if (command === "help") {
+    event.preventDefault();
+    return toggleHelp();
+  }
   if (command === "search") {
     event.preventDefault();
     return focusSearch();
@@ -227,7 +270,27 @@ function onFlowKey(event, flow, focusSearch) {
 
 // Clance's toolbar for a flow: search (a symbol, or "/" and a question),
 // what's on the canvas, and the commands, from lode's flow API.
-function FlowBar({ flow, project, root, launcher, ready }) {
+// "?": lode's keys, as its COMMAND_HELP describes them.
+const KEY_LABEL = (key) =>
+  key.replace("Mod+", "⌘").replace("Shift+", "⇧").replace("ArrowDown", "↓").replace("ArrowUp", "↑").replace("ArrowLeft", "←").replace("ArrowRight", "→").replace("Backspace", "⌫").replace("Delete", "⌦");
+
+function KeysHelp({ onClose }) {
+  const rows = Object.keys(COMMAND_HELP).filter((c) => DEFAULT_KEYS[c]?.length);
+  return html`
+    <div class="flow-keys" role="dialog" aria-label="Keys" onClick=${onClose}>
+      <div class="flow-keys-title">Keys <span class="flow-keys-note">Esc or ? closes</span></div>
+      ${rows.map(
+        (c) => html`<div class="flow-keys-row">
+          <span class="flow-keys-keys">${DEFAULT_KEYS[c].map((k) => html`<kbd>${KEY_LABEL(k)}</kbd>`)}</span>
+          <span>${COMMAND_HELP[c]}</span>
+        </div>`
+      )}
+      <div class="flow-keys-note">In a card's code, keys type, ⌘S saves and ⌘Z undoes the typing; Esc comes back to the canvas.</div>
+    </div>
+  `;
+}
+
+function FlowBar({ flow, project, root, launcher, ready, onKeys }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [note, setNote] = useState("");
@@ -310,6 +373,7 @@ function FlowBar({ flow, project, root, launcher, ready }) {
       <button class="btn-quiet btn-small" disabled=${!cards} onClick=${copyContext} title="Copy these cards (or the selected ones) as context for an LLM">Copy context</button>
       <button class="btn-secondary btn-small" disabled=${!cards} onClick=${askClaude} title="Paste these cards (or the selected ones) into your Claude session">Ask Claude</button>
       <button class="btn-quiet btn-small" disabled=${!flow.canRun("clear")} onClick=${run("clear")} title="Clear the canvas">Clear</button>
+      <button class="btn-quiet btn-small" onClick=${onKeys} title="The keys (?)">?</button>
     </header>
   `;
 }
