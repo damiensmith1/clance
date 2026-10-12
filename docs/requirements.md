@@ -446,7 +446,9 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - Ask Claude opens a new Claude session beside the lode (in another pane,
   or a new one to its right) with the cards (or the selected ones) in its
   prompt, without sending it, and opens at once (one session is kept warm,
-  in the folder of the lode tab being shown). Copy context puts the same on the clipboard.
+  in the folder of the lode tab being shown). Pressing it again while that
+  session is open goes to it instead of opening another. Copy context puts
+  the same on the clipboard.
 - Reading a project never freezes the window, and a canvas comes back as it
   was after switching tabs, ⇧⌘T or a relaunch.
 

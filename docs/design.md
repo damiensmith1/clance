@@ -1829,6 +1829,10 @@ built on lode's API, which is how lode is meant to be hosted.
   Asking Claude does), instead of lode's own explain panel. Beside: in
   another pane if there is one (one already showing a session first, else
   the largest), else a pane split off the lode's to the right (60/40).
+  Once per lode tab: the session it opened is remembered on the lode tab
+  (`askSession`, saved with the layout), and pressing Ask Claude again
+  while that session is open just brings it forward; once it's closed,
+  the next press opens a new one.
 - **One pre-warmed session for Ask Claude** (`lodePool.ts`), so it opens
   at once, in the folder of the lode tab being shown. Like the popup's
   pool, but it follows the folder, since a session's working directory is

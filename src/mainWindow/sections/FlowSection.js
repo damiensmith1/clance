@@ -382,7 +382,7 @@ function FlowBar({ flow, project, root, launcher, ready, onKeys, tabId }) {
       <button class="btn-quiet btn-small" disabled=${!flow.canRun("fit")} onClick=${run("fit")} title="Show every card (f)">Fit</button>
       <button class="btn-quiet btn-small ${flow.diff !== null ? "flow-on" : ""}" onClick=${() => void flow.setDiff(flow.diff === null ? "HEAD" : null)} title="Show what changed since the last commit">Changes</button>
       <button class="btn-quiet btn-small" disabled=${!cards} onClick=${copyContext} title="Copy these cards (or the selected ones) as context for an LLM">Copy context</button>
-      <button class="btn-secondary btn-small" disabled=${!cards} onClick=${askClaude} title="Open a Claude session beside this lode with these cards (or the selected ones) in its prompt">Ask Claude</button>
+      <button class="btn-secondary btn-small" disabled=${!cards} onClick=${askClaude} title="Open a Claude session beside this lode with these cards (or the selected ones) in its prompt; once it's open, go to it">Ask Claude</button>
       <button class="btn-quiet btn-small" disabled=${!flow.canRun("clear")} onClick=${run("clear")} title="Clear the canvas">Clear</button>
       <button class="btn-quiet btn-small" onClick=${onKeys} title="The keys (?)">?</button>
     </header>

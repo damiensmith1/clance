@@ -6,6 +6,7 @@ import { FilesSection, openFolderSearch } from "./sections/FilesSection.js";
 import {
   TabContext,
   useTabScroll,
+  readTabState,
   writeTabState,
   flushTabState,
   dropTabState,
@@ -1489,8 +1490,15 @@ export function Shell() {
   // lode rather than over it. In another pane if there is one (one already
   // showing a session first, else the largest), else in a new pane split off
   // the lode's to the right. The cards go into its prompt, not sent.
+  //
+  // Once per lode tab: the session it opened is remembered on the lode tab
+  // (`askSession`, saved with it), and pressing again while that session is
+  // still open just brings it forward.
   async function askClaudeBeside(text, root, fromTabId) {
-    const from = listTabs(getState().root).find((entry) => entry.tab.id === fromTabId)?.paneId ?? mainPaneId();
+    const tabs = listTabs(getState().root);
+    const opened = tabs.find((entry) => entry.tab.id === readTabState(fromTabId, "askSession", null));
+    if (opened) return activateTab(opened.paneId, opened.tab.id);
+    const from = tabs.find((entry) => entry.tab.id === fromTabId)?.paneId ?? mainPaneId();
     const claimed = await window.clanceApp.lodeClaimSession(root).catch(() => null);
     if (!claimed) return askClaude(text, root);
     // A folder Claude Code hasn't been trusted in: `claude` there, which
@@ -1501,6 +1509,7 @@ export function Shell() {
       : { id: nextTerminalId(), type: "terminal", label: claimed.name, icon: "terminal", args: ["attach", claimed.id] };
     tab.terminalId = tab.terminalId ?? tab.id;
     const terminalId = tab.terminalId;
+    writeTabState(fromTabId, "askSession", tab.id, { persist: true });
     const others = paneRects(getState().root).filter((rect) => rect.leaf.id !== from);
     const showsSession = (leaf) => leaf.tabs.find((t) => t.id === leaf.activeTabId)?.args?.[0] === "attach";
     const target = others.find((rect) => showsSession(rect.leaf)) ?? others.sort((a, b) => b.area - a.area)[0];
