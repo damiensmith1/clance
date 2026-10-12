@@ -16,7 +16,7 @@ import { FileSection } from "./sections/FileSection.js";
 import { SettingsSection } from "./sections/SettingsSection.js";
 import { DictationSection } from "./sections/DictationSection.js";
 import { TerminalSection, nextTerminalId, destroyTerminal } from "./sections/TerminalSection.js";
-import { FlowSection, destroyFlow, flowOf, setFlowStart, symbolAt } from "./sections/FlowSection.js";
+import { FlowSection, changedIds, destroyFlow, flowOf, releaseIfUnused, setFlowStart, symbolAt } from "./sections/FlowSection.js";
 import { canvasOp } from "./sections/lodeCanvases.js";
 import {
   loadEditorConfig,
@@ -447,7 +447,7 @@ function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut, openSectio
     case "chats":
       return html`<${ChatsListSection} onOpenChat=${openChatTab} onNewChat=${openNewChatTab} />`;
     case "changes":
-      return html`<${ChangesSection} onOpenFile=${openFileTab} />`;
+      return html`<${ChangesSection} onOpenFile=${openFileTab} onOpenInLode=${launcher.openChangesInLode} />`;
     case "files":
       return html`<${FilesSection}
         onOpenFile=${openFileTab}
@@ -1531,6 +1531,8 @@ export function Shell() {
     tab.terminalId = tab.terminalId ?? tab.id;
     const terminalId = tab.terminalId;
     writeTabState(fromTabId, "askSession", tab.id, { persist: true });
+    // The lode tab follows the session it opened (lodeCanvases.js).
+    if (!claimed.untrusted) writeTabState(fromTabId, "follow", { agent: claimed.id, label: claimed.name }, { persist: true });
     const others = paneRects(getState().root).filter((rect) => rect.leaf.id !== from);
     const showsSession = (leaf) => leaf.tabs.find((t) => t.id === leaf.activeTabId)?.args?.[0] === "attach";
     const target = others.find((rect) => showsSession(rect.leaf)) ?? others.sort((a, b) => b.area - a.area)[0];
@@ -1743,6 +1745,16 @@ export function Shell() {
     );
   }
 
+  // Every uncommitted change in a repository, as a lode tab of its changed
+  // functions with the changes marked (lode's changes view).
+  async function openChangesInLode(root) {
+    const real = await window.clanceApp.lodeOpen(root);
+    if (!real) return;
+    const ids = (await changedIds(real)).slice(0, 40);
+    if (!ids.length) return releaseIfUnused(real);
+    await openFlowTab(real, { newTab: true, ids, diff: "HEAD" });
+  }
+
   // A file in a flow: the symbol at `line` (a file tab's cursor), else the
   // whole file.
   async function openInFlow(root, path, line = null) {
@@ -1833,6 +1845,7 @@ export function Shell() {
     openShellTab,
     openFlowTab,
     openInFlow,
+    openChangesInLode,
     // A flow of the folder Files last showed; without one, Files, to pick it.
     newFlow: async () => {
       const folder = await window.clanceApp.filesGetLastFolder();

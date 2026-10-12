@@ -24,7 +24,9 @@ import { captureActiveDisplay } from "./screenCapture";
 import * as ax from "./ax";
 import { readConfig, writeConfig } from "./config";
 import { SESSION_CWD } from "./paths";
-import { preloadLodeTools, registerLodeTools } from "./lodeTools";
+import { lodeToolInfo, preloadLodeTools, registerLodeTools } from "./lodeTools";
+import { setFollowHookEndpoint } from "./followHooks";
+import { handleFollowHook } from "./lodeFollow";
 
 // The single source of truth for what local tools exist, both for
 // popupWindow.ts's --allowedTools/--disallowedTools wiring (which needs
@@ -49,25 +51,6 @@ export const LOCAL_TOOLS: LocalToolInfo[] = [
   { name: "click_at", tier: "auto", description: "Click a position on the user's screen." },
   { name: "write_field", tier: "approval", description: "Write text into a field in another app." },
   { name: "activate_app", tier: "approval", description: "Bring a different app to the front." },
-  // lode (lodeTools.ts): the lode tabs' canvases and their projects' code graphs.
-  { name: "lode_canvases", tier: "auto", description: "List the open lode tabs." },
-  { name: "lode_canvas", tier: "auto", description: "Read what's on a lode canvas." },
-  { name: "lode_show", tier: "auto", description: "Put symbols on a lode canvas as cards." },
-  { name: "lode_build_flow", tier: "auto", description: "Build the flow for a question on a lode canvas." },
-  { name: "lode_expand", tier: "auto", description: "Expand a card on a lode canvas." },
-  { name: "lode_close", tier: "auto", description: "Close cards on a lode canvas." },
-  { name: "lode_select", tier: "auto", description: "Select cards on a lode canvas." },
-  { name: "lode_focus", tier: "auto", description: "Move a lode canvas's view to cards." },
-  { name: "lode_changes_shown", tier: "auto", description: "Show or hide git changes on a lode canvas." },
-  { name: "lode_note", tier: "auto", description: "Put a note card (title and text) on a lode canvas." },
-  { name: "lode_link", tier: "auto", description: "Draw a labelled arrow between cards on a lode canvas." },
-  { name: "lode_diagram", tier: "auto", description: "Draw a diagram of notes and arrows on a lode canvas." },
-  { name: "lode_search", tier: "auto", description: "Find symbols in a lode project." },
-  { name: "lode_read", tier: "auto", description: "Read a symbol with what it calls and what calls it." },
-  { name: "lode_context", tier: "auto", description: "The code that matters for a question, from lode's graph." },
-  { name: "lode_impact", tier: "auto", description: "What the uncommitted changes touch." },
-  { name: "lode_changes", tier: "auto", description: "What changed in git, by file and symbol." },
-  { name: "lode_entries", tier: "auto", description: "Where to start reading a lode project." },
 ];
 
 // Roles click_element will press. Deliberately a list rather than "anything
@@ -101,10 +84,18 @@ export type LocalToolStatus = LocalToolInfo & { enabled: boolean };
 // (knownLocalTools): a list saved then was a choice among these.
 const FIRST_LOCAL_TOOLS = ["list_open_windows", "look_at_screen", "read_selection", "read_focused_field", "read_window_text", "click_element", "click_at", "write_field", "activate_app"];
 
+// Clance's own tools, then lode-graph's (lodeTools.ts: the lode tabs'
+// canvases and their projects' code graphs), whatever tools that version
+// of lode-graph has, so one it adds is offered (and on) without a change
+// here.
+function allLocalTools(): LocalToolInfo[] {
+  return [...LOCAL_TOOLS, ...lodeToolInfo()];
+}
+
 export function listLocalTools(): LocalToolStatus[] {
   const { enabledLocalTools, knownLocalTools } = readConfig();
   const known = new Set(knownLocalTools ?? FIRST_LOCAL_TOOLS);
-  return LOCAL_TOOLS.map((tool) => ({
+  return allLocalTools().map((tool) => ({
     ...tool,
     // A tool added since the list was saved was never turned off: on.
     enabled: enabledLocalTools === "all" || enabledLocalTools.includes(tool.name) || !known.has(tool.name),
@@ -116,7 +107,7 @@ export function listLocalTools(): LocalToolStatus[] {
 // afterward — a later "on" only ever adds back to that explicit list, it
 // never collapses back to "all" implicitly.
 export function setLocalToolEnabled(name: string, enabled: boolean): LocalToolStatus[] {
-  const allNames = LOCAL_TOOLS.map((tool) => tool.name);
+  const allNames = allLocalTools().map((tool) => tool.name);
   // name/enabled cross an IPC boundary from the renderer — only ever a
   // known tool name is accepted, so a compromised or buggy renderer can't
   // write arbitrary strings into config.json.
@@ -1048,6 +1039,9 @@ async function startLocalToolsServer(): Promise<{
   serverKey: string;
   headersHelper: string;
 }> {
+  // lode-graph's tools are listed (and allowed) from the loaded module:
+  // loaded before any session is minted with this server.
+  await preloadLodeTools().catch(() => {});
   const identity = readPersistentIdentity();
   const token = randomBytes(32).toString("hex");
 
@@ -1076,6 +1070,15 @@ async function startLocalToolsServer(): Promise<{
             `[localToolsServer ${new Date().toISOString()}] rejected: unauthorized (host header: ${req.headers.host}, expected: ${expectedHost})`
           );
           res.writeHead(401).end();
+          return;
+        }
+
+        // A session's hook, for a lode tab following it (lodeFollow.ts).
+        if (req.method === "POST" && req.url === "/hook") {
+          let body = "";
+          for await (const chunk of req) body += chunk;
+          const text = await handleFollowHook(body).catch(() => "");
+          res.writeHead(200, { "Content-Type": "text/plain" }).end(text);
           return;
         }
 
@@ -1258,6 +1261,7 @@ async function startLocalToolsServer(): Promise<{
     headersHelper: headersHelperCommand(headersPath),
     headersPath,
   };
+  setFollowHookEndpoint(server.url, headersPath);
   console.log(`[localToolsServer ${new Date().toISOString()}] listening on ${server.url}`);
   return server;
 }

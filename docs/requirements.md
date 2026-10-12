@@ -456,6 +456,18 @@ Sessions Clance starts get these tools when Accessibility is granted:
   session is open goes to it and pastes the cards there instead of opening
   another. Copy context puts
   the same on the clipboard.
+- A lode tab can follow a Claude session (a Follow picker in its toolbar,
+  listing the sessions open in Clance that work in the tab's project; Ask
+  Claude's session is followed from the start). As the session writes
+  code, by any tool, in any folder (tracked by git or not), it appears as
+  cards and the view moves to them, unless the user moved the canvas in
+  the last few seconds; code it writes in a worktree or another repo comes
+  onto the same canvas, framed as a group named for that folder. When its
+  turn ends the canvas fits everything. A followed session is asked to
+  explain with notes, diagrams and groups on the canvas and keep its
+  written reply short. Only sessions Clance started can be followed.
+- The Changes panel opens every uncommitted change in a repository as a
+  lode tab of the changed functions, with the changes marked.
 - Reading a project never freezes the window, and a canvas comes back as it
   was after switching tabs, ⇧⌘T or a relaunch.
 

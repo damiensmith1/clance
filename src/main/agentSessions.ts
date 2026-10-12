@@ -6,6 +6,7 @@ import { promisify } from "util";
 import { getLoginShellPath } from "./ptyManager";
 import { SESSION_CWD } from "./paths";
 import { cwdForSessionId } from "./chatHistory";
+import { followHookSettings } from "./followHooks";
 
 const execFileAsync = promisify(execFile);
 
@@ -48,6 +49,10 @@ export function cliSettingsArgs(): string[] {
   // palette — those can't be fixed by remapping xterm's theme, so the CLI
   // itself has to be told the background is light.
   const cliSettings: Record<string, unknown> = { theme: "light" };
+  // Hooks that tell Clance what the session edits, so a lode tab can follow
+  // it (followHooks.ts, lodeFollow.ts).
+  const hooks = followHookSettings();
+  if (hooks) cliSettings.hooks = hooks;
   return ["--settings", JSON.stringify(cliSettings)];
 }
 

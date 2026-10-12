@@ -21,6 +21,14 @@ export async function preloadLodeTools(): Promise<void> {
   lodeMcp ??= await loadLodeMcp();
 }
 
+/** lode-graph's tools, for the local tools list (localToolsServer.ts):
+ *  each pre-authorized, described by its first sentence. Empty until
+ *  loaded. */
+export function lodeToolInfo(): { name: string; tier: "auto"; description: string }[] {
+  if (!lodeMcp) return [];
+  return lodeMcp.canvasTools(host as never).map((tool) => ({ name: tool.name, tier: "auto" as const, description: (tool.description.match(/^.*?[.:](\s|$)/)?.[0] ?? tool.description).trim() }));
+}
+
 interface CanvasInfo {
   canvas: string;
   label: string;
@@ -29,18 +37,23 @@ interface CanvasInfo {
   question?: string;
   showing: boolean;
   focused: boolean;
+  folders?: string[];
 }
 
 const host = {
   list: () => canvasRequest("list") as Promise<CanvasInfo[]>,
-  read: (canvas: string, budget: number) => canvasRequest("read", { canvas, budget }) as Promise<{ markdown: string; cards: { name: string; selected: boolean; note?: boolean }[]; question?: string }>,
+  read: (canvas: string, budget: number) =>
+    canvasRequest("read", { canvas, budget }) as Promise<{ markdown: string; cards: { name: string; selected: boolean; note?: boolean; folder?: string; group?: string }[]; question?: string; groups?: { id: string; title: string; cards: string[] }[] }>,
   apply: (canvas: string, actions: unknown[]) => canvasRequest("apply", { canvas, actions }) as Promise<{ cards: string[] }>,
-  // The project's lode for a canvas.
-  service: (canvas: string) => ({
+  // The project's lode for a canvas, or another folder's on it (the window
+  // adds the folder to the canvas, which opens its lode, and says its path).
+  service: (canvas: string, folder?: string) => ({
     call: async (method: string, params: Record<string, unknown> = {}) => {
-      const folder = ((await canvasRequest("list")) as CanvasInfo[]).find((c) => c.canvas === canvas)?.folder;
-      if (!folder) throw new Error(`No lode tab ${canvas}.`);
-      return lodeCall(folder, method, params);
+      const root = folder
+        ? ((await canvasRequest("folder", { canvas, folder })) as string)
+        : ((await canvasRequest("list")) as CanvasInfo[]).find((c) => c.canvas === canvas)?.folder;
+      if (!root) throw new Error(`No lode tab ${canvas}.`);
+      return lodeCall(root, method, params);
     },
   }),
 };

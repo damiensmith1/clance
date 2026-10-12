@@ -15,7 +15,9 @@ import {
   serviceStorage,
 } from "../../shared/vendor/lode-views.mjs";
 import { highlightLine } from "../../shared/syntax.js";
-import { useTabId, useTabState } from "../state/tabState.js";
+import { readTabState, useTabId, useTabState, writeTabState } from "../state/tabState.js";
+import { getState, listTabs } from "../state/layoutStore.js";
+import { inProject } from "./lodeCanvases.js";
 import { renderMarkdown } from "../../shared/markdown.js";
 
 // A Flow tab: a project's code read as cards on a canvas (lode, see
@@ -96,10 +98,22 @@ function flowFor(tab) {
   if (existing) return existing;
   const project = projectFor(tab.root);
   project.tabs.add(tab.id);
+  // Other folders this canvas has cards from (a worktree, another repo):
+  // each its own lode, held while the tab is open (lode's folders, see
+  // lode-graph's LodeHost.folder).
+  const others = new Set();
   const host = {
     openView: (request) => current?.openFlowTab(tab.root, { ...request, newTab: true }),
     // A card's title: the real file tab, even with this flow showing.
-    openSource: (file, line) => current?.openFileTab(tab.root, file, line ?? null, { flow: false }),
+    openSource: (file, line, folder) => current?.openFileTab(folder ?? tab.root, file, line ?? null, { flow: false }),
+    folder: async (path) => {
+      const real = await window.clanceApp.lodeOpen(path);
+      if (!real) return null;
+      const other = projectFor(real);
+      other.tabs.add(tab.id);
+      others.add(real);
+      return other.connection;
+    },
     syntax,
     syntaxCss: SYNTAX_CSS,
     storage: serviceStorage(project.connection),
@@ -113,11 +127,18 @@ function flowFor(tab) {
   };
   const start = starts.get(tab.id) ?? {};
   starts.delete(tab.id);
-  const el = createView({ kind: "flow", state: tab.stateKey, ...start }, project.connection, host);
+  const el = createView({ kind: "flow", state: tab.stateKey, folder: tab.root, ...start }, project.connection, host);
   el.classList.add("flow-canvas");
-  const entry = { el, root: tab.root, stateKey: tab.stateKey };
+  const entry = { el, root: tab.root, stateKey: tab.stateKey, others };
   flows.set(tab.id, entry);
   return entry;
+}
+
+// When the person last moved a canvas themselves (panned, zoomed, clicked):
+// following a session doesn't take the view from them for a few seconds.
+const touched = new Map();
+export function touchedRecently(tabId, ms = 5000) {
+  return Date.now() - (touched.get(tabId) ?? 0) < ms;
 }
 
 /** The canvas of an open Flow tab, if it has been shown. */
@@ -133,14 +154,40 @@ export function destroyFlow(tabId) {
   if (!entry) return;
   flows.delete(tabId);
   entry.el.remove();
-  const project = projects.get(entry.root);
+  for (const root of [entry.root, ...entry.others]) releaseProject(root, tabId);
+}
+
+// A tab is done with a project's lode: the last one lets it go.
+function releaseProject(root, tabId) {
+  const project = projects.get(root);
   if (!project) return;
   project.tabs.delete(tabId);
   if (project.tabs.size) return;
-  projects.delete(entry.root);
+  projects.delete(root);
   project.connection.close();
   project.stopStatus();
-  window.clanceApp.lodeRelease(entry.root);
+  window.clanceApp.lodeRelease(root);
+}
+
+/** A project's lode that no tab ended up using (asked something, then no
+ *  tab opened): let it go. */
+export function releaseIfUnused(root) {
+  const project = projects.get(root);
+  if (project && !project.tabs.size) (project.tabs.add(""), releaseProject(root, ""));
+}
+
+/** A project's lode connection (opened if need be), for a tab that uses it. */
+export function connectProject(root, tabId) {
+  const project = projectFor(root);
+  project.tabs.add(tabId);
+  flows.get(tabId)?.others.add(root);
+  return project;
+}
+
+/** Symbols with changes in a project (against `base`), for a flow of them. */
+export async function changedIds(root, base = "HEAD") {
+  const result = await projectFor(root).api.changes(base).catch(() => null);
+  return (result?.files ?? []).flatMap((f) => (f.symbols.length ? f.symbols.map((s) => s.node.id) : [f.file]));
 }
 
 export function FlowSection({ tab, launcher }) {
@@ -177,6 +224,9 @@ export function FlowSection({ tab, launcher }) {
       report();
       if (event.composedPath()[0]?.isContentEditable && !event.relatedTarget) setTimeout(() => !document.activeElement || document.activeElement === document.body ? host.focus({ preventScroll: true }) : null, 0);
     };
+    const touch = () => touched.set(tabId, Date.now());
+    host.addEventListener("pointerdown", touch, true);
+    host.addEventListener("wheel", touch, { capture: true, passive: true });
     host.addEventListener("pointerdown", takeFocus, true);
     host.addEventListener("focusin", report);
     host.addEventListener("focusout", leftCode);
@@ -196,6 +246,8 @@ export function FlowSection({ tab, launcher }) {
         })
         .catch(() => {});
     return () => {
+      host.removeEventListener("pointerdown", touch, true);
+      host.removeEventListener("wheel", touch, { capture: true });
       host.removeEventListener("pointerdown", takeFocus, true);
       host.removeEventListener("focusin", report);
       host.removeEventListener("focusout", leftCode);
@@ -349,10 +401,35 @@ function FlowBar({ flow, project, root, launcher, ready, onKeys, tabId }) {
 
   // A pointer, not a copy: the session sees the canvas itself, and can draw
   // on it, through the lode tools (src/main/lodeTools.ts).
-  function askClaude() {
+  async function askClaude() {
     const selected = flow.selection().length;
     const what = selected > 1 ? `the ${selected} selected cards on my lode canvas` : "my lode canvas";
-    launcher.askClaudeBeside(`About ${what} (lode_canvas, canvas ${tabId}): `, root, tabId);
+    await launcher.askClaudeBeside(`About ${what} (lode_canvas, canvas ${tabId}): `, root, tabId);
+    redrawBar((n) => n + 1); // it follows the session it opened
+  }
+
+  // The Claude session this canvas follows (lodeCanvases.js's follow): the
+  // sessions open in Clance's panes, by agent id. Read fresh each render,
+  // since Ask Claude sets it too.
+  const [, redrawBar] = useState(0);
+  // Where each session works (agent id → folder): only ones in this
+  // canvas's project are offered, since it shows only its project's code.
+  const [folders, setFolders] = useState({});
+  const loadFolders = () =>
+    void window.clanceApp
+      .listAgents()
+      .then((agents) => setFolders(Object.fromEntries(agents.map((a) => [a.id, a.cwd]))))
+      .catch(() => {});
+  useEffect(loadFolders, []);
+  const follow = readTabState(tabId, "follow", null);
+  const sessions = listTabs(getState().root)
+    .filter((entry) => entry.tab.args?.[0] === "attach" && inProject(folders[entry.tab.args[1]], root))
+    .map((entry) => ({ agent: entry.tab.args[1], label: entry.tab.label }));
+  if (follow && !sessions.some((s) => s.agent === follow.agent)) sessions.push({ ...follow, label: `${follow.label} (closed)` });
+  function setFollow(agent) {
+    const session = sessions.find((s) => s.agent === agent);
+    writeTabState(tabId, "follow", session ? { agent: session.agent, label: session.label.replace(/ \(closed\)$/, "") } : null, { persist: true });
+    redrawBar((n) => n + 1);
   }
 
   async function copyContext() {
@@ -408,6 +485,16 @@ function FlowBar({ flow, project, root, launcher, ready, onKeys, tabId }) {
       </div>
       <span class="flow-count">${note || [cards ? `${cards} card${cards === 1 ? "" : "s"}` : "", unsaved ? `${unsaved} unsaved` : ""].filter(Boolean).join(" · ")}</span>
       <span class="flow-bar-spacer"></span>
+      <select
+        class="flow-mode flow-follow"
+        value=${follow?.agent ?? ""}
+        onMouseDown=${loadFolders}
+        onChange=${(event) => setFollow(event.target.value)}
+        title="Follow a Claude session: what it edits shows here as cards as it goes, and it explains with notes on this canvas"
+      >
+        <option value="">Follow: none</option>
+        ${sessions.map((s) => html`<option value=${s.agent} title=${s.label}>Follow: ${s.label.length > 40 ? `${s.label.slice(0, 40)}…` : s.label}</option>`)}
+      </select>
       <button class="btn-quiet btn-small" disabled=${!flow.canRun("undo")} onClick=${run("undo")} title="Undo (⌘Z)">Undo</button>
       <button class="btn-quiet btn-small" disabled=${!flow.canRun("zoomReset")} onClick=${run("zoomReset")} title="Back to 100%">${Math.round(flow.zoom * 100)}%</button>
       <button class="btn-quiet btn-small" disabled=${!flow.canRun("fit")} onClick=${run("fit")} title="Show every card (f)">Fit</button>

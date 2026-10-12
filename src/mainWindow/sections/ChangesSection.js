@@ -285,7 +285,7 @@ function FileRow({ file, isNew, expanded, repoRoot, onOpen, onToggleStage, onTog
   `;
 }
 
-export function ChangesSection({ onOpenFile }) {
+export function ChangesSection({ onOpenFile, onOpenInLode }) {
   // Whatever the pane knew before it was last unmounted (see above). `root`
   // is undefined until a repository has been chosen in this tab.
   const [byRoot] = useTabState("changes.byRoot", () => new Map());
@@ -678,6 +678,9 @@ export function ChangesSection({ onOpenFile }) {
           ${totals.insertions > 0 && html`<span class="change-ins">+${totals.insertions}</span>`}
           ${totals.deletions > 0 && html`<span class="change-del">−${totals.deletions}</span>`}
         </span>`}
+        ${files.length > 0 &&
+        onOpenInLode &&
+        html`<button class="btn-quiet btn-small changes-lode" title="Open every changed function as cards in a lode tab, with the changes marked" onClick=${() => onOpenInLode(root)}>Open in lode</button>`}
         ${newPaths.size > 0 &&
         html`<button class="changes-new-count" title="Clear the marks" onClick=${markAllSeen}>
           ${newPaths.size} new

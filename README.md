@@ -70,8 +70,16 @@ what ([lode](https://github.com/damiensmith1/lode-graph)): open one from
 Files, from a file tab, or by asking a question with `/`. Ask Claude opens a
 session beside it that can see the canvas and work on it with you: read the
 cards, search the rest of the code, put code on it, build a flow, and draw
-notes and labelled arrows. So an answer can be a picture, like a design laid
-out next to the real code it would change.
+notes and labelled arrows, then group and arrange what it drew. So an answer
+can be a picture, like a design laid out next to the real code it would
+change.
+
+A lode tab can also follow a Claude session: as it writes code, with any
+tool and in any folder, the code appears as cards and the view follows it.
+Code it writes in a worktree or another repo lands on the same canvas, in its
+own group. It explains its work in notes on the canvas instead of long
+replies. From the Changes panel, Open in lode shows every uncommitted change
+as cards.
 
 ![A Claude session drawing a rate-limiter design on a lode canvas, linked to the real code it would change](docs/images/lode.png)
 

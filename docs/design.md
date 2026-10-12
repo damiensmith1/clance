@@ -483,8 +483,12 @@ to the CLI's own file and shell tools. Handlers are in `frontApp.ts`.
 | `lode_show`, `lode_build_flow`, `lode_expand`, `lode_close`, `lode_select`, `lode_focus`, `lode_changes_shown` | auto | Draw on a lode tab's canvas: lode's canvas actions, applied by the window |
 | `lode_search`, `lode_read`, `lode_context`, `lode_impact`, `lode_changes`, `lode_entries` | auto | lode-graph's own MCP tools, on a lode tab's project's running lode |
 
-`LOCAL_TOOLS` is the single list the server registration, the Clance tools
-UI and the CLI arguments all read from.
+Clance's own tools (`LOCAL_TOOLS`) and lode-graph's (`lodeToolInfo`, read
+from the loaded `canvasTools`, so a tool a new lode-graph adds is listed,
+allowed and on without a change in Clance) are the one list the server
+registration, the Clance tools UI and the CLI arguments all read from
+(`allLocalTools`). lode-graph is loaded before the server starts, so no
+session is minted without them.
 
 Tools start enabled: the setting is "all" until one is turned off, then a
 list of the enabled ones, saved with the tools that existed at the time
@@ -1900,6 +1904,51 @@ built on lode's API, which is how lode is meant to be hosted.
   `lode:jev`), never the key. Without one, a lode tab's `/` and its
   Quick/Crawl picker are off and Enter on `/` opens Settings. lode never
   reads a `.env` of its own inside Clance.
+- **Following a session.** Every session Clance starts gets hooks in its
+  `--settings` (`cliSettingsArgs`, `followHooks.ts`): PostToolUse (Edit,
+  MultiEdit, Write, NotebookEdit, Bash), UserPromptSubmit and Stop each
+  run curl, which posts the hook's input to the local tools server's
+  `/hook` with the token read from its headers file when it runs (a
+  background session keeps its args across launches, so nothing in them
+  changes). If Clance isn't running curl fails at once and the session
+  carries on. `lodeFollow.ts` matches the hook's session id to an agent id
+  (`listAgents`). What the session wrote comes from the session, not git,
+  so it works in any folder, tracked or not: Edit and Write say the file
+  and the text (so the line it starts on); for Bash (sed, scripts,
+  generators) a recursive watch on the session's folder from the prompt
+  to Stop collects files written (not dependencies, build output, caches
+  or `.git`), reported after each command. Each file goes once per
+  modification time, with its folder: its repository's root (git only
+  locates it, so a worktree is its own folder), else the session's. The
+  window (`canvasRequest("follow")`, `lodeCanvases.js`) turns each into
+  the symbol there (`symbolAt`, after lode re-reads the file) or the file.
+  A file in the canvas's project is a plain card; one from another folder
+  (a worktree, under `.claude/worktrees/` or anywhere, or another repo) is
+  added from that folder's lode onto the same canvas (lode-graph's
+  multi-folder canvases: the host's `folder` hook opens that folder's lode
+  for the tab, released with it) and framed in a group named for it
+  ("worktree: fix-login"). The view moves to the cards and the cursor to
+  the line, unless the canvas was touched in the last 5 s; Stop tidies
+  (closes up the space closed cards left) and fits. One command writing
+  more than 8 files (a worktree being made, an install, a generator) isn't
+  shown: that's not code being worked on. No
+  diff is turned on: the Changes button is the person's. A prompt gets
+  back text the CLI adds to it, telling the session to explain on that
+  canvas (`lode_note`, `lode_diagram`, and `lode_group` / `lode_arrange` to
+  organise what it touched) and keep its reply short. Which session a
+  lode tab follows is its `follow` tab state ({ agent, label }), set by its
+  toolbar's Follow picker (sessions whose folder, from `listAgents`, is in
+  the tab's project) or by Ask Claude; a hook from a session outside the
+  project is ignored. A turn's cards share one undo group.
+- **Changes in lode.** The Changes panel's Open in lode opens a new lode
+  tab of every changed function in the repository (lode's `changes`
+  against HEAD: each changed symbol, or the file for top-level changes, at
+  most 40) with the changes view on. This is the git view; following a
+  session isn't.
+- **Other folders on a canvas.** The tools that find or add code take a
+  `folder`; Clance's CanvasHost asks the window to add that folder to the
+  canvas (`canvasRequest("folder")`: `flow.addFolder`, which opens its
+  lode through the host's `folder` hook) and then calls that lode.
 - **Files open as cards while a flow is showing.** Opening a file from
   anywhere (Files, Changes, search, ⌘P) while a lode tab is the main
   pane's showing tab adds it to that flow as a card, if it's in the flow's
