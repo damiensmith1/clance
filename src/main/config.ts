@@ -47,6 +47,9 @@ export type ClanceConfig = {
   // the other places roots.ts trusts); see docs/design.md's "Saving".
   writableRoots: string[];
   editor: EditorConfig;
+  // The Jev key for lode's "/" questions, encrypted with safeStorage
+  // (base64). Absent: none set here (see lode.ts's jevKey).
+  jevKey?: string;
 };
 
 export type EditorConfig = {

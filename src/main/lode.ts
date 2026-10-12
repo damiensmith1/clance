@@ -1,6 +1,7 @@
-import { app, utilityProcess, type UtilityProcess, type WebContents } from "electron";
+import { app, BrowserWindow, safeStorage, utilityProcess, type UtilityProcess, type WebContents } from "electron";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { readConfig, writeConfig } from "./config";
 import { resolveFolder } from "./files";
 import { mainWindowContents } from "./mainWindow";
 
@@ -17,12 +18,26 @@ import { mainWindowContents } from "./mainWindow";
 // starts a new one.
 //
 // Keys are Clance's to give, never lode's to find: the Jev key that builds
-// a flow for a "/" question comes from Clance's environment, or in a dev
-// run from the repo's .env (which nothing else reads), and is handed to the
-// worker, which gives it to lode as its judge.
+// a flow for a "/" question is the one set in Settings (or setup), kept
+// encrypted in Clance's config with the system keychain (safeStorage); else
+// Clance's environment; else, in a dev run, the repo's .env (which nothing
+// else reads). A packaged app has no .env, so there it's Settings or the
+// environment. Each worker gets it in its environment, and again whenever
+// it changes ("jev-key", lodeWorker.ts), so running lodes pick it up.
 
-function jevKey(): string | undefined {
-  if (process.env.TYPESAFE_API_KEY) return process.env.TYPESAFE_API_KEY;
+export type JevSource = "settings" | "environment" | "env-file";
+
+function storedJevKey(): string | undefined {
+  const sealed = readConfig().jevKey;
+  if (!sealed || !safeStorage.isEncryptionAvailable()) return undefined;
+  try {
+    return safeStorage.decryptString(Buffer.from(sealed, "base64")) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function envFileJevKey(): string | undefined {
   if (app.isPackaged) return undefined;
   try {
     const line = readFileSync(join(__dirname, "../../.env"), "utf8").match(/^\s*TYPESAFE_API_KEY\s*=\s*(.*)$/m);
@@ -30,6 +45,36 @@ function jevKey(): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function jevKey(): { key: string; source: JevSource } | null {
+  const stored = storedJevKey();
+  if (stored) return { key: stored, source: "settings" };
+  if (process.env.TYPESAFE_API_KEY) return { key: process.env.TYPESAFE_API_KEY, source: "environment" };
+  const file = envFileJevKey();
+  return file ? { key: file, source: "env-file" } : null;
+}
+
+/** Whether "/" questions can be asked, and where the key comes from (never
+ *  the key itself). */
+export function jevStatus(): { source: JevSource | null } {
+  return { source: jevKey()?.source ?? null };
+}
+
+/** Set (or, with null, remove) the Jev key kept in Settings; running lodes
+ *  and windows hear the new status. */
+export function setJevKey(key: string | null): { source: JevSource | null } {
+  const trimmed = key?.trim();
+  if (trimmed && !safeStorage.isEncryptionAvailable()) throw new Error("This Mac's keychain isn't available to keep the key in.");
+  const config = readConfig();
+  if (trimmed) config.jevKey = safeStorage.encryptString(trimmed).toString("base64");
+  else delete config.jevKey;
+  writeConfig(config);
+  const now = jevKey();
+  for (const worker of workers.values()) worker.proc.postMessage({ clance: "jev-key", key: now?.key ?? null });
+  const status = { source: now?.source ?? null };
+  for (const win of BrowserWindow.getAllWindows()) if (!win.webContents.isDestroyed()) win.webContents.send("lode:jev", status);
+  return status;
 }
 
 interface Worker {
@@ -43,11 +88,11 @@ const watchedSenders = new Set<number>();
 function workerFor(root: string): Worker {
   const existing = workers.get(root);
   if (existing) return existing;
-  const key = jevKey();
+  const key = jevKey()?.key;
   const proc = utilityProcess.fork(join(__dirname, "lodeWorker.js"), [root], {
     serviceName: "lode",
     stdio: "pipe",
-    env: { ...process.env, ...(key && { TYPESAFE_API_KEY: key }) },
+    env: { ...process.env, TYPESAFE_API_KEY: key ?? "" },
   });
   const worker: Worker = { proc, senders: new Set() };
   workers.set(root, worker);

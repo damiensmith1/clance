@@ -183,6 +183,15 @@ contextBridge.exposeInMainWorld("clanceApp", {
     return () => ipcRenderer.removeListener("lode:canvas-request", listener);
   },
   lodeCanvasReply: (id: number, result: unknown, error?: string) => ipcRenderer.send("lode:canvas-reply", id, result, error),
+  // The Jev key for "/" questions: { source } ("settings", "environment",
+  // "env-file" or null), set or removed (null) from Settings, and changes.
+  jevStatus: () => ipcRenderer.invoke("lode:jev-status"),
+  setJevKey: (key: string | null) => ipcRenderer.invoke("lode:set-jev-key", key),
+  onJevStatus: (callback: (status: { source: string | null }) => void) => {
+    const listener = (_event: unknown, status: { source: string | null }) => callback(status);
+    ipcRenderer.on("lode:jev", listener);
+    return () => ipcRenderer.removeListener("lode:jev", listener);
+  },
   // Whether Claude Code has been trusted in a folder (null: can't tell).
   claudeTrusted: (dir: string) => ipcRenderer.invoke("claude:trusted", dir),
   // Ask Claude from a lode tab: a session in its project, pre-warmed.

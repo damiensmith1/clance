@@ -1887,12 +1887,19 @@ built on lode's API, which is how lode is meant to be hosted.
   question finds its flow (lode's `ask` `mode`): Quick, lode's pass (word
   matches, one Jev pass), or Crawl, its Jev crawl (reads more of the
   project; slower). Kept with the tab.
-- **Keys are Clance's to give.** The Jev key for `/` questions comes from
-  Clance's environment (`TYPESAFE_API_KEY`), or in a dev run from the
-  repo's `.env`, which nothing else reads. `lode.ts` hands it to the worker,
-  which gives lode its judge (`jevJudge`); lode never reads a `.env` of its
-  own inside Clance. A Settings field for it is still to come: an app
-  opened from the Dock has no shell environment.
+- **Keys are Clance's to give.** The Jev key for `/` questions is, in
+  order: the one set in Settings or setup's lode step (`JevKeySettings.js`),
+  kept in Clance's config encrypted with the keychain (`safeStorage`,
+  `jevKey`); Clance's environment (`TYPESAFE_API_KEY`); in a dev run, the
+  repo's `.env`, which nothing else reads. A packaged app opened from the
+  Dock has neither of the last two, so there it's Settings. `lode.ts`
+  (`jevKey`) puts it in each worker's environment, and lode reads it from
+  there per question (no `judge` option), so a key set or removed is sent
+  to running workers (`{ clance: "jev-key" }`) and applies without a
+  restart. Windows only learn where it comes from (`lode:jev-status`,
+  `lode:jev`), never the key. Without one, a lode tab's `/` and its
+  Quick/Crawl picker are off and Enter on `/` opens Settings. lode never
+  reads a `.env` of its own inside Clance.
 - **Files open as cards while a flow is showing.** Opening a file from
   anywhere (Files, Changes, search, ⌘P) while a lode tab is the main
   pane's showing tab adds it to that flow as a card, if it's in the flow's

@@ -8,6 +8,7 @@ import { DictationStep } from "../setup/DictationStep.js";
 import { Logo } from "../../shared/icons.js";
 import { Toggle } from "../components/Toggle.js";
 import { EditorSettingsRows, CommandLineRow } from "../settings/EditorSettings.js";
+import { JevKeyRow } from "../settings/JevKeySettings.js";
 
 // Reports whether a newer release exists and hands the user the Homebrew
 // command to install it; see src/main/updates.ts for why Clance doesn't
@@ -240,6 +241,11 @@ export function SettingsSection() {
       <section class="extension-group">
         <h2 class="group-title">editor</h2>
         <${EditorSettingsRows} />
+      </section>
+
+      <section class="extension-group">
+        <h2 class="group-title">lode</h2>
+        <${JevKeyRow} />
       </section>
 
       <section class="extension-group">

@@ -439,7 +439,10 @@ Sessions Clance starts get these tools when Accessibility is granted:
   folder). A flow for a folder that already has one opens in it.
 - The tab's search finds a symbol by name, or with `/` builds the flow
   that answers a question, quickly or as a crawl that reads more (a picker
-  beside it, kept with the tab).
+  beside it, kept with the tab). `/` needs a Jev key, set in Settings or
+  setup (or `TYPESAFE_API_KEY` in the environment, or the repo's `.env` in
+  a dev run); without one it's off and points to Settings. A key set takes
+  effect in open lode tabs at once, and is kept encrypted, never shown.
 - A card's title opens the file in a file tab at that line.
 - While a lode tab is showing in the main pane, opening a file (Files,
   Changes, search, ⌘P) adds it to that flow as a card instead of opening a
@@ -559,6 +562,7 @@ Sessions Clance starts get these tools when Accessibility is granted:
   4. **Dictation** (optional, skippable) — microphone access and the
      recommended model, or another from a menu. Setup can finish while the
      model downloads.
+  5. **lode** (optional, skippable) — a Jev key for lode's `/` questions.
 - Each step after the first can go back to the previous one. Enter continues.
 - Permissions are detected as soon as they're granted, without a recheck
   button.

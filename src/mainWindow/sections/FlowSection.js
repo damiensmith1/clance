@@ -1,4 +1,5 @@
 import { html, useEffect, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
+import { useJevStatus } from "../settings/JevKeySettings.js";
 import {
   ASK_EVENT,
   CHANGE_EVENT,
@@ -312,6 +313,8 @@ function FlowBar({ flow, project, root, launcher, ready, onKeys, tabId }) {
   // How "/" questions find their flow: lode's quick pass, or its Jev crawl
   // (slower, reads more of the project). Kept with the tab.
   const [mode, setMode] = useTabState("ask.mode", "pass", { persist: true });
+  // "/" needs a Jev key (Settings, or the environment): off without one.
+  const canAsk = !!useJevStatus()?.source;
   const timer = useRef(0);
 
   function onInput(event) {
@@ -335,6 +338,7 @@ function FlowBar({ flow, project, root, launcher, ready, onKeys, tabId }) {
     }
     if (event.key !== "Enter") return;
     if (query.startsWith("/")) {
+      if (!canAsk) return launcher.openSection("settings");
       const question = query.slice(1).trim();
       if (question) void flow.ask(question, { mode });
       setQuery("");
@@ -367,6 +371,7 @@ function FlowBar({ flow, project, root, launcher, ready, onKeys, tabId }) {
       <select
         class="flow-mode"
         value=${mode}
+        disabled=${!canAsk}
         onChange=${(event) => setMode(event.target.value)}
         title="How a / question finds its flow: a quick pass (word matches, one Jev pass) or a Jev crawl (reads more of the project; slower)"
       >
@@ -376,13 +381,21 @@ function FlowBar({ flow, project, root, launcher, ready, onKeys, tabId }) {
       <div class="flow-search">
         <input
           type="search"
-          placeholder=${ready ? "Find a symbol, or / and a question…" : "Reading the project…"}
+          placeholder=${!ready ? "Reading the project…" : canAsk ? "Find a symbol, or / and a question…" : "Find a symbol"}
           disabled=${!ready}
           value=${query}
           onInput=${onInput}
           onKeyDown=${onKeyDown}
           title="A symbol's name, or / and a question: / how do sessions start?"
         />
+        ${query.startsWith("/") &&
+        !canAsk &&
+        html`<div class="menu flow-results">
+          <button class="menu-item" onClick=${() => launcher.openSection("settings")}>
+            <span class="menu-item-title">Questions need a Jev key</span>
+            <span class="menu-item-detail">Add one in Settings · ↩</span>
+          </button>
+        </div>`}
         ${results.length > 0 &&
         html`<div class="menu flow-results" role="listbox">
           ${results.map(

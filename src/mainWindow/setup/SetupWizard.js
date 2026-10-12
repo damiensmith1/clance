@@ -3,13 +3,15 @@ import { ConnectClaudeStep } from "./ConnectClaudeStep.js";
 import { PermissionsStep } from "./PermissionsStep.js";
 import { ShortcutsStep } from "./ShortcutsStep.js";
 import { DictationStep } from "./DictationStep.js";
+import { JevKeyStep } from "../settings/JevKeySettings.js";
 import { Logo } from "../../shared/icons.js";
 
-// Dictation is last and optional: it never counts toward setup being
-// complete (see setupStatus.ts), so it can be skipped, and someone who quits
-// during it lands straight in the app next launch — it lives in Settings too.
-const STEP_ORDER = ["claude", "permissions", "shortcuts", "dictation"];
-const STEP_LABELS = { claude: "account", permissions: "permissions", shortcuts: "shortcuts", dictation: "dictation" };
+// Dictation and the Jev key (lode's "/" questions) are last and optional:
+// they never count toward setup being complete (see setupStatus.ts), so
+// they can be skipped, and someone who quits during them lands straight in
+// the app next launch — both live in Settings too.
+const STEP_ORDER = ["claude", "permissions", "shortcuts", "dictation", "lode"];
+const STEP_LABELS = { claude: "account", permissions: "permissions", shortcuts: "shortcuts", dictation: "dictation", lode: "lode" };
 
 function firstIncompleteStep(status) {
   if (!(status.claude.installed && status.claude.loggedIn)) return "claude";
@@ -84,6 +86,7 @@ export function SetupWizard({ initialStatus }) {
         ${step === "permissions" && html`<${PermissionsStep} onComplete=${advance} onBack=${goBack} />`}
         ${step === "shortcuts" && html`<${ShortcutsStep} onComplete=${advance} onBack=${goBack} />`}
         ${step === "dictation" && html`<${DictationStep} onComplete=${advance} onBack=${goBack} />`}
+        ${step === "lode" && html`<${JevKeyStep} onComplete=${advance} onBack=${goBack} />`}
       </div>
     </div>
   `;
