@@ -1831,8 +1831,13 @@ built on lode's API, which is how lode is meant to be hosted.
   the largest), else a pane split off the lode's to the right (60/40).
   Once per lode tab: the session it opened is remembered on the lode tab
   (`askSession`, saved with the layout), and pressing Ask Claude again
-  while that session is open just brings it forward; once it's closed,
-  the next press opens a new one.
+  while that session is open brings it forward and pastes the cards into
+  it at once; once it's closed, the next press opens a new one. A new
+  session's paste goes in 0.4 s after its terminal's first output (it's
+  already running, so attached is ready), not after the output goes quiet
+  as Asking Claude's does for a session that's still starting: an attached
+  session's screen may not go quiet, which left the paste to the 10 s
+  fallback.
 - **One pre-warmed session for Ask Claude** (`lodePool.ts`), so it opens
   at once, in the folder of the lode tab being shown. Like the popup's
   pool, but it follows the folder, since a session's working directory is

@@ -1493,11 +1493,15 @@ export function Shell() {
   //
   // Once per lode tab: the session it opened is remembered on the lode tab
   // (`askSession`, saved with it), and pressing again while that session is
-  // still open just brings it forward.
+  // still open brings it forward and pastes the cards into it (it's running,
+  // so at once) rather than opening another.
   async function askClaudeBeside(text, root, fromTabId) {
     const tabs = listTabs(getState().root);
     const opened = tabs.find((entry) => entry.tab.id === readTabState(fromTabId, "askSession", null));
-    if (opened) return activateTab(opened.paneId, opened.tab.id);
+    if (opened) {
+      activateTab(opened.paneId, opened.tab.id);
+      return bracketedPaste(opened.tab.terminalId, text);
+    }
     const from = tabs.find((entry) => entry.tab.id === fromTabId)?.paneId ?? mainPaneId();
     const claimed = await window.clanceApp.lodeClaimSession(root).catch(() => null);
     if (!claimed) return askClaude(text, root);
@@ -1527,7 +1531,26 @@ export function Shell() {
         pasteWhenReady(terminalId, text);
         void window.clanceApp.lodeWarmSession?.(root).catch(() => {});
       });
-    } else pasteWhenReady(terminalId, text);
+    } else pasteWhenAttached(terminalId, text);
+  }
+
+  // A session that's already running (a claimed spare, `claude attach`)
+  // takes input as soon as its terminal is attached: the paste goes in just
+  // after its first output, not after the output goes quiet, which a
+  // session's screen may never do (the 10 s fallback, otherwise).
+  function pasteWhenAttached(terminalId, text) {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      stop();
+      clearTimeout(giveUp);
+      bracketedPaste(terminalId, text);
+    };
+    const stop = window.clanceApp.onTerminalData(({ terminalId: id }) => {
+      if (id === terminalId) setTimeout(finish, 400);
+    });
+    const giveUp = setTimeout(finish, 5000);
   }
 
   // The focused editor's selection, or the line the cursor is on.
