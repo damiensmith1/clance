@@ -58,7 +58,7 @@ import {
 import { resolveOpenArgs, resolveSessionId, spawnBackgroundAgent, stopAgent, listAgents, cliSettingsArgs, UntrustedWorkspaceError, isClaudeTrusted } from "./agentSessions";
 import { isPoolSpareId } from "./agentPool";
 import { copyDroppedFile } from "./dropFiles";
-import { lodeSend, lodeRelease, stopAllLodes } from "./lode";
+import { lodeSend, lodeRelease, stopAllLodes, canvasReply } from "./lode";
 import { claimLodeSession, discardLeftoverLodeSessions, isLodeSpareId, releaseAllLodeSessions, releaseLodeSession, warmLodeSession } from "./lodePool";
 import {
   getStatus as getGitStatus,
@@ -696,6 +696,8 @@ ipcMain.on("lode:release", (event, root: unknown) => {
   lodeRelease(event.sender, root);
   if (typeof root === "string") releaseLodeSession(root);
 });
+// The window's answer about its lode tabs, for the lode tools (lodeTools.ts).
+ipcMain.on("lode:canvas-reply", (_event, id: unknown, result: unknown, error: unknown) => canvasReply(id, result, error));
 // Whether Claude Code has been trusted in a folder (null: can't tell).
 ipcMain.handle("claude:trusted", (_event, dir: unknown) => {
   const real = resolveFolder(dir);

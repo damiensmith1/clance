@@ -479,9 +479,18 @@ to the CLI's own file and shell tools. Handlers are in `frontApp.ts`.
 | `click_at(x, y)` | auto | Click at fractions (0–1) of the display under the cursor. Reads what is under the point first and reports it, so a coordinate guess is checkable. |
 | `write_field(text?, mode?, app?)` | approval | `AXValue`/`AXSelectedText` where the app allows it, clipboard-and-keystrokes where it doesn't, then reads the field back either way |
 | `activate_app(app)` | approval | Focus a window by title |
+| `lode_canvases`, `lode_canvas(canvas?)` | auto | The open lode tabs; one's cards as context (see "lode tabs") |
+| `lode_show`, `lode_build_flow`, `lode_expand`, `lode_close`, `lode_select`, `lode_focus`, `lode_changes_shown` | auto | Draw on a lode tab's canvas: lode's canvas actions, applied by the window |
+| `lode_search`, `lode_read`, `lode_context`, `lode_impact`, `lode_changes`, `lode_entries` | auto | lode-graph's own MCP tools, on a lode tab's project's running lode |
 
 `LOCAL_TOOLS` is the single list the server registration, the Clance tools
 UI and the CLI arguments all read from.
+
+Tools start enabled: the setting is "all" until one is turned off, then a
+list of the enabled ones, saved with the tools that existed at the time
+(`knownLocalTools`), so a tool added later (the lode tools) is on rather
+than counted as turned off. Lists saved before that was kept count as a
+choice among the first nine tools.
 
 Acting on an app went from four tools to two. The three former
 text-writing tools were one capability split three ways — three approval prompts and three descriptions for "put text in
@@ -1823,10 +1832,10 @@ built on lode's API, which is how lode is meant to be hosted.
 - **Clance's toolbar** above the canvas: search (a symbol by name, or `/`
   and a question, which lode builds into a flow with Jev), the card count, undo, zoom,
   fit, git changes on or off, copy context, **Ask Claude** and clear. Ask
-  Claude takes `flow.context()` (the cards, or the selected ones, with how
-  they connect and any changes, sized for a model) and opens a new session
-  beside the lode with it in the prompt, not sent (a bracketed paste, as
-  Asking Claude does), instead of lode's own explain panel. Beside: in
+  Claude opens a new session beside the lode with a pointer to the canvas
+  in its prompt, not sent ("About my lode canvas (lode_canvas, canvas
+  flow:…): "), instead of lode's own explain panel: the session sees and
+  draws on the canvas itself, through the lode tools (below). Beside: in
   another pane if there is one (one already showing a session first, else
   the largest), else a pane split off the lode's to the right (60/40).
   Once per lode tab: the session it opened is remembered on the lode tab
@@ -1853,6 +1862,24 @@ built on lode's API, which is how lode is meant to be hosted.
   until the folder is trusted (polled, up to five minutes, never if the tab
   closes), since pasted into the trust prompt they'd answer it, then go
   into that session, and the spare warms.
+- **lode tools for Claude sessions** (`lodeTools.ts`, on the local tools
+  server, so every Clance session has them): `lode_canvases` lists the
+  open lode tabs (id, folder, cards, question, which is in front);
+  `lode_canvas` reads one's cards as context (`flow.context()`, the
+  selection first); `lode_show`, `lode_build_flow` (lode's `ask` → a
+  plan), `lode_expand`, `lode_close`, `lode_select`, `lode_focus` and
+  `lode_changes_shown` draw on one, as lode's `CanvasAction`s, one undo
+  step a call. A tool's `canvas` is a lode tab's id; without one, the lode
+  tab in front. The graph tools are lode-graph's own (`lodeTools` from
+  `lode-graph/mcp`), run against the canvas's project's lode: main calls
+  that worker itself (`lodeCall`, ids windows never use). Canvases live in
+  the window, so main asks it (`lode:canvas-request` / reply,
+  `sections/lodeCanvases.js`), which matches the model's card names to the
+  canvas's cards, and shows a tab whose canvas hasn't been drawn yet
+  without taking focus from where the user is. Written on lode-graph's
+  public API only, to move into lode-graph as a toolkit hosts mount. Like
+  the other local tools, sessions only get them when Accessibility is
+  granted (the server is gated on it).
 - **Keys are Clance's to give.** The Jev key for `/` questions comes from
   Clance's environment (`TYPESAFE_API_KEY`), or in a dev run from the
   repo's `.env`, which nothing else reads. `lode.ts` hands it to the worker,

@@ -2,6 +2,7 @@ import { app, utilityProcess, type UtilityProcess, type WebContents } from "elec
 import { readFileSync } from "fs";
 import { join } from "path";
 import { resolveFolder } from "./files";
+import { mainWindowContents } from "./mainWindow";
 
 // lode (the `lode-graph` package, github.com/damiensmith1/lode-graph) reads a project as a code graph for
 // the Flow tabs. Each project folder gets its own lode, in a utility process
@@ -52,9 +53,17 @@ function workerFor(root: string): Worker {
   workers.set(root, worker);
   let error = "";
   proc.stderr?.on("data", (chunk: Buffer) => (error = (error + chunk.toString()).slice(-2000)));
-  proc.on("message", (message: { method?: string; params?: { error?: string } }) => {
+  proc.on("message", (message: { method?: string; id?: unknown; result?: unknown; error?: string; params?: { error?: string } }) => {
     if (message?.method === "failed") {
       error = message.params?.error ?? error;
+      return;
+    }
+    // An answer to main's own call (lodeCall), not a window's.
+    if (typeof message?.id === "string" && message.id.startsWith("main:")) {
+      const waiting = mainCalls.get(message.id);
+      mainCalls.delete(message.id);
+      if (message.error !== undefined) waiting?.reject(new Error(message.error));
+      else waiting?.resolve(message.result);
       return;
     }
     for (const sender of worker.senders) if (!sender.isDestroyed()) sender.send("lode:msg", { root, message });
@@ -84,6 +93,64 @@ export function lodeSend(sender: WebContents, root: unknown, message: unknown): 
     });
   }
   worker.proc.postMessage(message);
+}
+
+// Main's own calls to a project's lode (the lode tools Claude sessions
+// use, localToolsServer.ts), by an id windows never use.
+const mainCalls = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+let nextCall = 1;
+
+/** Call a project's lode from main: a service method and its params. Only
+ *  for a folder a window already has a lode for (its lode tabs), so this
+ *  never starts one nothing would stop. */
+export function lodeCall(root: string, method: string, params: Record<string, unknown> = {}): Promise<unknown> {
+  const worker = workers.get(root);
+  if (!worker) return Promise.reject(new Error(`no lode tab is open on ${root}`));
+  const id = `main:${nextCall++}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      mainCalls.delete(id);
+      reject(new Error(`lode didn't answer ${method} in time`));
+    }, 60_000);
+    mainCalls.set(id, {
+      resolve: (value) => (clearTimeout(timer), resolve(value)),
+      reject: (error) => (clearTimeout(timer), reject(error)),
+    });
+    worker.proc.postMessage({ lode: 1, id, method, params });
+  });
+}
+
+// --- the lode tabs themselves, for the tools: the window holds the canvases ---
+
+const canvasCalls = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+let nextCanvasCall = 1;
+
+/** Ask the main window about its lode tabs ("list", "read", "apply", see
+ *  Shell.js's canvas handler). */
+export function canvasRequest(op: string, args: Record<string, unknown> = {}): Promise<unknown> {
+  const contents = mainWindowContents();
+  if (!contents) return Promise.reject(new Error("Clance's main window isn't open, so there are no lode tabs"));
+  const id = nextCanvasCall++;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      canvasCalls.delete(id);
+      reject(new Error("the lode tab didn't answer in time"));
+    }, 120_000);
+    canvasCalls.set(id, {
+      resolve: (value) => (clearTimeout(timer), resolve(value)),
+      reject: (error) => (clearTimeout(timer), reject(error)),
+    });
+    contents.send("lode:canvas-request", { id, op, args });
+  });
+}
+
+/** The window's answer to a canvasRequest. */
+export function canvasReply(id: unknown, result: unknown, error: unknown): void {
+  const waiting = typeof id === "number" ? canvasCalls.get(id) : undefined;
+  if (!waiting) return;
+  canvasCalls.delete(id as number);
+  if (typeof error === "string") waiting.reject(new Error(error));
+  else waiting.resolve(result);
 }
 
 /** A window is done with a project's lode (its last Flow tab closed). */

@@ -126,6 +126,11 @@ export function openMainWindow(): void {
 }
 
 /** Brings the main window forward and sends it `channel` once it has loaded. */
+/** The main window's page, if it's open (without opening it). */
+export function mainWindowContents(): Electron.WebContents | null {
+  return mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null;
+}
+
 export async function sendToMainWindow(channel: string, payload?: unknown): Promise<void> {
   openMainWindow();
   await mainWindowReady;

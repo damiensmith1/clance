@@ -17,6 +17,7 @@ import { SettingsSection } from "./sections/SettingsSection.js";
 import { DictationSection } from "./sections/DictationSection.js";
 import { TerminalSection, nextTerminalId, destroyTerminal } from "./sections/TerminalSection.js";
 import { FlowSection, destroyFlow, flowOf, setFlowStart, symbolAt } from "./sections/FlowSection.js";
+import { canvasOp } from "./sections/lodeCanvases.js";
 import {
   loadEditorConfig,
   release as releaseBuffer,
@@ -1382,7 +1383,19 @@ export function Shell() {
   // rather than `state`, since the listener outlives the render it was
   // registered in.
   useEffect(() => {
-    return window.clanceApp.onWindowCommand((command) => {
+    // The lode tools (src/main/lodeTools.ts) asking about the lode tabs: list
+    // them, read one's cards as context, or draw on one (lode's canvas
+    // actions, flow.apply). A tab whose canvas hasn't been shown since launch
+    // is shown first (its pane's tab, without taking focus from where the
+    // user is), since a canvas only exists once it has been drawn.
+    const stopCanvas = window.clanceApp.onLodeCanvasRequest?.(async ({ id, op, args }) => {
+      try {
+        window.clanceApp.lodeCanvasReply(id, await canvasOp(op, args));
+      } catch (error) {
+        window.clanceApp.lodeCanvasReply(id, null, error instanceof Error ? error.message : String(error));
+      }
+    });
+    const stopCommands = window.clanceApp.onWindowCommand((command) => {
       if (command === "close-tab") closeActiveTab();
       else if (command === "next-tab") cycleTab(1);
       else if (command === "prev-tab") cycleTab(-1);
@@ -1396,6 +1409,10 @@ export function Shell() {
         openFolderSearch();
       }
     });
+    return () => {
+      stopCanvas?.();
+      stopCommands();
+    };
   }, []);
 
   // ---- Ask Claude (⌘L) ----

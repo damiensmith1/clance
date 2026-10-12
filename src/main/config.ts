@@ -35,6 +35,11 @@ export type ClanceConfig = {
   // disables one they specifically don't want rather than needing to opt
   // into what's already there.
   enabledLocalTools: string[] | "all";
+  // The tools that existed when enabledLocalTools last became a list: one
+  // added after that is on (it was never turned off). Absent on configs
+  // from before this was kept (see localToolsServer.ts's
+  // FIRST_LOCAL_TOOLS).
+  knownLocalTools?: string[];
   dictation: DictationConfig;
   // Folders the person put Clance in through something the main process
   // owns — a folder picked in a dialog, a file or folder opened from Finder

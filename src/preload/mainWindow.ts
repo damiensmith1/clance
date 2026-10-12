@@ -175,6 +175,14 @@ contextBridge.exposeInMainWorld("clanceApp", {
   lodeOpen: (root: string) => ipcRenderer.invoke("lode:open", root),
   lodeSend: (root: string, message: unknown) => ipcRenderer.send("lode:msg", root, message),
   lodeRelease: (root: string) => ipcRenderer.send("lode:release", root),
+  // The lode tools asking about the lode tabs (list, read, apply): see
+  // src/main/lodeTools.ts and Shell.js's canvas handler.
+  onLodeCanvasRequest: (callback: (request: { id: number; op: string; args: Record<string, unknown> }) => void) => {
+    const listener = (_event: unknown, request: { id: number; op: string; args: Record<string, unknown> }) => callback(request);
+    ipcRenderer.on("lode:canvas-request", listener);
+    return () => ipcRenderer.removeListener("lode:canvas-request", listener);
+  },
+  lodeCanvasReply: (id: number, result: unknown, error?: string) => ipcRenderer.send("lode:canvas-reply", id, result, error),
   // Whether Claude Code has been trusted in a folder (null: can't tell).
   claudeTrusted: (dir: string) => ipcRenderer.invoke("claude:trusted", dir),
   // Ask Claude from a lode tab: a session in its project, pre-warmed.

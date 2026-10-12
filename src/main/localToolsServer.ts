@@ -24,6 +24,7 @@ import { captureActiveDisplay } from "./screenCapture";
 import * as ax from "./ax";
 import { readConfig, writeConfig } from "./config";
 import { SESSION_CWD } from "./paths";
+import { preloadLodeTools, registerLodeTools } from "./lodeTools";
 
 // The single source of truth for what local tools exist, both for
 // popupWindow.ts's --allowedTools/--disallowedTools wiring (which needs
@@ -48,6 +49,22 @@ export const LOCAL_TOOLS: LocalToolInfo[] = [
   { name: "click_at", tier: "auto", description: "Click a position on the user's screen." },
   { name: "write_field", tier: "approval", description: "Write text into a field in another app." },
   { name: "activate_app", tier: "approval", description: "Bring a different app to the front." },
+  // lode (lodeTools.ts): the lode tabs' canvases and their projects' code graphs.
+  { name: "lode_canvases", tier: "auto", description: "List the open lode tabs." },
+  { name: "lode_canvas", tier: "auto", description: "Read what's on a lode canvas." },
+  { name: "lode_show", tier: "auto", description: "Put symbols on a lode canvas as cards." },
+  { name: "lode_build_flow", tier: "auto", description: "Build the flow for a question on a lode canvas." },
+  { name: "lode_expand", tier: "auto", description: "Expand a card on a lode canvas." },
+  { name: "lode_close", tier: "auto", description: "Close cards on a lode canvas." },
+  { name: "lode_select", tier: "auto", description: "Select cards on a lode canvas." },
+  { name: "lode_focus", tier: "auto", description: "Move a lode canvas's view to cards." },
+  { name: "lode_changes_shown", tier: "auto", description: "Show or hide git changes on a lode canvas." },
+  { name: "lode_search", tier: "auto", description: "Find symbols in a lode project." },
+  { name: "lode_read", tier: "auto", description: "Read a symbol with what it calls and what calls it." },
+  { name: "lode_context", tier: "auto", description: "The code that matters for a question, from lode's graph." },
+  { name: "lode_impact", tier: "auto", description: "What the uncommitted changes touch." },
+  { name: "lode_changes", tier: "auto", description: "What changed in git, by file and symbol." },
+  { name: "lode_entries", tier: "auto", description: "Where to start reading a lode project." },
 ];
 
 // Roles click_element will press. Deliberately a list rather than "anything
@@ -77,11 +94,17 @@ const CLICKABLE_ROLES = new Set([
 
 export type LocalToolStatus = LocalToolInfo & { enabled: boolean };
 
+// The tools there were before configs recorded which existed
+// (knownLocalTools): a list saved then was a choice among these.
+const FIRST_LOCAL_TOOLS = ["list_open_windows", "look_at_screen", "read_selection", "read_focused_field", "read_window_text", "click_element", "click_at", "write_field", "activate_app"];
+
 export function listLocalTools(): LocalToolStatus[] {
-  const { enabledLocalTools } = readConfig();
+  const { enabledLocalTools, knownLocalTools } = readConfig();
+  const known = new Set(knownLocalTools ?? FIRST_LOCAL_TOOLS);
   return LOCAL_TOOLS.map((tool) => ({
     ...tool,
-    enabled: enabledLocalTools === "all" || enabledLocalTools.includes(tool.name),
+    // A tool added since the list was saved was never turned off: on.
+    enabled: enabledLocalTools === "all" || enabledLocalTools.includes(tool.name) || !known.has(tool.name),
   }));
 }
 
@@ -99,12 +122,12 @@ export function setLocalToolEnabled(name: string, enabled: boolean): LocalToolSt
   }
 
   const config = readConfig();
-  const currentlyEnabled =
-    config.enabledLocalTools === "all" ? allNames : [...config.enabledLocalTools];
+  const currentlyEnabled = listLocalTools().filter((tool) => tool.enabled).map((tool) => tool.name);
   const next = enabled
     ? [...new Set([...currentlyEnabled, name])]
     : currentlyEnabled.filter((n) => n !== name);
   config.enabledLocalTools = next;
+  config.knownLocalTools = allNames;
   writeConfig(config);
   return listLocalTools();
 }
@@ -914,6 +937,8 @@ function createMcpServer(): McpServer {
     })
   );
 
+  registerLodeTools(server, withLogging);
+
   return server;
 }
 
@@ -997,6 +1022,9 @@ async function listenOnSavedPort(httpServer: Server, identity: PersistentIdentit
 // check below. Started at app launch (index.ts), not lazily on the first
 // mint, since sessions from earlier launches may call in at any time.
 let starting: Promise<{ url: string; token: string; serverKey: string; headersHelper: string }> | undefined;
+
+// lode-graph's tools load (ESM) once, before the first session connects.
+void preloadLodeTools().catch((error) => console.error("[localToolsServer] lode tools didn't load:", error));
 
 export function ensureLocalToolsServer(): Promise<{
   url: string;

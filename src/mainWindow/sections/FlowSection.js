@@ -336,10 +336,12 @@ function FlowBar({ flow, project, root, launcher, ready, onKeys, tabId }) {
     if (results[0]) pick(results[0]);
   }
 
-  async function askClaude() {
-    const context = await flow.context().catch(() => null);
-    if (!context) return;
-    launcher.askClaudeBeside(`From lode, ${context.title} (${root}):\n\n${context.markdown}\n\n`, root, tabId);
+  // A pointer, not a copy: the session sees the canvas itself, and can draw
+  // on it, through the lode tools (src/main/lodeTools.ts).
+  function askClaude() {
+    const selected = flow.selection().length;
+    const what = selected > 1 ? `the ${selected} selected cards on my lode canvas` : "my lode canvas";
+    launcher.askClaudeBeside(`About ${what} (lode_canvas, canvas ${tabId}): `, root, tabId);
   }
 
   async function copyContext() {
@@ -382,7 +384,7 @@ function FlowBar({ flow, project, root, launcher, ready, onKeys, tabId }) {
       <button class="btn-quiet btn-small" disabled=${!flow.canRun("fit")} onClick=${run("fit")} title="Show every card (f)">Fit</button>
       <button class="btn-quiet btn-small ${flow.diff !== null ? "flow-on" : ""}" onClick=${() => void flow.setDiff(flow.diff === null ? "HEAD" : null)} title="Show what changed since the last commit">Changes</button>
       <button class="btn-quiet btn-small" disabled=${!cards} onClick=${copyContext} title="Copy these cards (or the selected ones) as context for an LLM">Copy context</button>
-      <button class="btn-secondary btn-small" disabled=${!cards} onClick=${askClaude} title="Open a Claude session beside this lode with these cards (or the selected ones) in its prompt; once it's open, go to it">Ask Claude</button>
+      <button class="btn-secondary btn-small" disabled=${!ready} onClick=${askClaude} title="Open a Claude session beside this lode that can see and draw on it (lode tools); once it's open, go to it">Ask Claude</button>
       <button class="btn-quiet btn-small" disabled=${!flow.canRun("clear")} onClick=${run("clear")} title="Clear the canvas">Clear</button>
       <button class="btn-quiet btn-small" onClick=${onKeys} title="The keys (?)">?</button>
     </header>

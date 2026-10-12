@@ -444,8 +444,10 @@ Sessions Clance starts get these tools when Accessibility is granted:
   Changes, search, ⌘P) adds it to that flow as a card instead of opening a
   file tab, when the file is in the flow's project.
 - Ask Claude opens a new Claude session beside the lode (in another pane,
-  or a new one to its right) with the cards (or the selected ones) in its
-  prompt, without sending it, and opens at once (one session is kept warm,
+  or a new one to its right) with a pointer to the canvas in its prompt,
+  without sending it; Claude sessions can see any open lode tab's cards and
+  the project's code graph, and draw on the canvas (add cards, build a flow
+  for a question, expand, close, select, focus, show changes), and opens at once (one session is kept warm,
   in the folder of the lode tab being shown). Pressing it again while that
   session is open goes to it and pastes the cards there instead of opening
   another. Copy context puts
