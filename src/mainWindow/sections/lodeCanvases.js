@@ -55,7 +55,15 @@ const followContext = (tab) =>
     "Keep your written reply to a line or two that points at the canvas.",
   ].join(" ");
 
-const followTurns = new Map(); // tab id → this turn's undo group
+// A followed turn, per lode tab: its undo group, the cards on the canvas
+// when the prompt was sent (null: followed mid-turn), and the cards its
+// edits were shown on.
+const followTurns = new Map(); // tab id → { group, before, touched }
+const turnOf = (tabId) => {
+  if (!followTurns.has(tabId)) followTurns.set(tabId, { group: `follow-${Date.now()}`, before: null, touched: new Set() });
+  return followTurns.get(tabId);
+};
+const ZOOMED_OUT = 0.45; // fitting the turn's cards any smaller frames its notes instead
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const WORKTREE = /\/\.claude\/worktrees\/([^/]+)$/;
 
@@ -85,8 +93,8 @@ async function followEdit(entry, edits, report) {
     byFolder.set(own, at);
   }
   if (!byFolder.size) return;
-  if (!followTurns.has(tab.id)) followTurns.set(tab.id, `follow-${Date.now()}`);
-  const group = followTurns.get(tab.id);
+  const turn = turnOf(tab.id);
+  const group = turn.group;
   const shown = [];
   for (const [folder, { ids, lines }] of byFolder) {
     const add = { kind: "add", ids, ...(folder && { folder }) };
@@ -104,6 +112,7 @@ async function followEdit(entry, edits, report) {
     for (const id of missing()) report.missing.push(id);
     const keys = ids.map(keyOf).filter((k) => flow.cards().some((c) => c.key === k));
     report.shown.push(...keys);
+    for (const k of keys) turn.touched.add(k);
     if (folder && keys.length) {
       const name = folder.match(WORKTREE)?.[1];
       await flow.apply([{ kind: "group", id: `folder:${label}`, title: name ? `worktree: ${name}` : folder.split("/").pop(), cards: keys, add: true, layout: "column" }], { undoGroup: group });
@@ -116,22 +125,44 @@ async function followEdit(entry, edits, report) {
   if (last) flow.moveCursor(last.key, last.line);
 }
 
+// The turn ended: close up what closed cards left empty, then show what
+// the turn did: the cards its edits were shown on and everything it put on
+// the canvas (notes, diagrams, groups). Spread so wide that would zoom far
+// out, its notes instead (its explanation). A turn that changed nothing
+// leaves the view alone, and so does one the person is moving around in.
+async function endTurn(tabId, flow) {
+  const turn = followTurns.get(tabId);
+  followTurns.delete(tabId);
+  if (touchedRecently(tabId)) return;
+  const now = flow.cards().map((c) => c.key);
+  const made = turn?.before ? now.filter((k) => !turn.before.has(k)) : [];
+  const keys = [...new Set([...(turn?.touched ?? []), ...made])].filter((k) => now.includes(k));
+  await flow.apply([{ kind: "tidy" }]);
+  if (!keys.length) return;
+  await flow.apply([{ kind: "focus", cards: keys }]);
+  const notes = keys.filter((k) => k.startsWith("note:"));
+  if (flow.zoom < ZOOMED_OUT && notes.length && notes.length < keys.length) await flow.apply([{ kind: "focus", cards: notes }]);
+}
+
 // A session in this canvas's project (or one of its folders).
 export const inProject = (cwd, root) => !!cwd && (cwd === root || cwd.startsWith(`${root}/`));
 
 async function follow({ agent, cwd, event, edits }) {
   const followers = lodeTabs().filter((e) => readTabState(e.tab.id, "follow", null)?.agent === agent && (!cwd || inProject(cwd, e.tab.root)));
   if (!followers.length) return null;
-  if (event === "prompt") return { context: followContext(followers[0].tab) };
+  if (event === "prompt") {
+    // A new turn: what's there now isn't its.
+    for (const { tab } of followers) {
+      const flow = flowOf(tab.id);
+      followTurns.set(tab.id, { group: `follow-${Date.now()}`, before: flow ? new Set(flow.cards().map((c) => c.key)) : null, touched: new Set() });
+    }
+    return { context: followContext(followers[0].tab) };
+  }
   // What happened, for main's log (lodeFollow.ts).
   const report = { canvases: followers.map((e) => e.tab.id), shown: [], missing: [], skipped: [] };
   for (const entry of followers) {
     if (event === "edit") await followEdit(entry, edits ?? [], report);
-    else if (event === "stop" && flowOf(entry.tab.id)) {
-      followTurns.delete(entry.tab.id);
-      // Close up what closed cards left empty, then show it all.
-      if (!touchedRecently(entry.tab.id)) await flowOf(entry.tab.id).apply([{ kind: "tidy" }, { kind: "fit" }]);
-    }
+    else if (event === "stop" && flowOf(entry.tab.id)) await endTurn(entry.tab.id, flowOf(entry.tab.id));
   }
   return report;
 }

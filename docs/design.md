@@ -1929,7 +1929,11 @@ built on lode's API, which is how lode is meant to be hosted.
   for the tab, released with it) and framed in a group named for it
   ("worktree: fix-login"). The view moves to the cards and the cursor to
   the line, unless the canvas was touched in the last 5 s; Stop tidies
-  (closes up the space closed cards left) and fits. One command writing
+  (closes up the space closed cards left) and frames the turn: the cards
+  its edits were shown on plus every card new since the prompt (its notes,
+  diagrams, groups: the canvas's cards at the prompt are kept to compare),
+  or, if that would zoom out past 45%, just its notes; a turn that changed
+  nothing leaves the view where it is. One command writing
   more than 8 files (a worktree being made, an install, a generator) isn't
   shown: that's not code being worked on. No
   diff is turned on: the Changes button is the person's. A prompt gets

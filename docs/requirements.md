@@ -463,7 +463,8 @@ Sessions Clance starts get these tools when Accessibility is granted:
   cards and the view moves to them, unless the user moved the canvas in
   the last few seconds; code it writes in a worktree or another repo comes
   onto the same canvas, framed as a group named for that folder. When its
-  turn ends the canvas fits everything. A followed session is asked to
+  turn ends the view frames what that turn did (the code it changed and
+  the notes it drew), not the whole canvas. A followed session is asked to
   explain with notes, diagrams and groups on the canvas and keep its
   written reply short. Only sessions Clance started can be followed.
 - The Changes panel opens every uncommitted change in a repository as a
