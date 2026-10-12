@@ -14,7 +14,8 @@ import {
   serviceStorage,
 } from "../../shared/vendor/lode-views.mjs";
 import { highlightLine } from "../../shared/syntax.js";
-import { useTabId } from "../state/tabState.js";
+import { useTabId, useTabState } from "../state/tabState.js";
+import { renderMarkdown } from "../../shared/markdown.js";
 
 // A Flow tab: a project's code read as cards on a canvas (lode, see
 // docs/design.md's "Flow tabs"; the `lode-graph` package). lode runs per project folder in the main
@@ -102,6 +103,9 @@ function flowFor(tab) {
     syntaxCss: SYNTAX_CSS,
     storage: serviceStorage(project.connection),
     empty: "Open a file or symbol: search above, “Open in lode” in Files, or “lode” on a file tab.",
+    // Note cards' text (a model's system design, an explanation): Markdown,
+    // sanitized (shared/markdown.js).
+    renderNote: (text) => renderMarkdown(text),
     // Not on the whole window: Clance has other panes. The tab forwards keys
     // only while focus is in it (onFlowKey).
     keys: false,
@@ -305,6 +309,9 @@ function FlowBar({ flow, project, root, launcher, ready, onKeys, tabId }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [note, setNote] = useState("");
+  // How "/" questions find their flow: lode's quick pass, or its Jev crawl
+  // (slower, reads more of the project). Kept with the tab.
+  const [mode, setMode] = useTabState("ask.mode", "pass", { persist: true });
   const timer = useRef(0);
 
   function onInput(event) {
@@ -329,7 +336,7 @@ function FlowBar({ flow, project, root, launcher, ready, onKeys, tabId }) {
     if (event.key !== "Enter") return;
     if (query.startsWith("/")) {
       const question = query.slice(1).trim();
-      if (question) void flow.ask(question);
+      if (question) void flow.ask(question, { mode });
       setQuery("");
       return;
     }
@@ -357,6 +364,15 @@ function FlowBar({ flow, project, root, launcher, ready, onKeys, tabId }) {
   const run = (command) => () => flow.run(command);
   return html`
     <header class="flow-bar">
+      <select
+        class="flow-mode"
+        value=${mode}
+        onChange=${(event) => setMode(event.target.value)}
+        title="How a / question finds its flow: a quick pass (word matches, one Jev pass) or a Jev crawl (reads more of the project; slower)"
+      >
+        <option value="pass">Quick</option>
+        <option value="crawl">Crawl</option>
+      </select>
       <div class="flow-search">
         <input
           type="search"

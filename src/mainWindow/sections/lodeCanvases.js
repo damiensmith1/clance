@@ -57,7 +57,7 @@ export async function canvasOp(op, args) {
     const selected = new Set(flow.selection().map((c) => c.key));
     return {
       markdown: context?.markdown ?? "",
-      cards: flow.cards().map((c) => ({ key: c.key, name: c.node.name, file: c.node.file, selected: selected.has(c.key) })),
+      cards: flow.cards().map((c) => ({ key: c.key, name: c.text?.title ?? c.node.name, file: c.node.file, selected: selected.has(c.key), ...(c.text && { note: true }) })),
       ...(flow.asked && { question: flow.asked.question }),
     };
   }
@@ -71,7 +71,7 @@ export async function canvasOp(op, args) {
       )
       .filter((a) => a && (!a.cards || a.cards.length));
     await flow.apply(actions, { undoGroup: `tool-${Date.now()}` });
-    return { cards: flow.cards().map((c) => c.node.name), ...(missing.length && { missing }) };
+    return { cards: flow.cards().map((c) => c.text?.title ?? c.node.name), ...(missing.length && { missing }) };
   }
   throw new Error(`unknown canvas request ${op}`);
 }

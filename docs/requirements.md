@@ -438,7 +438,8 @@ Sessions Clance starts get these tools when Accessibility is granted:
   a file tab (lode: the symbol at the cursor), or the launcher (the Files
   folder). A flow for a folder that already has one opens in it.
 - The tab's search finds a symbol by name, or with `/` builds the flow
-  that answers a question.
+  that answers a question, quickly or as a crawl that reads more (a picker
+  beside it, kept with the tab).
 - A card's title opens the file in a file tab at that line.
 - While a lode tab is showing in the main pane, opening a file (Files,
   Changes, search, ⌘P) adds it to that flow as a card instead of opening a

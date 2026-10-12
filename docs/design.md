@@ -1863,23 +1863,30 @@ built on lode's API, which is how lode is meant to be hosted.
   closes), since pasted into the trust prompt they'd answer it, then go
   into that session, and the spare warms.
 - **lode tools for Claude sessions** (`lodeTools.ts`, on the local tools
-  server, so every Clance session has them): `lode_canvases` lists the
-  open lode tabs (id, folder, cards, question, which is in front);
-  `lode_canvas` reads one's cards as context (`flow.context()`, the
-  selection first); `lode_show`, `lode_build_flow` (lode's `ask` → a
-  plan), `lode_expand`, `lode_close`, `lode_select`, `lode_focus` and
-  `lode_changes_shown` draw on one, as lode's `CanvasAction`s, one undo
-  step a call. A tool's `canvas` is a lode tab's id; without one, the lode
-  tab in front. The graph tools are lode-graph's own (`lodeTools` from
-  `lode-graph/mcp`), run against the canvas's project's lode: main calls
-  that worker itself (`lodeCall`, ids windows never use). Canvases live in
-  the window, so main asks it (`lode:canvas-request` / reply,
-  `sections/lodeCanvases.js`), which matches the model's card names to the
-  canvas's cards, and shows a tab whose canvas hasn't been drawn yet
-  without taking focus from where the user is. Written on lode-graph's
-  public API only, to move into lode-graph as a toolkit hosts mount. Like
-  the other local tools, sessions only get them when Accessibility is
-  granted (the server is gated on it).
+  server, so every Clance session has them). They're lode-graph's own
+  (`canvasTools` from `lode-graph/mcp`), with Clance as their canvas host:
+  `lode_canvases` lists the open lode tabs (id, folder, cards, question,
+  which is in front); `lode_canvas` reads one (its code as context, notes
+  as text); `lode_show`, `lode_build_flow` (with `mode`), `lode_expand`,
+  `lode_close`, `lode_select`, `lode_focus` and `lode_changes_shown` work
+  the code cards; `lode_note`, `lode_link` and `lode_diagram` draw note
+  cards (a title and Markdown) with labelled arrows, e.g. a system design
+  beside the real code; and lode-graph's graph tools (search, read,
+  context, impact, changes, entries) run on a canvas's project. A tool's
+  `canvas` is a lode tab's id; without one, the lode tab in front. Clance
+  supplies the canvases: main asks the window (`lode:canvas-request` /
+  reply, `sections/lodeCanvases.js`: list, read with `flow.context()`,
+  apply with `flow.apply`, showing a tab whose canvas hasn't been drawn yet
+  without taking focus) and a canvas's graph is its project's running lode
+  (`lodeCall`, ids windows never use). lode-graph's JSON Schemas become zod
+  for the MCP server. Like the other local tools, sessions only get them
+  when Accessibility is granted (the server is gated on it).
+- **Note cards** render their text with Clance's own Markdown
+  (`shared/markdown.js`, sanitized), as lode's `host.renderNote`.
+- **Quick or Crawl.** A picker by the search box chooses how a `/`
+  question finds its flow (lode's `ask` `mode`): Quick, lode's pass (word
+  matches, one Jev pass), or Crawl, its Jev crawl (reads more of the
+  project; slower). Kept with the tab.
 - **Keys are Clance's to give.** The Jev key for `/` questions comes from
   Clance's environment (`TYPESAFE_API_KEY`), or in a dev run from the
   repo's `.env`, which nothing else reads. `lode.ts` hands it to the worker,
