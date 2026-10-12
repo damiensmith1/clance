@@ -151,6 +151,19 @@ Every `claude` process gets:
   `recentDirectories` (most recent first, max 8).
 - Reopening a session always uses the `cwd` recorded on its transcript's
   user messages (`chatHistory.ts`'s `cwdForSessionId`), never the default.
+- **Trust.** Claude Code runs in a folder only once its trust prompt has
+  been accepted there, and a background session can't show that prompt
+  (`claude --bg` refuses: `UntrustedWorkspaceError`). So when the Files tab
+  shows a folder that isn't trusted, a banner says so and offers a
+  terminal: `claude` there, which asks, the way the Sessions tab's new
+  session does in such a folder, and is an ordinary session once
+  accepted. The banner goes once the folder shows as trusted (polled while
+  that terminal is open). Clance never writes Claude Code's files and never
+  answers the prompt itself: trusting a folder lets its hooks and MCP
+  servers run, so that's the person's to answer. Whether a folder is trusted comes from Claude
+  Code's `~/.claude.json` (`projects` → `hasTrustDialogAccepted`, the
+  folder or one above it: `isClaudeTrusted`); when that can't be read,
+  Clance doesn't ask, and `claude --bg` refusing stays the final word.
 
 ### Pre-warmed popup session
 
@@ -1811,8 +1824,26 @@ built on lode's API, which is how lode is meant to be hosted.
   and a question, which lode builds into a flow with Jev), the card count, undo, zoom,
   fit, git changes on or off, copy context, **Ask Claude** and clear. Ask
   Claude takes `flow.context()` (the cards, or the selected ones, with how
-  they connect and any changes, sized for a model) and pastes it into a
-  session as Asking Claude does, instead of lode's own explain panel.
+  they connect and any changes, sized for a model) and opens a new session
+  beside the lode with it in the prompt, not sent (a bracketed paste, as
+  Asking Claude does), instead of lode's own explain panel. Beside: in
+  another pane if there is one (one already showing a session first, else
+  the largest), else a pane split off the lode's to the right (60/40).
+- **One pre-warmed session for Ask Claude** (`lodePool.ts`), so it opens
+  at once, in the folder of the lode tab being shown. Like the popup's
+  pool, but it follows the folder, since a session's working directory is
+  fixed when it starts: showing a lode tab (once its project has been
+  read) warms one there (`lode:warm-session`), and showing one on another
+  folder stops it and warms one in the new folder. Ask Claude claims it
+  (`lode:claim-session`) and the next warms behind it; the folder's last
+  lode tab closing, or quitting, stops it. A spare whose mint args changed
+  is replaced. The spare is hidden from the Sessions list; its id is kept
+  in `~/.clance/lode-pool.json` so one a crash left running is stopped on
+  the next launch. In a folder Claude Code hasn't been trusted in, Ask
+  Claude opens a plain `claude` there instead, which asks; the cards wait
+  until the folder is trusted (polled, up to five minutes, never if the tab
+  closes), since pasted into the trust prompt they'd answer it, then go
+  into that session, and the spare warms.
 - **Keys are Clance's to give.** The Jev key for `/` questions comes from
   Clance's environment (`TYPESAFE_API_KEY`), or in a dev run from the
   repo's `.env`, which nothing else reads. `lode.ts` hands it to the worker,

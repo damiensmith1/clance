@@ -175,6 +175,11 @@ contextBridge.exposeInMainWorld("clanceApp", {
   lodeOpen: (root: string) => ipcRenderer.invoke("lode:open", root),
   lodeSend: (root: string, message: unknown) => ipcRenderer.send("lode:msg", root, message),
   lodeRelease: (root: string) => ipcRenderer.send("lode:release", root),
+  // Whether Claude Code has been trusted in a folder (null: can't tell).
+  claudeTrusted: (dir: string) => ipcRenderer.invoke("claude:trusted", dir),
+  // Ask Claude from a lode tab: a session in its project, pre-warmed.
+  lodeWarmSession: (root: string) => ipcRenderer.invoke("lode:warm-session", root),
+  lodeClaimSession: (root: string) => ipcRenderer.invoke("lode:claim-session", root),
   // Whether focus is on a Flow tab's canvas, so the menu's ⌘Z is its undo.
   setFlowFocused: (focused: boolean) => ipcRenderer.send("flow:focused", focused),
   onLodeMessage: (callback: (payload: { root: string; message: unknown }) => void) => {

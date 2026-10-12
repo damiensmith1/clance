@@ -47,7 +47,7 @@ function parentOf(path) {
 
 const DRAG_THRESHOLD_PX = 4;
 
-export function FilesSection({ onOpenFile, onOpenResult, onPathMoved, onOpenTerminal, onAskClaude, onOpenFlow, onOpenInFlow }) {
+export function FilesSection({ onOpenFile, onOpenResult, onPathMoved, onOpenTerminal, onAskClaude, onOpenFlow, onOpenInFlow, onTrustFolder }) {
   const [byRoot] = useTabState("files.byRoot", () => new Map());
   function cacheFor(folder) {
     if (!byRoot.has(folder)) byRoot.set(folder, { expanded: new Set(), selected: null, dirs: new Map() });
@@ -66,6 +66,9 @@ export function FilesSection({ onOpenFile, onOpenResult, onPathMoved, onOpenTerm
   const [showIgnored, setShowIgnored] = useTabState("files.showIgnored", true, { persist: true });
   const [menu, setMenu] = useState(false);
   const [repo, setRepo] = useState(null);
+  // Whether Claude Code has been trusted in the folder (null: can't tell, or
+  // not checked yet). Not trusted: a banner offers a terminal to trust it.
+  const [trusted, setTrusted] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(null);
   // { entry | null, x, y } — the right-click menu. A null entry is the
@@ -197,6 +200,8 @@ export function FilesSection({ onOpenFile, onOpenResult, onPathMoved, onOpenTerm
     if (lastRoot.current && lastRoot.current !== root && search?.scope) setSearch({ scope: null });
     lastRoot.current = root;
     window.clanceApp.filesSetLastFolder(root);
+    setTrusted(null);
+    window.clanceApp.claudeTrusted(root).then((on) => rootRef.current === root && setTrusted(on));
     window.clanceApp.filesFolderRepo(root).then((found) => {
       if (rootRef.current === root) setRepo(found ?? null);
     });
@@ -809,6 +814,26 @@ export function FilesSection({ onOpenFile, onOpenResult, onPathMoved, onOpenTerm
       </header>
 
       ${error && html`<div class="files-error">${error}</div>`}
+      ${trusted === false &&
+      onTrustFolder &&
+      html`
+        <div class="files-error files-conflict">
+          <span>Claude hasn't been trusted in this folder.</span>
+          <span class="files-conflict-actions">
+            <button
+              class="btn-quiet btn-small"
+              title="Open a terminal running claude here, to answer its trust prompt"
+              onClick=${() => {
+                const dir = root;
+                // The banner goes once the folder shows as trusted.
+                onTrustFolder(dir, () => rootRef.current === dir && setTrusted(true));
+              }}
+            >
+              Open terminal to trust
+            </button>
+          </span>
+        </div>
+      `}
       ${pendingDrop &&
       html`
         <div class="files-error files-conflict">

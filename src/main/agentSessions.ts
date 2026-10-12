@@ -1,4 +1,7 @@
 import { execFile } from "child_process";
+import { readFileSync } from "fs";
+import { homedir } from "os";
+import { dirname, join } from "path";
 import { promisify } from "util";
 import { getLoginShellPath } from "./ptyManager";
 import { SESSION_CWD } from "./paths";
@@ -238,4 +241,24 @@ export async function resolveSessionId(args: string[]): Promise<string | null> {
     return known.find((s) => s.id === args[1])?.sessionId ?? null;
   }
   return null;
+}
+
+/**
+ * Whether Claude Code has been trusted in `dir`: its trust prompt accepted
+ * there or in a folder above it, as `~/.claude.json` records (projects →
+ * hasTrustDialogAccepted). null when that can't be read, so a caller
+ * doesn't ask about trust it can't see; `claude --bg` refusing the folder
+ * (UntrustedWorkspaceError) stays the final word.
+ */
+export function isClaudeTrusted(dir: string): boolean | null {
+  let projects: Record<string, { hasTrustDialogAccepted?: boolean }>;
+  try {
+    projects = JSON.parse(readFileSync(join(homedir(), ".claude.json"), "utf8")).projects ?? {};
+  } catch {
+    return null;
+  }
+  for (let d = dir; ; d = dirname(d)) {
+    if (projects[d]?.hasTrustDialogAccepted) return true;
+    if (dirname(d) === d) return false;
+  }
 }

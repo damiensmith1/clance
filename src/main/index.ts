@@ -55,10 +55,11 @@ import {
   getPtyBuffer,
   warmLoginShellPath,
 } from "./ptyManager";
-import { resolveOpenArgs, resolveSessionId, spawnBackgroundAgent, stopAgent, listAgents, cliSettingsArgs, UntrustedWorkspaceError } from "./agentSessions";
+import { resolveOpenArgs, resolveSessionId, spawnBackgroundAgent, stopAgent, listAgents, cliSettingsArgs, UntrustedWorkspaceError, isClaudeTrusted } from "./agentSessions";
 import { isPoolSpareId } from "./agentPool";
 import { copyDroppedFile } from "./dropFiles";
 import { lodeSend, lodeRelease, stopAllLodes } from "./lode";
+import { claimLodeSession, discardLeftoverLodeSessions, isLodeSpareId, releaseAllLodeSessions, releaseLodeSession, warmLodeSession } from "./lodePool";
 import {
   getStatus as getGitStatus,
   getFileDiff,
@@ -169,6 +170,7 @@ async function refreshHotkeys(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  discardLeftoverLodeSessions();
   ensureSessionCwd();
   // Resolves and caches the login-shell PATH `claude --bg` needs (see
   // ptyManager.ts) well before the popup widget's hotkey ever fires it on
@@ -251,6 +253,7 @@ app.on("activate", () => {
 
 app.on("will-quit", unregisterAllHotkeys);
 app.on("will-quit", stopAllLodes);
+app.on("will-quit", releaseAllLodeSessions);
 // Unsaved edits in the editor are asked about before anything quits.
 app.on("before-quit", (event) => {
   if (holdQuitForUnsavedEdits()) event.preventDefault();
@@ -483,7 +486,7 @@ ipcMain.handle("agents:list", async (_event, opts: { all?: boolean }) => {
   const agents = await listAgents(opts);
   const kept = await Promise.all(
     agents.map(async (agent) => {
-      if (isPoolSpareId(agent.id)) return null;
+      if (isPoolSpareId(agent.id) || isLodeSpareId(agent.id)) return null;
       if (isPopupSessionName(agent.name) && !(await hasRealUserMessage(agent.sessionId))) return null;
       return agent;
     })
@@ -689,7 +692,28 @@ ipcMain.on("search:cancel", (event, id: unknown) => cancelSearch(event.sender, i
 // real path, the key messages use), then messages both ways.
 ipcMain.handle("lode:open", (_event, root: unknown) => resolveFolder(root));
 ipcMain.on("lode:msg", (event, root: unknown, message: unknown) => lodeSend(event.sender, root, message));
-ipcMain.on("lode:release", (event, root: unknown) => lodeRelease(event.sender, root));
+ipcMain.on("lode:release", (event, root: unknown) => {
+  lodeRelease(event.sender, root);
+  if (typeof root === "string") releaseLodeSession(root);
+});
+// Whether Claude Code has been trusted in a folder (null: can't tell).
+ipcMain.handle("claude:trusted", (_event, dir: unknown) => {
+  const real = resolveFolder(dir);
+  return real ? isClaudeTrusted(real) : null;
+});
+// A lode tab's Ask Claude: a session in the lode's project, pre-warmed per
+// folder so it opens at once (see lodePool.ts).
+ipcMain.handle("lode:warm-session", async (_event, root: unknown) => {
+  const dir = resolveFolder(root);
+  if (dir) await warmLodeSession(dir, await sessionMintArgs("window"));
+  return !!dir;
+});
+ipcMain.handle("lode:claim-session", async (_event, root: unknown) => {
+  const dir = resolveFolder(root);
+  if (!dir) throw new Error("not a folder");
+  addRecentDirectory(dir);
+  return claimLodeSession(dir, await sessionMintArgs("window"));
+});
 ipcMain.on("flow:focused", (event, focused: unknown) => setFlowFocused(event.sender.id, focused === true));
 ipcMain.handle("cli:status", () => cliStatus());
 ipcMain.handle("cli:install", () => installCli());

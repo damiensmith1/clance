@@ -455,6 +455,7 @@ function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut, openSectio
         onAskClaude=${launcher.askClaudeAbout}
         onOpenFlow=${(dir) => launcher.openFlowTab(dir, { newTab: true })}
         onOpenInFlow=${launcher.openInFlow}
+        onTrustFolder=${launcher.trustFolder}
       />`;
     case "file":
       // Keyed by tab: without it two file tabs in one pane share a component
@@ -1455,6 +1456,71 @@ export function Shell() {
     if (terminalId) pasteWhenReady(terminalId, text);
   }
 
+  // Claude Code trusts a folder once its trust prompt has been accepted
+  // there, and a background session can't show that prompt. Files offers
+  // it for a folder that isn't trusted (a banner): `claude` in a terminal
+  // there, which asks, and is a session once it's accepted. `onTrusted`
+  // runs once it is.
+  function trustFolder(root, onTrusted) {
+    const tab = trustTab(root);
+    openTab(tab, { paneId: mainPaneId() });
+    if (onTrusted) whenTrusted(root, tab.id, onTrusted);
+  }
+
+  function trustTab(root) {
+    const terminalId = nextTerminalId();
+    return { id: terminalId, type: "terminal", label: root.split("/").filter(Boolean).pop(), icon: "terminal", terminalId, args: [], cwd: root };
+  }
+
+  // Once a folder is trusted (polled while its trust prompt is open, up to
+  // five minutes), `then` runs; never if the tab closes first.
+  function whenTrusted(root, tabId, then) {
+    const started = Date.now();
+    const poll = async () => {
+      if (!listTabs(getState().root).some((entry) => entry.tab.id === tabId) || Date.now() - started > 5 * 60_000) return;
+      if (await window.clanceApp.claudeTrusted(root)) return then();
+      setTimeout(poll, 1000);
+    };
+    setTimeout(poll, 1000);
+  }
+
+  // A lode tab's Ask Claude: a new session in the lode's project (claimed
+  // from its pre-warmed spare, so it's quick: see lodePool.ts), beside the
+  // lode rather than over it. In another pane if there is one (one already
+  // showing a session first, else the largest), else in a new pane split off
+  // the lode's to the right. The cards go into its prompt, not sent.
+  async function askClaudeBeside(text, root, fromTabId) {
+    const from = listTabs(getState().root).find((entry) => entry.tab.id === fromTabId)?.paneId ?? mainPaneId();
+    const claimed = await window.clanceApp.lodeClaimSession(root).catch(() => null);
+    if (!claimed) return askClaude(text, root);
+    // A folder Claude Code hasn't been trusted in: `claude` there, which
+    // asks; the cards wait for the answer (pasted into the trust prompt,
+    // they'd answer it).
+    const tab = claimed.untrusted
+      ? trustTab(claimed.cwd)
+      : { id: nextTerminalId(), type: "terminal", label: claimed.name, icon: "terminal", args: ["attach", claimed.id] };
+    tab.terminalId = tab.terminalId ?? tab.id;
+    const terminalId = tab.terminalId;
+    const others = paneRects(getState().root).filter((rect) => rect.leaf.id !== from);
+    const showsSession = (leaf) => leaf.tabs.find((t) => t.id === leaf.activeTabId)?.args?.[0] === "attach";
+    const target = others.find((rect) => showsSession(rect.leaf)) ?? others.sort((a, b) => b.area - a.area)[0];
+    if (target) openTab(tab, { paneId: target.leaf.id });
+    else {
+      openTab(tab, { paneId: from });
+      if (canSplitAt(getState().root, from, tab.id, from, "right")) {
+        splitPane(tab.id, from, from, "right");
+        const split = findSplitContainingTab(getState().root, tab.id);
+        if (split) resizeSplit(split.id, [60, 40]);
+      }
+    }
+    if (claimed.untrusted) {
+      whenTrusted(claimed.cwd, tab.id, () => {
+        pasteWhenReady(terminalId, text);
+        void window.clanceApp.lodeWarmSession?.(root).catch(() => {});
+      });
+    } else pasteWhenReady(terminalId, text);
+  }
+
   // The focused editor's selection, or the line the cursor is on.
   function askAboutSelection() {
     const tab = activeFileTab();
@@ -1725,6 +1791,8 @@ export function Shell() {
       else openSection("files");
     },
     askClaude,
+    askClaudeBeside,
+    trustFolder,
     renameTab: renameTabById,
     banner,
   };

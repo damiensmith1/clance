@@ -175,6 +175,11 @@ export function FlowSection({ tab, launcher }) {
     host.addEventListener("pointerdown", takeFocus, true);
     host.addEventListener("focusin", report);
     host.addEventListener("focusout", leftCode);
+    // The one pre-warmed session for Ask Claude follows the folder of the
+    // lode tab being shown (lodePool.ts): warmed when this one shows, once
+    // its project has been read.
+    const warm = () => void window.clanceApp.lodeWarmSession?.(tab.root).catch(() => {});
+    if (project.ready) warm();
     // Ready once lode has read the project (the first answer).
     if (!project.ready)
       void project.api
@@ -182,6 +187,7 @@ export function FlowSection({ tab, launcher }) {
         .then((info) => {
           project.ready = info;
           setReady(info);
+          warm();
         })
         .catch(() => {});
     return () => {
@@ -210,7 +216,7 @@ export function FlowSection({ tab, launcher }) {
   const failed = project.status;
   return html`
     <div class="flow-section">
-      <${FlowBar} flow=${flow} project=${project} root=${tab.root} launcher=${launcher} ready=${ready} onKeys=${() => toggleHelp()} />
+      <${FlowBar} flow=${flow} project=${project} root=${tab.root} launcher=${launcher} ready=${ready} onKeys=${() => toggleHelp()} tabId=${tab.id} />
       ${flow.asked &&
       html`<div class="flow-asked">
         / ${flow.asked.question}
@@ -295,7 +301,7 @@ function KeysHelp({ onClose }) {
   `;
 }
 
-function FlowBar({ flow, project, root, launcher, ready, onKeys }) {
+function FlowBar({ flow, project, root, launcher, ready, onKeys, tabId }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [note, setNote] = useState("");
@@ -333,7 +339,7 @@ function FlowBar({ flow, project, root, launcher, ready, onKeys }) {
   async function askClaude() {
     const context = await flow.context().catch(() => null);
     if (!context) return;
-    launcher.askClaude(`From lode, ${context.title} (${root}):\n\n${context.markdown}\n\n`, root);
+    launcher.askClaudeBeside(`From lode, ${context.title} (${root}):\n\n${context.markdown}\n\n`, root, tabId);
   }
 
   async function copyContext() {
@@ -376,7 +382,7 @@ function FlowBar({ flow, project, root, launcher, ready, onKeys }) {
       <button class="btn-quiet btn-small" disabled=${!flow.canRun("fit")} onClick=${run("fit")} title="Show every card (f)">Fit</button>
       <button class="btn-quiet btn-small ${flow.diff !== null ? "flow-on" : ""}" onClick=${() => void flow.setDiff(flow.diff === null ? "HEAD" : null)} title="Show what changed since the last commit">Changes</button>
       <button class="btn-quiet btn-small" disabled=${!cards} onClick=${copyContext} title="Copy these cards (or the selected ones) as context for an LLM">Copy context</button>
-      <button class="btn-secondary btn-small" disabled=${!cards} onClick=${askClaude} title="Paste these cards (or the selected ones) into your Claude session">Ask Claude</button>
+      <button class="btn-secondary btn-small" disabled=${!cards} onClick=${askClaude} title="Open a Claude session beside this lode with these cards (or the selected ones) in its prompt">Ask Claude</button>
       <button class="btn-quiet btn-small" disabled=${!flow.canRun("clear")} onClick=${run("clear")} title="Clear the canvas">Clear</button>
       <button class="btn-quiet btn-small" onClick=${onKeys} title="The keys (?)">?</button>
     </header>

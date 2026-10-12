@@ -268,6 +268,9 @@ Sessions Clance starts get these tools when Accessibility is granted:
   repository — a scratch directory, a folder of notes, a repository that
   isn't the one Changes is pointed at. ⌘P needs a filename already; looking
   around a project is a different act from recalling a file in it.
+- A folder Claude Code hasn't been trusted in shows a banner in Files with
+  a button that opens a terminal running `claude` there, to answer its
+  trust prompt; the banner goes once it's trusted.
 - One folder at a time, from a switcher offering the default session
   directory, the folders it has been pointed at before (including ones chosen
   with "Choose folder…"), recently used directories, wherever running agents
@@ -440,8 +443,10 @@ Sessions Clance starts get these tools when Accessibility is granted:
 - While a lode tab is showing in the main pane, opening a file (Files,
   Changes, search, ⌘P) adds it to that flow as a card instead of opening a
   file tab, when the file is in the flow's project.
-- Ask Claude pastes the cards (or the selected ones) into a session as
-  context, without sending it; copy context puts the same on the clipboard.
+- Ask Claude opens a new Claude session beside the lode (in another pane,
+  or a new one to its right) with the cards (or the selected ones) in its
+  prompt, without sending it, and opens at once (one session is kept warm,
+  in the folder of the lode tab being shown). Copy context puts the same on the clipboard.
 - Reading a project never freezes the window, and a canvas comes back as it
   was after switching tabs, ⇧⌘T or a relaunch.
 
