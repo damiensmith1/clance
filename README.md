@@ -14,49 +14,80 @@ the text at your cursor.
 
 ## Features
 
-- **A popup that stays out of the way.** Opens instantly near the cursor,
-  can be moved and resized, and hides until you call it back. Nothing about
-  your screen is captured unless a session asks for it.
-- **Computer-use tools.** Sessions can read your screen as text — the window
-  in front of you, the field you're typing in, whatever you've highlighted —
-  or take a screenshot when a picture is what's needed. They can also list
-  open apps, click a control by the name shown on it, and type into other
-  apps. Anything that could act on an app you didn't point at goes through
-  Claude Code's normal approval prompt, and each tool can be switched off.
-- **Every session in one place.** The main window lists every Claude Code
-  session on your Mac — running or finished, from any project. Peek at one
-  without opening it, pin the ones you're living in, or open them as terminal
-  tabs you can split into panes. Sessions run as Claude Code background
-  agents, so closing a window never ends one, and each can be resumed with
-  `claude --resume` in a terminal.
-- **Read and review the code your sessions write.** A Changes pane shows
-  what has moved in a git repository and updates as files change on disk, so
-  a session working in it is watched rather than checked on. Open a changed
-  file to see its diff inline, then stage, commit and push from the same pane.
-- **A small editor.** A Files explorer browses any folder on your Mac,
-  repository or not, and can create, rename, move and delete files. Open a
-  file as a tab to edit it — syntax highlighting, find and replace, its
-  uncommitted changes marked in the gutter, and a warning rather than a
-  silent overwrite if a session changed it on disk while you were editing.
-  Markdown renders as a preview, the Files tab searches the whole folder or
-  any folder in it (⇧⌘F), and ⌘L asks a session about the selected code. Open files from
-  Finder or with `clance <path>` in a terminal.
-- **On-device dictation.** Works in any app, powered by
-  [whisper.cpp](https://github.com/ggml-org/whisper.cpp). Clance recommends a
-  speech model for your Mac, and keeps a searchable history of everything
-  you've dictated.
-- **Works with your Claude Code setup.** Skills, hooks, plugins and MCP
-  servers you've configured for Claude Code work in Clance unchanged.
+### A popup that stays out of the way
+
+Opens instantly near the cursor, can be moved and resized, and hides until
+you call it back. Nothing about your screen is captured unless a session
+asks for it.
+
+### Computer-use tools
+
+Sessions can read your screen as text — the window in front of you, the
+field you're typing in, whatever you've highlighted — or take a screenshot
+when a picture is what's needed. They can also list open apps, click a
+control by the name shown on it, and type into other apps. Anything that
+could act on an app you didn't point at goes through Claude Code's normal
+approval prompt, and each tool can be switched off.
+
+### Every session in one place
+
+The main window lists every Claude Code session on your Mac — running or
+finished, from any project. Peek at one without opening it, pin the ones
+you're living in, or open them as terminal tabs you can split into panes.
+Sessions run as Claude Code background agents, so closing a window never
+ends one, and each can be resumed with `claude --resume` in a terminal.
 
 ![Every Claude Code session on your Mac in the main window](docs/images/sessions.png)
 
 ![Two sessions side by side in split panes](docs/images/split.png)
 
-![Editing a file beside the Files explorer](docs/images/editor.png)
+### Read and review the code your sessions write
+
+A Changes pane shows what has moved in a git repository and updates as files
+change on disk, so a session working in it is watched rather than checked
+on. Open a changed file to see its diff inline, then stage, commit and push
+from the same pane.
 
 ![Reviewing a diff in the editor, with the Changes pane beside it](docs/images/changes.png)
 
+### A small editor
+
+A Files explorer browses any folder on your Mac, repository or not, and can
+create, rename, move and delete files. Open a file as a tab to edit it —
+syntax highlighting, find and replace, its uncommitted changes marked in the
+gutter, and a warning rather than a silent overwrite if a session changed it
+on disk while you were editing. Markdown renders as a preview, the Files tab
+searches the whole folder or any folder in it (⇧⌘F), and ⌘L asks a session
+about the selected code. Open files from Finder or with `clance <path>` in a
+terminal.
+
+![Editing a file beside the Files explorer](docs/images/editor.png)
+
+### Read code as a flow, and let Claude draw on it
+
+A lode tab shows a project's code as cards on a canvas, linked by what calls
+what ([lode](https://github.com/damiensmith1/lode-graph)): open one from
+Files, from a file tab, or by asking a question with `/`. Ask Claude opens a
+session beside it that can see the canvas and work on it with you: read the
+cards, search the rest of the code, put code on it, build a flow, and draw
+notes and labelled arrows. So an answer can be a picture, like a design laid
+out next to the real code it would change.
+
+![A Claude session drawing a rate-limiter design on a lode canvas, linked to the real code it would change](docs/images/lode.png)
+
+### On-device dictation
+
+Works in any app, powered by
+[whisper.cpp](https://github.com/ggml-org/whisper.cpp). Clance recommends a
+speech model for your Mac, and keeps a searchable history of everything
+you've dictated.
+
 ![Dictating into a Mail reply](docs/images/dictation.png)
+
+### Works with your Claude Code setup
+
+Skills, hooks, plugins and MCP servers you've configured for Claude Code
+work in Clance unchanged.
 
 ## Requirements
 
@@ -129,6 +160,12 @@ beside your work rather than over it.
 | ⌘⌫ | Archive the selected session, or stop it if it's running |
 | ⌘W / ⌃⇥ | Close the active tab / move between tabs |
 | ⇧⌘T | Reopen the last closed tab |
+
+In a lode tab, lode's keys move around the canvas (↓↑ lines, → follow,
+← back, `e` expand, Space focus, `f` fit, `?` lists them all), `/` asks a
+question (Quick, or Crawl to read more of the project), and **Ask Claude**
+opens a session beside it that can see and draw on the canvas. Pressing it
+again goes back to that session with the cards you're on.
 
 ## Privacy
 
