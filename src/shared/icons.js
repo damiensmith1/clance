@@ -204,6 +204,27 @@ export const Icon = {
   check: (size = 16) => svg(size, html`<path d="M5 12.5l4.5 4.5L19 7" />`),
 
   arrowUp: (size = 16) => svg(size, html`<path d="M12 19V5M5 12l7-7 7 7" />`),
+  // A floppy: save.
+  save: (size = 16) =>
+    svg(
+      size,
+      html`<path d="M5 4h11l4 4v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" />
+        <path d="M8 4v5h7V4M8 20v-6h8v6" />`
+    ),
+  // Out of a box: save as / export.
+  export: (size = 16) =>
+    svg(
+      size,
+      html`<path d="M12 15V4M7.5 8.5L12 4l4.5 4.5" />
+        <path d="M5 13v6a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6" />`
+    ),
+  // Added and removed: git changes.
+  diff: (size = 16) =>
+    svg(
+      size,
+      html`<path d="M12 4v8M8 8h8" />
+        <path d="M8 18h8" />`
+    ),
 };
 
 // The Clance mark (packaging/clance-logo.svg), cropped to its bounds and

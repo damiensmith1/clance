@@ -183,6 +183,13 @@ contextBridge.exposeInMainWorld("clanceApp", {
     return () => ipcRenderer.removeListener("lode:canvas-request", listener);
   },
   lodeCanvasReply: (id: number, result: unknown, error?: string) => ipcRenderer.send("lode:canvas-reply", id, result, error),
+  // Saved lode canvases (src/main/canvases.ts).
+  canvasesList: () => ipcRenderer.invoke("canvases:list"),
+  canvasesRead: (path: string) => ipcRenderer.invoke("canvases:read", path),
+  canvasesSave: (path: string, root: string, layout: unknown) => ipcRenderer.invoke("canvases:save", path, root, layout),
+  canvasesDelete: (path: string) => ipcRenderer.invoke("canvases:delete", path),
+  canvasesCreate: (name: string, root: string, layout: unknown) => ipcRenderer.invoke("canvases:create", name, root, layout),
+  canvasesExport: (name: string, root: string, layout: unknown) => ipcRenderer.invoke("canvases:export", name, root, layout),
   // The Jev key for "/" questions: { source } ("settings", "environment",
   // "env-file" or null), set or removed (null) from Settings, and changes.
   jevStatus: () => ipcRenderer.invoke("lode:jev-status"),

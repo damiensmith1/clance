@@ -16,7 +16,7 @@ import { FileSection } from "./sections/FileSection.js";
 import { SettingsSection } from "./sections/SettingsSection.js";
 import { DictationSection } from "./sections/DictationSection.js";
 import { TerminalSection, nextTerminalId, destroyTerminal } from "./sections/TerminalSection.js";
-import { FlowSection, changedIds, destroyFlow, flowOf, releaseIfUnused, setFlowStart, symbolAt } from "./sections/FlowSection.js";
+import { FlowSection, saveCanvasOf, canvasSignature, changedIds, destroyFlow, flowOf, isCanvasDirty, onCanvasChange, releaseIfUnused, seedCanvas, setFlowStart, symbolAt } from "./sections/FlowSection.js";
 import { canvasOp } from "./sections/lodeCanvases.js";
 import {
   loadEditorConfig,
@@ -151,13 +151,26 @@ function rememberClosed(tab, paneId) {
 }
 
 /** Save / Don't Save / Cancel for any of `tabs` with unsaved edits. */
+// Files with unsaved edits, and lode tabs whose canvas has unsaved changes
+// (a saved canvas changed since, or one never saved).
 async function confirmUnsaved(tabs) {
-  const dirty = tabs.filter((tab) => tab.type === "file" && isDirty(tab.repoRoot, tab.path));
+  const dirty = tabs.filter((tab) => (tab.type === "file" && isDirty(tab.repoRoot, tab.path)) || isCanvasDirty(tab));
   if (dirty.length === 0) return true;
-  const choice = await window.clanceApp.docConfirmUnsaved(dirty.map((tab) => tab.path));
+  const choice = await window.clanceApp.docConfirmUnsaved(dirty.map((tab) => (tab.type === "flow" ? `the canvas “${tab.label}”` : tab.path)));
   if (choice === "cancel") return false;
   if (choice === "discard") return true;
   for (const tab of dirty) {
+    if (tab.type === "flow") {
+      // Never saved: it needs a name first, so the tab stays open and its
+      // toolbar asks for one.
+      const entry = listTabs(getState().root).find((e) => e.tab.id === tab.id);
+      if (!readTabState(tab.id, "canvas", null) && entry) {
+        activateTab(entry.paneId, tab.id);
+        await new Promise((r) => setTimeout(r, 100)); // its toolbar, shown
+      }
+      if (!(await saveCanvasOf(tab))) return false;
+      continue;
+    }
     const buffer = peekBuffer(tab.repoRoot, tab.path);
     // A save that hit a conflict (or failed) keeps the tab open, with the
     // banner saying why.
@@ -795,7 +808,8 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
               <button
                 key=${tab.id}
                 class="tab ${tab.id === node.activeTabId ? "tab-active" : ""} ${compact ? "tab-compact" : ""} ${
-                  tab.type === "file" && isDirty(tab.repoRoot, tab.path) ? "tab-dirty" : ""
+                  (tab.type === "file" && isDirty(tab.repoRoot, tab.path)) || isCanvasDirty(tab) ? "tab-dirty" : ""
+                } ${tab.type === "flow" ? "tab-canvas" : ""
                 }"
                 onPointerDown=${(e) => {
                   hideTip();
@@ -1353,7 +1367,11 @@ export function Shell() {
   function saveActive() {
     const tab = activeFileTab();
     const buffer = tab && peekBuffer(tab.repoRoot, tab.path);
-    if (buffer) saveBuffer(buffer);
+    if (buffer) return saveBuffer(buffer);
+    // A lode tab: its canvas, unless the caret is in a card's code (lode
+    // saves that edit itself).
+    const flowTab = activeTabOfType("flow");
+    if (flowTab && !flowOf(flowTab.id)?.shadowRoot?.activeElement?.isContentEditable) void saveCanvasOf(flowTab);
   }
 
   // ⇧⌘T: the most recently closed tab, back in the pane it left if that pane
@@ -1593,6 +1611,8 @@ export function Shell() {
   // Tabs show a dot while their file has unsaved edits.
   const [, setDirtyTick] = useState(0);
   useEffect(() => onDirtyChange(() => setDirtyTick((n) => n + 1)), []);
+  // …and lode tabs while their saved canvas has changes.
+  useEffect(() => onCanvasChange(() => setDirtyTick((n) => n + 1)), []);
 
   useEffect(() => {
     loadEditorConfig();
@@ -1745,6 +1765,22 @@ export function Shell() {
     );
   }
 
+  // A saved canvas (src/main/canvases.ts), in a new lode tab on its project,
+  // as it was saved; its code as it is now. One already open is gone to.
+  async function openSavedCanvas(path) {
+    const open = listTabs(getState().root).find((entry) => entry.tab.type === "flow" && readTabState(entry.tab.id, "canvas", null)?.path === path);
+    if (open) return activateTab(open.paneId, open.tab.id);
+    const file = await window.clanceApp.canvasesRead(path);
+    const real = file && (await window.clanceApp.lodeOpen(file.root));
+    if (!real) return;
+    const key = Math.random().toString(36).slice(2, 10);
+    const id = `flow:${key}`;
+    const stateKey = `clance-flow-${key}`;
+    seedCanvas(stateKey, file.layout);
+    openTab({ id, type: "flow", label: file.name, icon: "flow", root: real, stateKey }, { paneId: mainPaneId() });
+    writeTabState(id, "canvas", { path, name: file.name, sig: canvasSignature(file.layout) }, { persist: true });
+  }
+
   // Every uncommitted change in a repository, as a lode tab of its changed
   // functions with the changes marked (lode's changes view).
   async function openChangesInLode(root) {
@@ -1846,6 +1882,7 @@ export function Shell() {
     openFlowTab,
     openInFlow,
     openChangesInLode,
+    openSavedCanvas,
     // A flow of the folder Files last showed; without one, Files, to pick it.
     newFlow: async () => {
       const folder = await window.clanceApp.filesGetLastFolder();

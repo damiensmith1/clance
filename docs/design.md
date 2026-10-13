@@ -1944,6 +1944,35 @@ built on lode's API, which is how lode is meant to be hosted.
   toolbar's Follow picker (sessions whose folder, from `listAgents`, is in
   the tab's project) or by Ask Claude; a hook from a session outside the
   project is ignored. A turn's cards share one undo group.
+- **Saved canvases** (`canvases.ts`). A lode tab's canvas can be saved and
+  opened again later. A file is `{ lode: 1, name, root, savedAt, layout }`
+  where `layout` is lode's own saved layout for the tab (cards by symbol,
+  notes, groups, arrows, other folders, the view), so code isn't stored and
+  a canvas opens live, as the code is now. Saved canvases live in
+  `~/.clance/canvases/<name>.lode.json`, the list Open ▾ shows (by
+  project) and the only place the window reads or writes them. Save (or
+  ⌘S, unless the caret is in a card's code, where lode saves the edit)
+  writes over the tab's file; the first time, a field under Save asks for
+  a name. Export writes a copy anywhere through the save dialog (a
+  repository, say); it isn't a save: the tab and the list are unchanged.
+  The tab's lode storage is wrapped (`canvasStorage`): the last layout lode
+  saved is kept, which is what Save writes, and a tab opened from a file
+  starts from the file's layout (`seedCanvas`). The tab keeps `canvas`
+  ({ path, name, sig }) in its state and is called by the name; `sig` is a
+  hash of the layout without the view and selection, so moving around
+  isn't a change. The tab shows a red unsaved dot (`tab-canvas`) while its
+  layout differs from the file, or, never saved, while it has cards.
+  Opening one that's already open goes to that tab. Closing a lode tab with
+  unsaved changes asks Save / Don't Save / Cancel like a file
+  (`confirmUnsaved`); Save on one never saved keeps it open and asks for
+  a name in its toolbar. A canvas in Open ▾ can
+  be deleted from its ⋯ menu (on hover, or right-click the row: Move to
+  Trash, Clance's usual menu): its file goes to the Trash
+  (`shell.trashItem`),
+  and a tab of it becomes a canvas never saved (`forgetSavedCanvas`). The toolbar: Changes,
+  Copy context and Save as icons (Save red while unsaved), Open ▾, Export
+  (an icon, by ?); Undo and Fit are left to their keys. Disabled toolbar
+  buttons fade rather than showing a box, and lode tabs show no focus ring.
 - **Changes in lode.** The Changes panel's Open in lode opens a new lode
   tab of every changed function in the repository (lode's `changes`
   against HEAD: each changed symbol, or the file for top-level changes, at

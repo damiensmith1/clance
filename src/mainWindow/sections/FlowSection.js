@@ -1,5 +1,6 @@
 import { html, useEffect, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
 import { useJevStatus } from "../settings/JevKeySettings.js";
+import { Icon } from "../../shared/icons.js";
 import {
   ASK_EVENT,
   CHANGE_EVENT,
@@ -93,6 +94,116 @@ const SYNTAX_CSS = `
 .tok-comment { color: var(--lode-syntax-comment); font-style: italic; }
 `;
 
+// --- saved canvases (src/main/canvases.ts) ---
+//
+// A lode tab can be saved as a named canvas and opened again later. What's
+// saved is lode's own layout for the tab (what it keeps in storage), so the
+// tab's storage is wrapped: the last layout lode saved is kept here, and a
+// tab opened from a saved canvas starts from that canvas's layout.
+
+const latest = new Map(); // state key → the layout lode last saved
+const seeds = new Map(); // state key → a saved canvas's layout to start from
+const canvasListeners = new Set();
+const notifyCanvas = () => canvasListeners.forEach((listener) => listener());
+
+function canvasStorage(base) {
+  return {
+    load: async (key) => {
+      if (seeds.has(key)) {
+        const seeded = seeds.get(key);
+        seeds.delete(key);
+        latest.set(key, seeded);
+        return seeded;
+      }
+      const data = await base.load(key);
+      if (data) latest.set(key, data);
+      return data;
+    },
+    save: (key, data) => {
+      latest.set(key, data);
+      notifyCanvas();
+      return base.save(key, data);
+    },
+  };
+}
+
+// What a canvas is, for "unsaved" (not where the view is or what's
+// selected), as a short hash: it's kept with the tab.
+export function canvasSignature(layout) {
+  if (!layout) return "";
+  const text = JSON.stringify({ ...layout, camera: undefined, selected: undefined });
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+  return `${text.length}:${(h >>> 0).toString(36)}`;
+}
+const signature = canvasSignature;
+
+/** A lode tab opens from a saved canvas's layout. */
+export function seedCanvas(stateKey, layout) {
+  seeds.set(stateKey, layout);
+}
+
+/** The saved canvas a lode tab is ({ path, name, sig }), if it's one. */
+export const savedCanvasOf = (tab) => readTabState(tab.id, "canvas", null);
+
+/** Whether a lode tab has changes to save: a saved canvas changed since it
+ *  was saved, or one never saved that has cards. */
+export function isCanvasDirty(tab) {
+  if (tab.type !== "flow" || !latest.has(tab.stateKey)) return false;
+  const layout = latest.get(tab.stateKey);
+  const canvas = savedCanvasOf(tab);
+  // Never saved: unsaved once there's anything on it.
+  if (!canvas) return (layout?.cards?.length ?? 0) > 0;
+  return signature(layout) !== canvas.sig;
+}
+
+export function onCanvasChange(listener) {
+  canvasListeners.add(listener);
+  return () => canvasListeners.delete(listener);
+}
+
+/** Save a lode tab's canvas: over its file, or (`as`, or never saved) under
+ *  a name the person picks. */
+// The lode toolbar asks for a name the first time a canvas is saved (⌘S
+// included): each tab's bar registers how to ask.
+const nameAskers = new Map(); // tab id → open the name field
+
+// lode writes its layout a moment after a change: the latest, once it lands.
+async function layoutOf(tab) {
+  await new Promise((r) => setTimeout(r, 450));
+  return latest.get(tab.stateKey) ?? null;
+}
+
+/** Save a lode tab's canvas over its file, or, never saved, under `name`
+ *  (without one, the toolbar asks for it). */
+export async function saveCanvasOf(tab, { name } = {}) {
+  const canvas = savedCanvasOf(tab);
+  if (!canvas && !name) return void nameAskers.get(tab.id)?.();
+  const layout = await layoutOf(tab);
+  if (!layout) return null;
+  const entry = canvas
+    ? await window.clanceApp.canvasesSave(canvas.path, tab.root, layout)
+    : await window.clanceApp.canvasesCreate(name, tab.root, layout);
+  if (!entry) return null;
+  writeTabState(tab.id, "canvas", { path: entry.path, name: entry.name, sig: signature(layout) }, { persist: true });
+  current?.renameTab(tab.id, entry.name);
+  notifyCanvas();
+  return entry;
+}
+
+/** A saved canvas was deleted: tabs of it are canvases never saved again. */
+export function forgetSavedCanvas(path) {
+  for (const { tab } of listTabs(getState().root)) if (tab.type === "flow" && readTabState(tab.id, "canvas", null)?.path === path) writeTabState(tab.id, "canvas", null, { persist: true });
+  notifyCanvas();
+}
+
+/** Export a copy of a lode tab's canvas wherever the person picks. Not a
+ *  save: the tab and Clance's saved canvases are unchanged. */
+export async function exportCanvasOf(tab) {
+  const layout = await layoutOf(tab);
+  return layout ? window.clanceApp.canvasesExport(savedCanvasOf(tab)?.name ?? tab.label, tab.root, layout) : null;
+}
+
 function flowFor(tab) {
   const existing = flows.get(tab.id);
   if (existing) return existing;
@@ -116,7 +227,7 @@ function flowFor(tab) {
     },
     syntax,
     syntaxCss: SYNTAX_CSS,
-    storage: serviceStorage(project.connection),
+    storage: canvasStorage(serviceStorage(project.connection)),
     empty: "Open a file or symbol: search above, “Open in lode” in Files, or “lode” on a file tab.",
     // Note cards' text (a model's system design, an explanation): Markdown,
     // sanitized (shared/markdown.js).
@@ -261,6 +372,9 @@ export function FlowSection({ tab, launcher }) {
 
   // The tab's label follows what it shows: its question, else its first card.
   useEffect(() => {
+    // A saved canvas is called what it was saved as.
+    const saved = savedCanvasOf(tab);
+    if (saved) return void (saved.name !== tab.label && launcher.renameTab(tab.id, saved.name));
     // An empty canvas (cleared, or nothing opened yet) goes back to the
     // default, the project folder's name, unless a question is being asked.
     const cards = flow.cards();
@@ -273,7 +387,7 @@ export function FlowSection({ tab, launcher }) {
   const failed = project.status;
   return html`
     <div class="flow-section">
-      <${FlowBar} flow=${flow} project=${project} root=${tab.root} launcher=${launcher} ready=${ready} onKeys=${() => toggleHelp()} tabId=${tab.id} />
+      <${FlowBar} flow=${flow} project=${project} root=${tab.root} launcher=${launcher} ready=${ready} onKeys=${() => toggleHelp()} tabId=${tab.id} tab=${tab} />
       ${flow.asked &&
       html`<div class="flow-asked">
         / ${flow.asked.question}
@@ -358,10 +472,66 @@ function KeysHelp({ onClose }) {
   `;
 }
 
-function FlowBar({ flow, project, root, launcher, ready, onKeys, tabId }) {
+function FlowBar({ flow, project, root, launcher, ready, onKeys, tabId, tab }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
-  const [note, setNote] = useState("");
+  // Saved canvases: this tab's, and the menu of all of them.
+  const [canvasMenu, setCanvasMenu] = useState(null); // null: closed; else the list
+  const canvasMenuRef = useRef(null);
+  // A click anywhere else closes it.
+  useEffect(() => {
+    if (!canvasMenu) return;
+    const away = (event) => !canvasMenuRef.current?.contains(event.target) && setCanvasMenu(null);
+    window.addEventListener("pointerdown", away, true);
+    return () => window.removeEventListener("pointerdown", away, true);
+  }, [canvasMenu]);
+  const [, redrawSaved] = useState(0);
+  useEffect(() => onCanvasChange(() => redrawSaved((n) => n + 1)), []);
+  const saved = savedCanvasOf(tab);
+  const dirty = isCanvasDirty(tab);
+  // The first save's name, asked in a small field under Save.
+  const [naming, setNaming] = useState(null); // null, or the name typed so far
+  useEffect(() => {
+    nameAskers.set(tabId, () => setNaming(tab.label));
+    return () => nameAskers.delete(tabId);
+  }, [tabId, tab.label]);
+  async function save(name) {
+    setCanvasMenu(null);
+    if (name !== undefined && !name.trim()) return;
+    await saveCanvasOf(tab, name ? { name: name.trim() } : {});
+    // No note: the save icon going from red to grey says it.
+    if (name) setNaming(null);
+  }
+  async function exportCopy() {
+    await exportCanvasOf(tab);
+  }
+  // Delete a saved canvas (to the Trash), from its ⋯ menu (or a right-click);
+  // a tab of it is then unsaved again.
+  // The canvas whose ⋯ menu is open, and where: drawn over the list (which
+  // scrolls, and would clip it), at the ⋯, upward near the window's bottom.
+  const [trashing, setTrashing] = useState(null); // null, or { canvas, x, y, up }
+  const openActions = (c, el) => {
+    if (trashing?.canvas.path === c.path) return setTrashing(null);
+    const r = el.getBoundingClientRect();
+    setTrashing({ canvas: c, x: window.innerWidth - r.right, y: r.bottom + 2, top: r.top - 2, up: r.bottom + 60 > window.innerHeight });
+  };
+  // Closing the list closes it too.
+  useEffect(() => {
+    if (!canvasMenu) setTrashing(null);
+  }, [canvasMenu]);
+  async function deleteSaved(c) {
+    setTrashing(null);
+    if (!(await window.clanceApp.canvasesDelete(c.path))) return;
+    forgetSavedCanvas(c.path);
+    setCanvasMenu(await window.clanceApp.canvasesList());
+  }
+  async function toggleCanvasMenu() {
+    setCanvasMenu(canvasMenu ? null : await window.clanceApp.canvasesList());
+  }
+  // The menu's canvases by project, this one's first.
+  const byProject = new Map();
+  for (const c of canvasMenu ?? []) byProject.set(c.root, [...(byProject.get(c.root) ?? []), c]);
+  const projectsInMenu = [...byProject.keys()].sort((a, b) => Number(b === root) - Number(a === root));
   // How "/" questions find their flow: lode's quick pass, or its Jev crawl
   // (slower, reads more of the project). Kept with the tab.
   const [mode, setMode] = useTabState("ask.mode", "pass", { persist: true });
@@ -432,12 +602,14 @@ function FlowBar({ flow, project, root, launcher, ready, onKeys, tabId }) {
     redrawBar((n) => n + 1);
   }
 
+  // Copied: the icon is a check for a moment (same size, nothing moves).
+  const [copied, setCopied] = useState(false);
   async function copyContext() {
     const context = await flow.context().catch(() => null);
     if (!context) return;
     await navigator.clipboard.writeText(context.markdown);
-    setNote(`copied · ${context.tokens.toLocaleString()} tokens`);
-    setTimeout(() => setNote(""), 2500);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   }
 
   const cards = flow.cards().length;
@@ -483,7 +655,7 @@ function FlowBar({ flow, project, root, launcher, ready, onKeys, tabId }) {
           )}
         </div>`}
       </div>
-      <span class="flow-count">${note || [cards ? `${cards} card${cards === 1 ? "" : "s"}` : "", unsaved ? `${unsaved} unsaved` : ""].filter(Boolean).join(" · ")}</span>
+      <span class="flow-count">${[cards ? `${cards} card${cards === 1 ? "" : "s"}` : "", unsaved ? `${unsaved} unsaved` : ""].filter(Boolean).join(" · ")}</span>
       <span class="flow-bar-spacer"></span>
       <select
         class="flow-mode flow-follow"
@@ -495,13 +667,60 @@ function FlowBar({ flow, project, root, launcher, ready, onKeys, tabId }) {
         <option value="">Follow: none</option>
         ${sessions.map((s) => html`<option value=${s.agent} title=${s.label}>Follow: ${s.label.length > 40 ? `${s.label.slice(0, 40)}…` : s.label}</option>`)}
       </select>
-      <button class="btn-quiet btn-small" disabled=${!flow.canRun("undo")} onClick=${run("undo")} title="Undo (⌘Z)">Undo</button>
       <button class="btn-quiet btn-small" disabled=${!flow.canRun("zoomReset")} onClick=${run("zoomReset")} title="Back to 100%">${Math.round(flow.zoom * 100)}%</button>
-      <button class="btn-quiet btn-small" disabled=${!flow.canRun("fit")} onClick=${run("fit")} title="Show every card (f)">Fit</button>
-      <button class="btn-quiet btn-small ${flow.diff !== null ? "flow-on" : ""}" onClick=${() => void flow.setDiff(flow.diff === null ? "HEAD" : null)} title="Show what changed since the last commit">Changes</button>
-      <button class="btn-quiet btn-small" disabled=${!cards} onClick=${copyContext} title="Copy these cards (or the selected ones) as context for an LLM">Copy context</button>
+      <button class="btn-quiet btn-small flow-icon ${flow.diff !== null ? "flow-on" : ""}" onClick=${() => void flow.setDiff(flow.diff === null ? "HEAD" : null)} title="Show what changed since the last commit" aria-label="Changes">${Icon.diff(14)}</button>
+      <button class="btn-quiet btn-small flow-icon" disabled=${!cards} onClick=${copyContext} title="Copy context: these cards (or the selected ones) as context for an LLM" aria-label=${copied ? "Copied" : "Copy context"}>${copied ? html`<span class="flow-copied">${Icon.check(14)}</span>` : Icon.copy(14)}</button>
+      <div class="flow-canvases">
+        <button
+          class="btn-quiet btn-small flow-icon flow-save ${dirty ? "flow-unsaved" : ""}"
+          disabled=${!dirty}
+          onClick=${() => save()}
+          title=${dirty ? (saved ? `Save ${saved.name} (⌘S)` : "Save this canvas, to open again later (⌘S)") : "Saved"}
+          aria-label=${dirty ? "Save (unsaved changes)" : "Saved"}
+        >${Icon.save(14)}</button>
+        ${naming !== null &&
+        html`<form class="menu flow-name-pop" onSubmit=${(e) => (e.preventDefault(), save(naming))}>
+          <input
+            class="preference-input"
+            value=${naming}
+            ref=${(el) => el && !el.dataset.focused && ((el.dataset.focused = "1"), el.focus(), el.select())}
+            onInput=${(e) => setNaming(e.target.value)}
+            onKeyDown=${(e) => e.key === "Escape" && setNaming(null)}
+            onBlur=${() => setTimeout(() => setNaming(null), 150)}
+            placeholder="Canvas name"
+            aria-label="Canvas name"
+          />
+          <button class="btn-primary btn-small" type="submit" disabled=${!naming.trim()}>Save</button>
+        </form>`}
+      </div>
+      <div class="flow-canvases" ref=${canvasMenuRef}>
+        <button class="btn-quiet btn-small" onClick=${toggleCanvasMenu} title="Open a saved canvas">Open ▾</button>
+        ${canvasMenu &&
+        html`<div class="menu flow-canvas-menu" role="menu">
+          ${projectsInMenu.map(
+            (projectRoot) => html`
+              <div class="menu-label">${projectRoot.split("/").filter(Boolean).pop()}</div>
+              ${byProject.get(projectRoot).map(
+                (c) => html`<div class="flow-canvas-row" onContextMenu=${(e) => (e.preventDefault(), openActions(c, e.currentTarget.querySelector(".flow-canvas-more")))}>
+                  <button class="menu-item ${saved?.path === c.path ? "menu-item-active" : ""}" title=${c.path.replace(/^\/Users\/[^/]+/, "~")} onClick=${() => (setCanvasMenu(null), launcher.openSavedCanvas(c.path))}>
+                    <span class="menu-item-title flow-canvas-name">${c.name}</span>
+                    <span class="menu-item-detail">${new Date(c.savedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+                  </button>
+                  <button class="icon-button flow-canvas-more ${trashing?.canvas.path === c.path ? "flow-canvas-more-open" : ""}" title="More" aria-label=${`More for ${c.name}`} onClick=${(e) => openActions(c, e.currentTarget)}>${Icon.moreVertical(14)}</button>
+                </div>`
+              )}
+            `
+          )}
+          ${!canvasMenu.length && html`<div class="menu-label">No saved canvases yet</div>`}
+        </div>`}
+        ${trashing &&
+        html`<div class="menu flow-canvas-actions" role="menu" style=${`right:${trashing.x}px;${trashing.up ? `bottom:${window.innerHeight - trashing.top}px` : `top:${trashing.y}px`}`}>
+          <button class="menu-item menu-item-danger" role="menuitem" onClick=${() => deleteSaved(trashing.canvas)}><span class="menu-item-title">Move to Trash</span></button>
+        </div>`}
+      </div>
       <button class="btn-secondary btn-small" disabled=${!ready} onClick=${askClaude} title="Open a Claude session beside this lode that can see and draw on it (lode tools); once it's open, go to it">Ask Claude</button>
       <button class="btn-quiet btn-small" disabled=${!flow.canRun("clear")} onClick=${run("clear")} title="Clear the canvas">Clear</button>
+      <button class="btn-quiet btn-small flow-icon" disabled=${!cards} onClick=${exportCopy} title="Export a copy of this canvas (a file anywhere; it isn't saved in Clance)" aria-label="Export">${Icon.export(14)}</button>
       <button class="btn-quiet btn-small" onClick=${onKeys} title="The keys (?)">?</button>
     </header>
   `;

@@ -3392,6 +3392,98 @@
         height: 22px;
         font-size: var(--text-xs);
       }
+      .flow-canvases {
+        position: relative;
+      }
+      .flow-canvas-menu {
+        position: absolute;
+        top: calc(100% + 4px);
+        right: 0;
+        z-index: 20;
+        min-width: 240px;
+        max-height: 60vh;
+        overflow-y: auto;
+      }
+      .flow-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      /* A lode canvas's unsaved dot: red, apart from a file's. */
+      .tab-dirty.tab-canvas .tab-dirty-dot::before {
+        background: var(--danger);
+      }
+      .flow-canvas-row {
+        position: relative;
+        display: flex;
+        align-items: center;
+      }
+      .flow-canvas-row > .menu-item {
+        flex: 1;
+        min-width: 0;
+        padding-right: 34px;
+      }
+      .flow-canvas-row .menu-item-detail {
+        flex: none;
+      }
+      .flow-canvas-name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      /* Shared icon-button, smaller, over the row's end; shown on hover. */
+      .flow-canvas-more {
+        position: absolute;
+        right: 4px;
+        width: 22px;
+        height: 22px;
+        visibility: hidden;
+      }
+      .flow-canvas-row:hover .flow-canvas-more,
+      .flow-canvas-more-open {
+        visibility: visible;
+      }
+      /* Fixed, over the list: the list scrolls and would clip it. */
+      .flow-canvas-actions {
+        position: fixed;
+        z-index: 30;
+        min-width: 160px;
+      }
+      .flow-name-pop {
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 0;
+        z-index: 20;
+        flex-direction: row;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2);
+      }
+      .flow-name-pop .preference-input {
+        width: 220px;
+      }
+      /* Disabled toolbar buttons fade rather than turning into grey boxes. */
+      .flow-bar .btn-quiet:disabled {
+        background: transparent;
+        border-color: transparent;
+        box-shadow: none;
+        opacity: 0.4;
+      }
+      .flow-copied {
+        display: inline-flex;
+        color: var(--success);
+      }
+      /* Save: red while the canvas has unsaved changes. */
+      .flow-bar .flow-unsaved {
+        color: var(--danger);
+      }
+      /* No focus ring in a lode tab (its toolbar and canvas): it showed on
+         every click. */
+      .flow-section :focus-visible {
+        box-shadow: none;
+        outline: none;
+      }
       .flow-follow {
         width: 160px;
         text-overflow: ellipsis;

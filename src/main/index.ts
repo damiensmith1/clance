@@ -59,6 +59,7 @@ import { resolveOpenArgs, resolveSessionId, spawnBackgroundAgent, stopAgent, lis
 import { isPoolSpareId } from "./agentPool";
 import { copyDroppedFile } from "./dropFiles";
 import { lodeSend, lodeRelease, stopAllLodes, canvasReply, jevStatus, setJevKey } from "./lode";
+import { createCanvas, deleteCanvas, exportCanvas, listCanvases, readCanvas, saveCanvas } from "./canvases";
 import { claimLodeSession, discardLeftoverLodeSessions, isLodeSpareId, releaseAllLodeSessions, releaseLodeSession, warmLodeSession } from "./lodePool";
 import {
   getStatus as getGitStatus,
@@ -662,7 +663,7 @@ ipcMain.handle("doc:confirm-unsaved", async (event, names: unknown) => {
   const message =
     list.length === 1
       ? `Do you want to save the changes you made to ${list[0]}?`
-      : `Do you want to save the changes you made to ${list.length} files?`;
+      : `Do you want to save the changes you made to these ${list.length}?`;
   const options: Electron.MessageBoxOptions = {
     type: "warning",
     message,
@@ -696,6 +697,14 @@ ipcMain.on("lode:release", (event, root: unknown) => {
   lodeRelease(event.sender, root);
   if (typeof root === "string") releaseLodeSession(root);
 });
+// Saved lode canvases (canvases.ts): the list, one's file, save one, save a
+// new one by name, export a copy anywhere.
+ipcMain.handle("canvases:list", () => listCanvases());
+ipcMain.handle("canvases:read", (_event, path: unknown) => readCanvas(path));
+ipcMain.handle("canvases:save", (_event, path: unknown, root: unknown, layout: unknown) => saveCanvas(path, root, layout));
+ipcMain.handle("canvases:delete", (_event, path: unknown) => deleteCanvas(path));
+ipcMain.handle("canvases:create", (_event, name: unknown, root: unknown, layout: unknown) => createCanvas(name, root, layout));
+ipcMain.handle("canvases:export", (event, name: unknown, root: unknown, layout: unknown) => exportCanvas(BrowserWindow.fromWebContents(event.sender), name, root, layout));
 // The Jev key for "/" questions (lode.ts): where it comes from, or set it.
 ipcMain.handle("lode:jev-status", () => jevStatus());
 ipcMain.handle("lode:set-jev-key", (_event, key: unknown) => setJevKey(typeof key === "string" ? key : null));

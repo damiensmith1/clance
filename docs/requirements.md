@@ -467,6 +467,15 @@ Sessions Clance starts get these tools when Accessibility is granted:
   the notes it drew), not the whole canvas. A followed session is asked to
   explain with notes, diagrams and groups on the canvas and keep its
   written reply short. Only sessions Clance started can be followed.
+- A lode canvas can be saved under a name and opened again later from a
+  list of saved canvases (by project), live: its code as it is now, its
+  notes, groups and layout as saved. Save (⌘S, when not editing a card's
+  code) writes over it, asking for a name the first time. Export writes a
+  copy anywhere, without saving. A saved canvas can be deleted from the
+  list (to the Trash, after asking). Closing a lode tab with unsaved
+  changes asks to save them first, like a file. A lode tab shows a red dot while it has
+  unsaved changes: a saved canvas changed since, or one never saved that
+  has cards (moving around the canvas isn't a change).
 - The Changes panel opens every uncommitted change in a repository as a
   lode tab of the changed functions, with the changes marked.
 - Reading a project never freezes the window, and a canvas comes back as it
