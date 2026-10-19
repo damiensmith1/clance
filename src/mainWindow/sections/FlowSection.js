@@ -458,7 +458,9 @@ function onFlowKey(event, flow, { focusSearch, toggleHelp, helpOpen }) {
     event.preventDefault();
     return toggleHelp(false);
   }
-  const command = Object.keys(DEFAULT_KEYS).find((c) => DEFAULT_KEYS[c].some((k) => keyMatches(k, event)));
+  // A key on several commands does the first that can run: ← and → step a
+  // tour while one is on, and go back and follow otherwise.
+  const command = Object.keys(DEFAULT_KEYS).find((c) => DEFAULT_KEYS[c].some((k) => keyMatches(k, event)) && (c === "help" || c === "search" || flow.canRun(c)));
   if (!command) return;
   if (command === "help") {
     event.preventDefault();
@@ -468,7 +470,6 @@ function onFlowKey(event, flow, { focusSearch, toggleHelp, helpOpen }) {
     event.preventDefault();
     return focusSearch();
   }
-  if (!flow.canRun(command)) return;
   event.preventDefault();
   flow.run(command);
 }
@@ -477,7 +478,7 @@ function onFlowKey(event, flow, { focusSearch, toggleHelp, helpOpen }) {
 // what's on the canvas, and the commands, from lode's flow API.
 // "?": lode's keys, as its COMMAND_HELP describes them.
 const KEY_LABEL = (key) =>
-  key.replace("Mod+", "⌘").replace("Shift+", "⇧").replace("ArrowDown", "↓").replace("ArrowUp", "↑").replace("ArrowLeft", "←").replace("ArrowRight", "→").replace("Backspace", "⌫").replace("Delete", "⌦");
+  key.replace("Mod+", "⌘").replace("Shift+", "⇧").replace("ArrowDown", "↓").replace("ArrowUp", "↑").replace("ArrowLeft", "←").replace("ArrowRight", "→").replace("Backspace", "⌫").replace("Delete", "⌦").replace("Escape", "Esc").replace("PageDown", "PgDn").replace("PageUp", "PgUp");
 
 function KeysHelp({ onClose }) {
   const rows = Object.keys(COMMAND_HELP).filter((c) => DEFAULT_KEYS[c]?.length);
