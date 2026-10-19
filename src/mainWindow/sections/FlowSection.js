@@ -93,6 +93,28 @@ const SYNTAX_CSS = `
 .tok-call { color: var(--lode-syntax-title); }
 .tok-comment { color: var(--lode-syntax-comment); font-style: italic; }
 `;
+// Note cards' Markdown beyond what lode styles itself: shared/markdown.js's
+// own markup (callouts, tags, wikilinks, diff blocks, footnotes), in the
+// app's colours. Inside the view's shadow root, so it can't reach
+// .file-markdown's rules.
+const NOTE_CSS = `
+.note-body .md-callout { --callout: var(--tok-number); --callout-bg: var(--diff-hunk-bg); margin: 0 0 8px; padding: 6px 10px; border-left: 3px solid var(--callout); border-radius: 0 6px 6px 0; background: var(--callout-bg); }
+.note-body .md-callout > :last-child { margin-bottom: 0; }
+.note-body .md-callout-tip { --callout: var(--success); --callout-bg: var(--success-bg); }
+.note-body .md-callout-important { --callout: var(--tok-keyword); --callout-bg: var(--accent-soft); }
+.note-body .md-callout-warning { --callout: var(--warning); --callout-bg: var(--warning-bg); }
+.note-body .md-callout-caution { --callout: var(--danger); --callout-bg: var(--diff-del-bg); }
+.note-body .md-callout-title { margin-bottom: 2px; font-weight: 600; color: var(--callout); }
+.note-body .md-tag { display: inline-block; padding: 0 6px; border-radius: 999px; background: var(--surface-bg); font-size: 11.5px; color: var(--text-secondary); }
+.note-body .md-wikilink { color: var(--tok-number); border-bottom: 1px dashed currentColor; }
+.note-body .md-diff-ins, .note-body .md-diff-del, .note-body .md-diff-hunk, .note-body .md-diff-ctx { display: block; margin: 0 -10px; padding: 0 10px; }
+.note-body .md-diff-ins { background: var(--diff-add-bg); color: var(--diff-add-mark); }
+.note-body .md-diff-del { background: var(--diff-del-bg); color: var(--diff-del-mark); }
+.note-body .md-diff-hunk { background: var(--diff-hunk-bg); color: var(--text-tertiary); }
+.note-body .footnote-ref a, .note-body .footnote-backref { text-decoration: none; }
+.note-body .footnotes { font-size: 12px; color: var(--text-secondary); }
+.note-body .footnotes p { margin: 0; }
+`;
 
 // --- saved canvases (src/main/canvases.ts) ---
 //
@@ -231,7 +253,8 @@ function flowFor(tab) {
     empty: "Open a file or symbol: search above, “Open in lode” in Files, or “lode” on a file tab.",
     // Note cards' text (a model's system design, an explanation): Markdown,
     // sanitized (shared/markdown.js).
-    renderNote: (text) => renderMarkdown(text),
+    renderNote: (text) => renderMarkdown(text, { plainCode: true }),
+    css: NOTE_CSS,
     // Not on the whole window: Clance has other panes. The tab forwards keys
     // only while focus is in it (onFlowKey).
     keys: false,

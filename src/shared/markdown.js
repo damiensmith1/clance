@@ -87,7 +87,8 @@ function highlightBlock(code, lang) {
     .join("\n");
 }
 
-function renderCodeBlock(lang, code) {
+function renderCodeBlock(lang, code, plain) {
+  if (plain) return `<pre><code>${highlightBlock(code, lang.toLowerCase())}</code></pre>`;
   return (
     `<div class="code-block">` +
     `<div class="code-block-header">` +
@@ -254,7 +255,7 @@ function comments(state, silent) {
   return true;
 }
 
-function createParser(html) {
+function createParser(html, plainCode) {
   const md = markdownit({ html, linkify: true, typographer: false, breaks: false })
     .use(footnote)
     .use(deflist)
@@ -278,9 +279,9 @@ function createParser(html) {
 
   md.renderer.rules.fence = (tokens, idx) => {
     const lang = tokens[idx].info.trim().split(/\s+/)[0] ?? "";
-    return renderCodeBlock(lang, tokens[idx].content.replace(/\n$/, ""));
+    return renderCodeBlock(lang, tokens[idx].content.replace(/\n$/, ""), plainCode);
   };
-  md.renderer.rules.code_block = (tokens, idx) => renderCodeBlock("", tokens[idx].content.replace(/\n$/, ""));
+  md.renderer.rules.code_block = (tokens, idx) => renderCodeBlock("", tokens[idx].content.replace(/\n$/, ""), plainCode);
 
   // No `src`: see loadMarkdownImages.
   md.renderer.rules.image = (tokens, idx, options, env, self) => {
@@ -336,9 +337,10 @@ const SANITIZE = {
 // ---- public API ----
 
 const parsers = new Map();
-function parserFor(html) {
-  if (!parsers.has(html)) parsers.set(html, createParser(html));
-  return parsers.get(html);
+function parserFor(html, plainCode) {
+  const key = `${html}/${plainCode}`;
+  if (!parsers.has(key)) parsers.set(key, createParser(html, plainCode));
+  return parsers.get(key);
 }
 
 const FRONT_MATTER = /^---[ \t]*\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
@@ -346,8 +348,10 @@ const FRONT_MATTER = /^---[ \t]*\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n
 /**
  * `html`: render raw HTML in the source (sanitized) rather than escape it.
  * `frontMatter`: show a leading YAML block as a metadata sheet.
+ * `plainCode`: code blocks without their language label and Copy button,
+ * for places attachCopyHandler can't reach (lode's note cards).
  */
-export function renderMarkdown(raw, { html = false, frontMatter = false } = {}) {
+export function renderMarkdown(raw, { html = false, frontMatter = false, plainCode = false } = {}) {
   let source = raw;
   let head = "";
   const front = frontMatter ? source.match(FRONT_MATTER) : null;
@@ -355,7 +359,7 @@ export function renderMarkdown(raw, { html = false, frontMatter = false } = {}) 
     head = renderFrontMatter(front[1]);
     source = source.slice(front[0].length);
   }
-  return purifier.sanitize(head + parserFor(html).render(source), SANITIZE);
+  return purifier.sanitize(head + parserFor(html, plainCode).render(source), SANITIZE);
 }
 
 /**
