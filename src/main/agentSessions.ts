@@ -238,11 +238,12 @@ export async function resolveOpenArgs(
 // the popup widget's "Open in App" button) can be labeled with its real
 // title instead of a generic placeholder. `attach <shortId>` only carries
 // the short agent id, not the session id, so that direction needs the
-// same `claude agents --json --all` round trip in reverse.
-export async function resolveSessionId(args: string[]): Promise<string | null> {
+// same `claude agents --json --all` round trip in reverse — or a listing
+// the caller already has, when it resolves many tabs at once.
+export async function resolveSessionId(args: string[], known?: AgentSession[]): Promise<string | null> {
   if (args[0] === "--resume") return args[1] ?? null;
   if (args[0] === "attach") {
-    const known = await listAgents({ all: true });
+    known ??= await listAgents({ all: true });
     return known.find((s) => s.id === args[1])?.sessionId ?? null;
   }
   return null;

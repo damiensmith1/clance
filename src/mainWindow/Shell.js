@@ -306,14 +306,13 @@ function usePaneState() {
   return state;
 }
 
-// A session tab that hasn't yet taken its conversation's name. Structural,
-// not a check against the placeholder's text: the placeholder is main's to
-// choose (chatHistory.ts's SESSION_PLACEHOLDER_TITLE), and matching a label
-// string here is exactly how a second, differently-worded placeholder used
-// to slip through unrenamed. `named` is set by the rename itself, so each
-// tab asks until it has a real title and then stops.
-function isUnnamedSessionTab(tab) {
-  return tab.type === "terminal" && Boolean(tab.args?.length) && !tab.named;
+// A tab showing a Claude session, whose label follows the session's title.
+// Structural, not a check against the placeholder's text: the placeholder is
+// main's to choose (chatHistory.ts's SESSION_PLACEHOLDER_TITLE), and matching
+// a label string here is exactly how a second, differently-worded
+// placeholder used to slip through unrenamed.
+function isSessionTab(tab) {
+  return tab.type === "terminal" && Boolean(tab.args?.length);
 }
 
 // Section tabs take their label from LAUNCHER_ITEMS rather than the saved
@@ -1152,34 +1151,36 @@ export function Shell() {
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
-  // A session tab opens before its conversation has a name: minted as "New
-  // Chat", or handed over from the widget with whatever title existed then
-  // (none, for a session that hadn't been used). The name arrives when the
-  // first message lands in the transcript, which nothing pushes — the CLI
-  // writes that file — so an unnamed tab asks until it has one. The effect
-  // keys off which tabs are unnamed rather than the whole tree, so merely
-  // switching tabs doesn't restart the timer, and it stops entirely once
-  // every tab has a name.
-  const unnamedTabIds = state.root
+  // A session tab is labelled with its session's title, which changes after
+  // the tab opens: a new session takes its first message's words once that
+  // lands in the transcript, and `/rename` can rename any session at any
+  // time. Nothing pushes either — the CLI writes that file — so session tabs
+  // ask, all in one call per poll. The effect keys off which tabs are
+  // sessions rather than the whole tree, so merely switching tabs doesn't
+  // restart the timer, and it stops when no session tab is open.
+  const sessionTabIds = state.root
     ? listTabs(state.root)
-        .filter(({ tab }) => isUnnamedSessionTab(tab))
+        .filter(({ tab }) => isSessionTab(tab))
         .map(({ tab }) => tab.id)
         .join(",")
     : "";
 
   useEffect(() => {
-    if (!unnamedTabIds) return;
+    if (!sessionTabIds) return;
     let cancelled = false;
     async function check() {
-      for (const { paneId, tab } of listTabs(getState().root).filter(({ tab }) => isUnnamedSessionTab(tab))) {
-        const title = await window.clanceApp.sessionTitleForArgs(tab.args);
-        // Re-checked against the store rather than the list this loop
+      const tabs = listTabs(getState().root).filter(({ tab }) => isSessionTab(tab));
+      const titles = await window.clanceApp.sessionTitlesForArgs(tabs.map(({ tab }) => tab.args));
+      if (cancelled) return;
+      tabs.forEach(({ tab }, i) => {
+        const title = titles[i];
+        if (!title) return;
+        // Re-checked against the store rather than the list this poll
         // started from: a tab can be closed or moved between panes while
-        // its own lookup is in flight.
-        if (cancelled || !title) continue;
+        // the lookup is in flight.
         const current = listTabs(getState().root).find((entry) => entry.tab.id === tab.id);
-        if (current && isUnnamedSessionTab(current.tab)) renameTab(current.paneId, tab.id, title);
-      }
+        if (current && current.tab.label !== title) renameTab(current.paneId, tab.id, title);
+      });
     }
     check();
     const interval = setInterval(check, TAB_TITLE_POLL_MS);
@@ -1187,7 +1188,7 @@ export function Shell() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [unnamedTabIds]);
+  }, [sessionTabIds]);
 
   // ⌘K from anywhere in the window, terminals included: switch to Sessions
   // (opening it if needed) with the cursor in its search. Capture phase, so a

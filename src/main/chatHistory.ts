@@ -1,4 +1,4 @@
-import { readdir, stat } from "fs/promises";
+import { open, readdir, stat } from "fs/promises";
 import { createReadStream } from "fs";
 import { createInterface } from "readline";
 import { homedir } from "os";
@@ -24,6 +24,68 @@ const TITLE_MAX_LENGTH = 70;
 // all agree. Emptiness itself is never this string — see readSessionHead,
 // which reports it as null — so nothing can be faked by typing it.
 export const SESSION_PLACEHOLDER_TITLE = "Clance Chat";
+
+// What every widget session is named at mint (see popupWindow.ts's
+// popupSessionName and isPopupSessionName).
+export const POPUP_SESSION_NAME_PREFIX = "Clance popup";
+
+// Names earlier Clance versions minted sessions under. Old transcripts
+// still record them as the session's name, and none of them was the user's.
+const LEGACY_MINT_NAMES = ["New Chat", "New conversation", "Clance pool spare"];
+
+/**
+ * A session's CLI name, if it is one the user gave it (`/rename`, or `-n`
+ * from a terminal) rather than the placeholder Clance minted it under.
+ * A fork keeps its source's name with " ⑂" appended, so a fork of an
+ * unnamed session is still unnamed.
+ */
+export function userGivenName(name: string | undefined): string | null {
+  if (!name) return null;
+  const base = name.replace(/(?:\s*⑂)+$/, "").trim();
+  if (!base || base === SESSION_PLACEHOLDER_TITLE || LEGACY_MINT_NAMES.includes(base)) return null;
+  if (base.startsWith(POPUP_SESSION_NAME_PREFIX)) return null;
+  return truncate(name.replace(/\s+/g, " "), TITLE_MAX_LENGTH);
+}
+
+// `/rename` records the new name as a `custom-title` entry, and the CLI
+// records the current one again after every turn so its own /resume list
+// can read it off the end of the file. Measured across ~400 transcripts, the
+// last one is never more than ~33 KB from the end, so only the tail is read:
+// these files reach hundreds of MB between them.
+const NAME_TAIL_BYTES = 64 * 1024;
+
+async function readSessionName(filePath: string): Promise<string | null> {
+  const handle = await open(filePath, "r");
+  try {
+    const { size } = await handle.stat();
+    const length = Math.min(size, NAME_TAIL_BYTES);
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, size - length);
+    const lines = buffer.toString("utf8").split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i].includes('"custom-title"')) continue;
+      let entry: Record<string, unknown>;
+      try {
+        entry = JSON.parse(lines[i]);
+      } catch {
+        // The tail's first line is usually cut off mid-entry.
+        continue;
+      }
+      if (entry.type !== "custom-title" || typeof entry.customTitle !== "string") continue;
+      // The latest name decides, even when it is Clance's placeholder.
+      return userGivenName(entry.customTitle);
+    }
+    return null;
+  } finally {
+    await handle.close();
+  }
+}
+
+// What a session is called everywhere Clance shows it — the Sessions list,
+// tabs, the widget, a peek: the name the user gave it, else its first message.
+async function sessionTitle(filePath: string): Promise<string | null> {
+  return (await readSessionName(filePath).catch(() => null)) ?? (await firstUserTitle(filePath));
+}
 
 export type SessionSummary = {
   id: string;
@@ -195,16 +257,16 @@ async function findSessionFilePath(sessionId: string): Promise<string | null> {
   return null;
 }
 
-// Used to label a main-window tab opened from the popup widget's "Open in
-// App" button, which only has a session id (from the terminal's --resume
-// args), not a title. Null if no project has that file, or it's somehow
-// gone — for a brand-new session with no resumed-from id at all, the
-// caller finds one first via findRecentClanceSessionId below.
+// A session's title (sessionTitle) by id: a tab's label, a live Sessions
+// row, a tab opened from the widget's "Open in App" button. Null if no
+// project has that file, or it's somehow gone — for a brand-new session with
+// no resumed-from id at all, the caller finds one first via
+// findRecentClanceSessionId below.
 export async function titleForSessionId(sessionId: string): Promise<string | null> {
   const filePath = await findSessionFilePath(sessionId);
   if (!filePath) return null;
   try {
-    return await firstUserTitle(filePath);
+    return await sessionTitle(filePath);
   } catch {
     return null;
   }
@@ -262,7 +324,13 @@ export async function cwdForSessionId(sessionId: string): Promise<string | null>
 // real pre-existing conversation (opened via "Open in…", say) always comes
 // back true even if this particular viewing added nothing new to it.
 export async function hasRealUserMessage(sessionId: string): Promise<boolean> {
-  return (await titleForSessionId(sessionId)) !== null;
+  const filePath = await findSessionFilePath(sessionId);
+  if (!filePath) return false;
+  try {
+    return (await firstUserTitle(filePath)) !== null;
+  } catch {
+    return false;
+  }
 }
 
 // Finds the session id for a brand-new (never `--resume`'d) Clance popup
@@ -359,11 +427,12 @@ export async function listSessions(): Promise<SessionSummary[]> {
         // whichever fraction of sessions still happen to be minted at the
         // default directory.
         if (dirName === CLANCE_PROJECT_DIR && title === null) continue;
+        const name = await readSessionName(filePath).catch(() => null);
         summaries.push({
           id,
           filePath,
           projectLabel: projectLabelFor(dirName),
-          title: title ?? SESSION_PLACEHOLDER_TITLE,
+          title: name ?? title ?? SESSION_PLACEHOLDER_TITLE,
           lastModified: fileStat.mtime.toISOString(),
           archived: archivedIds.has(id),
           pinned: pinnedIds.has(id),
@@ -610,6 +679,7 @@ export async function peekSession(sessionId: string): Promise<SessionPeek | null
   };
   let title: string | undefined;
   let aiTitle: string | undefined;
+  let name: string | null = null;
   let cwd: string | null = null;
   let gitBranch: string | null = null;
   let model: string | null = null;
@@ -635,6 +705,11 @@ export async function peekSession(sessionId: string): Promise<SessionPeek | null
       // opening words, so the last one wins.
       if (entry.type === "ai-title" && typeof entry.aiTitle === "string") {
         aiTitle = entry.aiTitle;
+        continue;
+      }
+      // The user's own name for it (see readSessionName) beats both.
+      if (entry.type === "custom-title" && typeof entry.customTitle === "string") {
+        name = userGivenName(entry.customTitle);
         continue;
       }
       if (entry.type !== "user" && entry.type !== "assistant") continue;
@@ -691,7 +766,7 @@ export async function peekSession(sessionId: string): Promise<SessionPeek | null
 
   return {
     id: sessionId,
-    title: aiTitle || title || SESSION_PLACEHOLDER_TITLE,
+    title: name || aiTitle || title || SESSION_PLACEHOLDER_TITLE,
     projectLabel: projectLabelFor(basename(dirname(filePath))),
     cwd,
     gitBranch,

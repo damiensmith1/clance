@@ -20,6 +20,9 @@ const hintBarToggleEl = document.getElementById("hint-bar-toggle");
 // A session that exits this soon after attaching never really started.
 const EARLY_EXIT_MS = 8000;
 
+// How often the header re-asks for its session's title while the widget is up.
+const TITLE_POLL_MS = 3000;
+
 let openInSessions = [];
 let term = null;
 let fitAddon = null;
@@ -445,6 +448,16 @@ function showSessionInfo(args) {
     if (title) toolbarTitleEl.textContent = `/ ${title}`;
   });
 }
+
+// The title changes under an open widget too — its first message lands, or
+// `/rename` renames it — so the header asks again while it's showing.
+setInterval(() => {
+  const args = activeArgs;
+  if (!args.length || document.hidden) return;
+  window.clance.sessionInfo(args).then(({ title }) => {
+    if (args === activeArgs && title) toolbarTitleEl.textContent = `/ ${title}`;
+  });
+}, TITLE_POLL_MS);
 
 // Bringing a hidden widget back (⌥Space) restores focus to whatever last had
 // it, which can be a toolbar button, drawn with a focus ring because the last

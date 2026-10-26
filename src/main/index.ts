@@ -414,14 +414,20 @@ ipcMain.handle(
   (_event, sessionId: string, pinned: boolean) => setSessionPinned(sessionId, pinned)
 );
 
-// A session tab's label, once its conversation has a name. The tab knows
-// only its launch args (["attach", <agent id>] or ["--resume", <session
-// id>]), so the agent → session hop happens here rather than costing the
-// renderer a full `claude agents --json` listing per poll.
-ipcMain.handle("sessions:title-for-args", async (_event, args: unknown) => {
-  if (!Array.isArray(args) || !args.every((arg) => typeof arg === "string")) return null;
-  const sessionId = await resolveSessionId(args);
-  return sessionId ? titleForSessionId(sessionId) : null;
+// Every session tab's label, in one round trip. A tab knows only its launch
+// args (["attach", <agent id>] or ["--resume", <session id>]), so the
+// agent → session hop happens here, against one `claude agents --json`
+// listing for all of them rather than one per tab per poll.
+ipcMain.handle("sessions:titles-for-args", async (_event, argsList: unknown) => {
+  if (!Array.isArray(argsList)) return [];
+  const known = await listAgents({ all: true });
+  return Promise.all(
+    argsList.map(async (args: unknown) => {
+      if (!Array.isArray(args) || !args.every((arg) => typeof arg === "string")) return null;
+      const sessionId = await resolveSessionId(args, known);
+      return sessionId ? titleForSessionId(sessionId) : null;
+    })
+  );
 });
 
 // A tab knows only its launch args; its menu's Copy Session ID needs the
@@ -489,7 +495,10 @@ ipcMain.handle("agents:list", async (_event, opts: { all?: boolean }) => {
     agents.map(async (agent) => {
       if (isPoolSpareId(agent.id) || isLodeSpareId(agent.id)) return null;
       if (isPopupSessionName(agent.name) && !(await hasRealUserMessage(agent.sessionId))) return null;
-      return agent;
+      // A running session's row is titled by the same rule as everywhere
+      // else (chatHistory.ts's sessionTitle), so a `/rename` shows within a
+      // poll. Only running ones: `--all` lists every stopped agent too.
+      return agent.pid ? { ...agent, title: await titleForSessionId(agent.sessionId) } : agent;
     })
   );
   return kept.filter((agent): agent is (typeof agents)[number] => agent !== null);

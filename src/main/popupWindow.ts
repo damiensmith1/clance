@@ -6,7 +6,7 @@ import { checkPermissions } from "./permissions";
 import { ensureLocalToolsServer, listLocalTools } from "./localToolsServer";
 import { spawnBackgroundAgent, resolveSessionId, stopAgent, rmAgent, listAgents } from "./agentSessions";
 import { claimPoolSpare, refillPool } from "./agentPool";
-import { hasRealUserMessage, listSessions } from "./chatHistory";
+import { hasRealUserMessage, titleForSessionId, POPUP_SESSION_NAME_PREFIX } from "./chatHistory";
 import { getDefaultDirectory, addRecentDirectory, readConfig } from "./config";
 
 const DEFAULT_WIDTH = 560;
@@ -55,8 +55,6 @@ let currentAgentId: string | null = null;
 // is stateless and can't be orphaned the same way: no other mechanism
 // mints a background agent named "Clance popup ..." by coincidence, so
 // checking by name is both more complete and doesn't need bookkeeping.
-const POPUP_SESSION_NAME_PREFIX = "Clance popup";
-
 export function isPopupSessionName(name: string | undefined): boolean {
   return !!name && name.startsWith(POPUP_SESSION_NAME_PREFIX);
 }
@@ -559,7 +557,7 @@ export async function popupSessionInfo(
   if (!agent) return { folder: null, title: null, toggleShortcut };
   let title: string | null = null;
   if (!isPopupSessionName(agent.name) || (await hasRealUserMessage(agent.sessionId))) {
-    title = (await listSessions()).find((session) => session.id === agent.sessionId)?.title ?? null;
+    title = await titleForSessionId(agent.sessionId);
   }
   return { folder: agent.cwd ?? null, title, toggleShortcut };
 }

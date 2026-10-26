@@ -40,7 +40,7 @@ contextBridge.exposeInMainWorld("clanceApp", {
     ipcRenderer.invoke("chatHistory:set-archived", sessionId, archived),
   setSessionPinned: (sessionId: string, pinned: boolean) =>
     ipcRenderer.invoke("chatHistory:set-pinned", sessionId, pinned),
-  sessionTitleForArgs: (args: string[]) => ipcRenderer.invoke("sessions:title-for-args", args),
+  sessionTitlesForArgs: (argsList: string[][]) => ipcRenderer.invoke("sessions:titles-for-args", argsList),
   sessionIdForArgs: (args: string[]) => ipcRenderer.invoke("sessions:id-for-args", args),
   sessionFolder: (sessionId: string) => ipcRenderer.invoke("sessions:folder", sessionId),
   revealFolder: (dir: string) => ipcRenderer.invoke("sessions:reveal-folder", dir),

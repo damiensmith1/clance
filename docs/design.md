@@ -197,16 +197,41 @@ session — and the widget's close path deletes sessions it believes are
 empty.
 
 `chatHistory.ts` scans `~/.claude/projects/*/*.jsonl` directly — every Claude
-Code session on the machine, not just Clance's. Titles come from the first
-real user message, read line by line rather than parsing whole transcripts
-(they reach several MB). Messages the CLI injects for local slash commands
-(`<local-command-caveat>` etc.) and the context preambles Clance used to
-type into the widget are skipped so they never become a title.
+Code session on the machine, not just Clance's.
+
+**A session has one title, wherever Clance shows it:** the Sessions list,
+its tab, the widget's header, a peek. `sessionTitle` decides it. The name the
+user gave the session wins, else its first real user message:
+
+- **The name** is the CLI's own. `/rename` (or `-n` from a terminal) writes
+  a `custom-title` entry, the same name `claude agents --json` reports, and
+  the CLI writes the current one again after every turn so its own /resume
+  list can find it at the end of the file. Clance reads only the last 64 KB
+  for it. Measured across ~400 transcripts, the last one was never more than
+  ~33 KB from the end, and reading the tail costs the whole list about
+  100 ms. The latest entry decides, and Clance's mint names don't count as
+  one (`userGivenName`): "Clance Chat", "Clance popup …", the older "New
+  Chat", "New conversation" and "Clance pool spare", and any of them with the
+  " ⑂" a fork appends.
+- **The first message** is read line by line rather than parsing whole
+  transcripts (they reach several MB). Messages the CLI injects for local
+  slash commands (`<local-command-caveat>` etc.) and the context preambles
+  Clance used to type into the widget are skipped so they never become a
+  title. Whether a session is empty is decided by this alone, never by a
+  name.
+
+Clance doesn't rename sessions itself. There's no CLI command to rename a
+session from outside, and a running session writes its own name back over
+anything else after every turn, so `/rename` in the session is the one way
+to do it.
 
 The Sessions tab (`ChatsSection.js`) is one table: session (title over its
 folder), project, state, updated. It has no header row, since each column is
 plain from its content; a line of keyboard hints sits above it instead. Live sessions come first, from
-`claude agents --json` polled every 5 s, titled from the matching transcript.
+`claude agents --json` polled every 5 s, each titled by main (`agents:list`
+adds `title` to running agents), so a `/rename` shows within a poll. Closed
+rows are read when the page loads and again whenever a live session stops,
+so a session renamed while it ran keeps that title when it moves down.
 Their project is the agent's `cwd` basename, and their state comes from the
 CLI's `state` field: `working` (signal dot), `blocked` shown as "needs you"
 (amber), `failed`, `done`, or the `busy`/`idle` status otherwise. Closed
@@ -304,8 +329,8 @@ ones (context the CLI injected as if the user had typed it), and `thinking`
 blocks — the CLI writes those with their text empty, so there is nothing in
 a log to show.
 
-The header prefers the CLI's own `ai-title` over the first message's opening
-words, and carries the project, git branch (unless it is a detached `HEAD`),
+The header is the session's title, except that between a user-given name and
+the first message's opening words it prefers the CLI's own `ai-title`. It carries the project, git branch (unless it is a detached `HEAD`),
 model, message count, how long the conversation ran and when it last moved.
 Claude's replies render through `markdown.js` with raw HTML escaped and the
 output sanitized (see "Readers"); the user's own messages are shown as typed.
@@ -426,7 +451,8 @@ every open would cost latency and be stale or irrelevant most of the time.
   one in a chosen directory (never pooled — the directory isn't known in
   advance). Nothing is typed into a resumed session. It's the toolbar title
   itself: a status dot, the session's folder and title
-  (`popup:session-info`), and a chevron. ⌘K anywhere in the widget, terminal
+  (`popup:session-info`, asked again every 3 s while the widget shows, so a
+  first message or a `/rename` reaches it), and a chevron. ⌘K anywhere in the widget, terminal
   included, opens it with its search focused; ⌘K again or Esc closes it and
   returns focus to the terminal.
 
@@ -833,15 +859,17 @@ button opens `$SHELL -il` in the default directory.
 - Other windows open a section through `openMainWindowSection`, which waits for
   the renderer before sending `open-section` (the HUD's "open settings", the
   popup's error state).
-- A session tab opens before its conversation has a name — "New Chat" — and
-  takes the transcript's title once the first message lands. Nothing pushes
-  that: the CLI writes the file, so an unnamed tab asks
-  (`sessions:title-for-args`) every 3 s until it has a name, and the poll
-  stops once every tab has one. The lookup resolves the tab's launch args to
-  a session id in the main process, since a tab knows only its agent id.
-  Which tabs are still unnamed is a `named` flag the rename sets, not a
-  check against the placeholder's wording — matching label text is how a
-  second, differently-worded placeholder once slipped through unrenamed.
+- A session tab is labelled with its session's title (see "Session list"),
+  which changes after the tab opens: a new session takes its first message
+  once that lands, and `/rename` renames any session at any time. Nothing
+  pushes either, since the CLI writes the file, so every session tab asks
+  every 3 s, all in one call (`sessions:titles-for-args`) that resolves each
+  tab's launch args to a session id against a single `claude agents --json`
+  listing, since a tab knows only its agent id. The label changes only when
+  the title has. Which tabs are sessions is structural (a terminal tab with
+  launch args), not a check against the placeholder's wording — matching
+  label text is how a second, differently-worded placeholder once slipped
+  through unrenamed.
 
 Tab keys live in the app menu's Window items (`appMenu.ts`) rather than in a
 renderer key listener: a menu accelerator is handled before the window sees

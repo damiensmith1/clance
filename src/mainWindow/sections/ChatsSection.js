@@ -275,15 +275,22 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
 
   const liveSessionIds = useMemo(() => new Set(agents.map((a) => a.sessionId)), [agents]);
 
-  // Every Clance-minted agent gets a generic mint-time name (the shared
-  // placeholder for the main window's, a timestamped one for the widget's)
-  // since there's no real conversation yet to title it from. Once one exists, prefer the same first-user-message title
-  // chatHistory.ts derives for closed sessions, so a live row reads the same
-  // way it will once it closes. Falls back to the mint-time name for a
-  // session too new to have a transcript title yet.
-  const sessionTitleById = useMemo(() => new Map(sessions.map((s) => [s.id, s.title])), [sessions]);
+  // A session that stops moves from the live rows to the closed ones, which
+  // were read when the page loaded — before any `/rename` since. Re-read them
+  // when one stops, so its row keeps the title it had while live.
+  const prevLiveIds = useRef(liveSessionIds);
+  useEffect(() => {
+    const stopped = [...prevLiveIds.current].some((id) => !liveSessionIds.has(id));
+    prevLiveIds.current = liveSessionIds;
+    if (stopped) window.clanceApp.listChatSessions().then(setSessions);
+  }, [liveSessionIds]);
+
+  // A live agent arrives titled by main (chatHistory.ts's sessionTitle): the
+  // name the user gave it, else its first message — the same rule a closed
+  // row and a tab use. Every Clance-minted agent also has a generic
+  // mint-time name, the fallback for a session with nothing in it yet.
   function displayNameFor(agent) {
-    return sessionTitleById.get(agent.sessionId) || agent.name || agent.sessionId;
+    return agent.title || agent.name || agent.sessionId;
   }
 
   // Every row the table can show, live sessions first. "Closed" is
@@ -317,7 +324,7 @@ export function ChatsListSection({ onOpenChat, onNewChat }) {
         updated: relativeTime(session.lastModified),
       }));
     return [...live, ...history];
-  }, [agents, sessions, liveSessionIds, sessionTitleById, pinnedIds]);
+  }, [agents, sessions, liveSessionIds, pinnedIds]);
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();

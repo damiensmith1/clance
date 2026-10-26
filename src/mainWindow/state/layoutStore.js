@@ -267,14 +267,11 @@ function reduce(state, action) {
 
     // Label only — a tab's id is what everything else keys off (dedup on
     // open, the pane tree, the persisted layout), so renaming never touches
-    // it, and the selection doesn't move. `named` records that the tab has
-    // taken its conversation's name, so it stops asking (Shell.js).
+    // it, and the selection doesn't move.
     case "RENAME_TAB": {
       const root = updateLeaf(state.root, action.paneId, (leaf) => ({
         ...leaf,
-        tabs: leaf.tabs.map((tab) =>
-          tab.id === action.tabId ? { ...tab, label: action.label, named: true } : tab
-        ),
+        tabs: leaf.tabs.map((tab) => (tab.id === action.tabId ? { ...tab, label: action.label } : tab)),
       }));
       return { ...state, root };
     }
