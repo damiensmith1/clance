@@ -37,7 +37,8 @@ const LEGACY_MINT_NAMES = ["New Chat", "New conversation", "Clance pool spare"];
  * A session's CLI name, if it is one the user gave it (`/rename`, or `-n`
  * from a terminal) rather than the placeholder Clance minted it under.
  * A fork keeps its source's name with " ⑂" appended, so a fork of an
- * unnamed session is still unnamed.
+ * unnamed session is still unnamed (its mark comes from its transcript
+ * instead; see isForkNotice).
  */
 export function userGivenName(name: string | undefined): string | null {
   if (!name) return null;
@@ -81,10 +82,31 @@ async function readSessionName(filePath: string): Promise<string | null> {
   }
 }
 
+// The CLI opens a fork's transcript with a notice telling the model it is one
+// (`<fork-source>`, in a queued task notification), ahead of the copied
+// conversation. A fork otherwise starts with its source's first message, so
+// without a mark the two read as the same session. The mark is the one the
+// CLI appends to a fork's name.
+const FORK_MARK = " ⑂";
+
+function isForkNotice(entry: Record<string, unknown>): boolean {
+  return (
+    entry.type === "queue-operation" && typeof entry.content === "string" && entry.content.includes("<fork-source>")
+  );
+}
+
+function markFork(title: string | null, fork: boolean): string | null {
+  return title && fork ? `${title}${FORK_MARK}` : title;
+}
+
 // What a session is called everywhere Clance shows it — the Sessions list,
-// tabs, the widget, a peek: the name the user gave it, else its first message.
+// tabs, the widget, a peek: the name the user gave it, else its first
+// message, marked when the session is a fork.
 async function sessionTitle(filePath: string): Promise<string | null> {
-  return (await readSessionName(filePath).catch(() => null)) ?? (await firstUserTitle(filePath));
+  const name = await readSessionName(filePath).catch(() => null);
+  if (name) return name;
+  const { title, fork } = await readSessionHead(filePath);
+  return markFork(title, fork);
 }
 
 export type SessionSummary = {
@@ -190,8 +212,11 @@ async function firstUserTitle(filePath: string): Promise<string | null> {
   return (await readSessionHead(filePath)).title;
 }
 
-async function readSessionHead(filePath: string): Promise<{ title: string | null; automated: boolean }> {
+async function readSessionHead(
+  filePath: string
+): Promise<{ title: string | null; automated: boolean; fork: boolean }> {
   let automated = false;
+  let fork = false;
   const rl = createInterface({
     input: createReadStream(filePath, "utf8"),
     crlfDelay: Infinity,
@@ -205,6 +230,7 @@ async function readSessionHead(filePath: string): Promise<{ title: string | null
       } catch {
         continue;
       }
+      fork ||= isForkNotice(entry);
       if (entry.type !== "user") continue;
       automated ||= isAutomatedEntrypoint(entry.entrypoint);
       const message = entry.message as Record<string, unknown> | undefined;
@@ -219,7 +245,7 @@ async function readSessionHead(filePath: string): Promise<{ title: string | null
       // with nothing added — fall back to the raw text rather than
       // treating a real, submitted turn as if it didn't happen.
       const stripped = stripClanceContextPrefix(stripLeadingImagePlaceholder(text)).trim();
-      return { title: truncate(stripped || text, TITLE_MAX_LENGTH), automated };
+      return { title: truncate(stripped || text, TITLE_MAX_LENGTH), automated, fork };
     }
   } finally {
     rl.close();
@@ -228,7 +254,7 @@ async function readSessionHead(filePath: string): Promise<{ title: string | null
   // callers below decide what to show, and "does this session have
   // anything in it" stays a question about the data rather than a string
   // comparison a first message could answer wrongly by quoting it.
-  return { title: null, automated };
+  return { title: null, automated, fork };
 }
 
 // Shared by titleForSessionId and cwdForSessionId below — a session can be
@@ -410,7 +436,7 @@ export async function listSessions(): Promise<SessionSummary[]> {
         const fileStat = await stat(filePath);
         if (!fileStat.isFile()) continue;
         const id = basename(entry, ".jsonl");
-        const { title, automated } = await readSessionHead(filePath);
+        const { title, automated, fork } = await readSessionHead(filePath);
         // Scoped to Clance's own default-directory bucket only — a real,
         // unrelated project's session with no messages yet is none of
         // Clance's business to hide, and there's no cheap directory-based
@@ -432,7 +458,7 @@ export async function listSessions(): Promise<SessionSummary[]> {
           id,
           filePath,
           projectLabel: projectLabelFor(dirName),
-          title: name ?? title ?? SESSION_PLACEHOLDER_TITLE,
+          title: name ?? markFork(title, fork) ?? SESSION_PLACEHOLDER_TITLE,
           lastModified: fileStat.mtime.toISOString(),
           archived: archivedIds.has(id),
           pinned: pinnedIds.has(id),
@@ -680,6 +706,7 @@ export async function peekSession(sessionId: string): Promise<SessionPeek | null
   let title: string | undefined;
   let aiTitle: string | undefined;
   let name: string | null = null;
+  let fork = false;
   let cwd: string | null = null;
   let gitBranch: string | null = null;
   let model: string | null = null;
@@ -702,9 +729,14 @@ export async function peekSession(sessionId: string): Promise<SessionPeek | null
 
       // The CLI's own one-line summary of the session, rewritten as the
       // conversation goes on — a better header than the first message's
-      // opening words, so the last one wins.
+      // opening words, so the last one wins. A fork's starts as its
+      // source's mint name ("Clance Chat ⑂"), which says nothing.
       if (entry.type === "ai-title" && typeof entry.aiTitle === "string") {
-        aiTitle = entry.aiTitle;
+        aiTitle = userGivenName(entry.aiTitle) ?? aiTitle;
+        continue;
+      }
+      if (isForkNotice(entry)) {
+        fork = true;
         continue;
       }
       // The user's own name for it (see readSessionName) beats both.
@@ -766,7 +798,7 @@ export async function peekSession(sessionId: string): Promise<SessionPeek | null
 
   return {
     id: sessionId,
-    title: name || aiTitle || title || SESSION_PLACEHOLDER_TITLE,
+    title: name || markFork(aiTitle || title || null, fork) || SESSION_PLACEHOLDER_TITLE,
     projectLabel: projectLabelFor(basename(dirname(filePath))),
     cwd,
     gitBranch,

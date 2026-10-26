@@ -219,6 +219,15 @@ user gave the session wins, else its first real user message:
   Clance used to type into the widget are skipped so they never become a
   title. Whether a session is empty is decided by this alone, never by a
   name.
+- **A fork** is a copy of another session's conversation, so it starts with
+  the same first message and would read as the same session. The CLI opens a
+  fork's transcript with a `<fork-source>` notice to the model, ahead of the
+  copied messages, so reading the head finds it at no extra cost
+  (`isForkNotice`). An unnamed fork's title gets the " ⑂" the CLI appends to
+  a fork's name. A named one already has it, unless it was renamed since. The
+  peek header does the same, and ignores the `ai-title` a fork starts with,
+  which is just its source's mint name ("Clance Chat ⑂"). A fork of a fork
+  has one mark, not two: the notice doesn't say how deep it is.
 
 Clance doesn't rename sessions itself. There's no CLI command to rename a
 session from outside, and a running session writes its own name back over
