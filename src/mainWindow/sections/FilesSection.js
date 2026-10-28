@@ -1,6 +1,6 @@
 import { html, useEffect, useLayoutEffect, useMemo, useRef, useState } from "../../shared/vendor/preact-htm-standalone.module.js";
 import { Icon } from "../../shared/icons.js";
-import { MenuItem } from "./ChatsSection.js";
+import { MenuItem } from "../components/MenuItem.js";
 import { fileIconUrl, folderIconUrl } from "../../shared/fileIcons.js";
 import { useTabId, useTabState, useTabScroll } from "../state/tabState.js";
 import { getState, findPane } from "../state/layoutStore.js";

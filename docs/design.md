@@ -52,7 +52,7 @@ anything open-ended is handed to a Claude Code session. See "Assistant".
 | Local tools transport | `@modelcontextprotocol/sdk`, Streamable HTTP | See "Local tools server" |
 | Speech-to-text | Homebrew `whisper.cpp` (`whisper-cli`), ggml models, Metal | Spawned per utterance |
 | Dictation history | `node:sqlite` + FTS5 | Built into Electron's Node — no second native addon to rebuild |
-| Git | The `git` binary, via `execFile` | See "Changes pane" |
+| Git | The `git` binary, via `execFile` | See "Work" |
 | Syntax highlighting | Hand-rolled (`src/shared/syntax.js`) | See "Syntax highlighting" |
 | Code graph (lode tabs) | lode (`lode-graph` on npm, pinned): its core in a utility process per project, its `<lode-flow>` canvas bundled once into `src/shared/vendor/lode-views.mjs` | See "lode tabs" |
 | Packaging | `electron-builder`, self-signed | See "Packaging and distribution" |
@@ -64,7 +64,7 @@ which is also the working directory for sessions that have no project:
 
 | Path | Contents | Owner |
 |---|---|---|
-| `config.json` | Shortcuts, default directory, recent directories, the Changes pane's last and recent repos, the Files folder and recent folders, enabled local tools, dictation settings, editor settings, writable roots | `config.ts` |
+| `config.json` | Shortcuts, default directory, recent directories, the repositories Work has been pointed at, the Files folder and recent folders, enabled local tools, dictation settings, editor settings, writable roots | `config.ts` |
 | `archived-sessions.json` | Archived session ids | `archivedSessions.ts` |
 | `window-layout.json` | Main window pane/tab tree; tabs for sections that no longer exist are dropped on restore | `windowLayout.ts` |
 | `pool.json` | The pre-warmed popup session | `agentPool.ts` |
@@ -92,7 +92,7 @@ Every session Clance opens is a `claude --bg` background agent — a real
 process supervised by the CLI's own daemon. A terminal tab or the popup is
 only a `claude attach <id>` client onto it. Closing a tab, switching away
 from it, or quitting Clance kills the attach client, never the conversation.
-Ending a session is explicit: the Sessions tab's Stop action runs
+Ending a session is explicit: Work's Stop action runs
 `claude stop <id>`, which leaves it resumable.
 
 `src/main/agentSessions.ts` is the single place `claude` processes are
@@ -146,7 +146,7 @@ Every `claude` process gets:
 ### Working directory
 
 - New sessions open in `getDefaultDirectory()` — the Settings value, or
-  `~/.clance` if unset. Both "New session" (Sessions tab) and the popup's
+  `~/.clance` if unset. Both "New session" (Work) and the popup's
   "Open in…" can instead mint in a picked directory; picks are remembered in
   `recentDirectories` (most recent first, max 8).
 - Reopening a session always uses the `cwd` recorded on its transcript's
@@ -155,7 +155,7 @@ Every `claude` process gets:
   been accepted there, and a background session can't show that prompt
   (`claude --bg` refuses: `UntrustedWorkspaceError`). So when the Files tab
   shows a folder that isn't trusted, a banner says so and offers a
-  terminal: `claude` there, which asks, the way the Sessions tab's new
+  terminal: `claude` there, which asks, the way Work's new
   session does in such a folder, and is an ordinary session once
   accepted. The banner goes once the folder shows as trusted (polled while
   that terminal is open). Clance never writes Claude Code's files and never
@@ -177,7 +177,7 @@ would otherwise be missing its tools). The pool refills after every claim,
 at startup, and when setup completes.
 
 Pool spares and popup sessions with no real user message yet are hidden from
-the Sessions tab (matched by the `Clance popup` name prefix, which can't be
+the Work tab (matched by the `Clance popup` name prefix, which can't be
 orphaned the way an in-memory id set could). Closing the popup on such a
 session stops and removes it, so empty conversations don't accumulate.
 
@@ -185,7 +185,7 @@ session stops and removes it, so empty conversations don't accumulate.
 
 A session with nothing in it yet is called `SESSION_PLACEHOLDER_TITLE`
 ("Clance Chat"), defined once in `chatHistory.ts` and used everywhere that
-state is shown: a Sessions row, a tab, a peek header, and the name a
+state is shown: a Work row, a tab, a peek header, and the name a
 main-window mint is given, so `claude agents --json` agrees too. The
 renderer never holds the string — `agents:spawn-new` names the agent and
 returns the name for the tab to wear. Emptiness itself is never that
@@ -199,8 +199,8 @@ empty.
 `chatHistory.ts` scans `~/.claude/projects/*/*.jsonl` directly — every Claude
 Code session on the machine, not just Clance's.
 
-**A session has one title, wherever Clance shows it:** the Sessions list,
-its tab, the widget's header, a peek. `sessionTitle` decides it. The name the
+**A session has one title, wherever Clance shows it:** the Work tab,
+its own tab, the widget's header, a peek. `sessionTitle` decides it. The name the
 user gave the session wins, else its first real user message:
 
 - **The name** is the CLI's own. `/rename` (or `-n` from a terminal) writes
@@ -234,66 +234,47 @@ session from outside, and a running session writes its own name back over
 anything else after every turn, so `/rename` in the session is the one way
 to do it.
 
-The Sessions tab (`ChatsSection.js`) is one table: session (title over its
-folder), project, state, updated. It has no header row, since each column is
-plain from its content; a line of keyboard hints sits above it instead. Live sessions come first, from
-`claude agents --json` polled every 5 s, each titled by main (`agents:list`
-adds `title` to running agents), so a `/rename` shows within a poll. Closed
-rows are read when the page loads and again whenever a live session stops,
-so a session renamed while it ran keeps that title when it moves down.
-Their project is the agent's `cwd` basename, and their state comes from the
-CLI's `state` field: `working` (signal dot), `blocked` shown as "needs you"
-(amber), `failed`, `done`, or the `busy`/`idle` status otherwise. Closed
-transcripts follow, newest first, minus whatever is live. A filter menu
-narrows to running, closed, archived (`archived-sessions.json`) or automated.
-Archiving is the only form of removal: deleting a transcript could destroy real
-work from an unrelated project.
+Past sessions are listed in the Work tab's session views (see "Work"); running
+ones are its items. A running session's state comes from the CLI's `state`
+field: `working`, `blocked` (shown as "needs you"), `failed`, `done`, or the
+`busy`/`idle` status otherwise. Pool spares, and widget sessions nobody has
+typed into yet, are processes rather than conversations and aren't shown
+(`isShownAgent` in `index.ts`, shared by `agents:list` and the Work model).
+Each summary carries the session's working folder, read from its first
+message, and its project is that folder's name. The transcript bucket's name
+is only the fallback, since it encodes "/" and "-" alike and decoding it split
+"my-app" into "app". Archiving (`archived-sessions.json`) is the only
+form of removal: deleting a transcript could destroy real work from an
+unrelated project.
 
 Automated sessions are ones a program started rather than a person, read from
 the `entrypoint` the CLI stamps on each transcript entry: `sdk-py`, `sdk-ts` or
 `sdk-cli` (`claude -p`), as opposed to `cli` for interactive sessions,
 Clance's `--bg` agents included. The security-guidance plugin, for one, runs
-two Agent SDK passes per commit. They only appear under the Automated filter,
-never in All sessions, Closed, search or the widget's resume list; an archived
-one shows under Archived.
+two Agent SDK passes per commit. They only appear under the Automated view
+filter, never among the rest or in the widget's resume list; an archived one
+shows under Archived.
 
-Pinned sessions sort above everything else, whatever their date or state —
-a closed session from last week sits above a running one from this morning.
+Pinned sessions sort above every other past session, whatever their date.
 `pinnedSessions.ts` keeps the ids in `pinned-sessions.json`, the same
-Clance-local shape archiving uses, and a slightly heavier rule closes the
-group. Pinning decides where a row sits, not whether it is exempt: the
-filter and the search still choose what's in the list at all, so a pinned
-closed session doesn't appear under Running. The renderer holds the pinned
-ids as one set rather than reading the flag off each row, since a live agent
-whose transcript hasn't been written yet has no summary to carry it.
+Clance-local shape archiving uses. Pinning decides where a row sits, not
+whether it is exempt: the filter and the search still choose what's listed.
 
-The pin shares the status dot's column rather than taking one of its own:
-two indicator columns left every ordinary row — closed and unpinned, which
-is most of them — with an empty gutter before its title. Exactly one of the
-pair shows at a time. The dot at rest, the pin when the row is hovered or
-pinned, so an unpinned, idle list carries no pin ink at all and the
-affordance appears where the hand already is. A pinned row that is also
-running would lose its dot that way, so the pin takes the dot's colour
-instead — amber on a session that needs you — and goes on doing its job:
-the shape says pinned, the colour says state.
-
-The page is keyboard-first. ⌘K anywhere in the main window, terminals
-included, switches to Sessions (opening it if needed) and focuses the search
-field. `Shell.js` catches it in the capture phase so a focused terminal never
-sees it, and `focusSessionSearch()` holds the request until the section has
-mounted. The search dropdown lists
-the top matches and then "start a new session in" the default folder (⌘↩),
-recent folders or a chosen one (⌘O). ⌘↩ and ⌘O work whenever the field has
-focus, before anything is typed. In the table ↑↓ select, ↩ opens in a tab,
-⌥↩ opens in the widget, ⌘⌫ archives (or stops a live session) and ⌘N starts a
-new session. Archiving shows a toast with Undo. Right-clicking a row adds Peek,
-Resume in Terminal, Copy folder path, Reveal in Finder and Pin/Unpin. Those go through
-`sessionActions.ts`, which re-validates the renderer's ids and paths. Resume
-in Terminal writes a `.command` file under `~/.clance/terminal` that runs
-`claude attach <agent>` or `claude --resume <session>` in the session's folder
-through the login shell, and opens it; scripting Terminal with AppleScript
-would need the Automation permission. Loading shows skeleton rows; an empty
-history shows a New session and Choose folder… prompt.
+⌘K anywhere in the main window, terminals included, switches to Work (opening
+it if needed) and focuses its search. `Shell.js` catches it in the capture
+phase so a focused terminal never sees it, and `focusWorkSearch()` holds the
+request until the section has mounted. Typing there filters the current
+view and opens a menu of matches, then "start a new session in" the default
+folder (⌘↩), recent folders or a chosen one (⌘O). In the table ↑↓ select (and
+show the row in the Changes pane), ↩ opens the row's session, ⌥↩ opens it in
+the widget, Space peeks, ⌘⌫ stops a running session or archives a past one,
+and ⌘N starts a new session. Right-clicking a row adds Show changes, Resume in
+Terminal, Terminal here and New session here, Copy branch name, Copy folder
+path, Reveal in Finder and Pin/Unpin. Those go through `sessionActions.ts`, which re-validates the renderer's ids and
+paths. Resume in Terminal writes a `.command` file under `~/.clance/terminal`
+that runs `claude attach <agent>` or `claude --resume <session>` in the
+session's folder through the login shell, and opens it; scripting Terminal
+with AppleScript would need the Automation permission.
 
 ### Peeking at a session
 
@@ -819,8 +800,8 @@ the component drawing it: `state/tabState.js`.
   carries the tab's id; outside a tab (the setup wizard reuses Settings'
   panels) it is plain `useState`.
 - **Live** values are kept in memory per tab while it's open and dropped when
-  it closes. A section's last data goes here (Sessions' lists, Dictation's
-  history, the Changes pane's per-repository memory, the Files tab's search
+  it closes. A section's last data goes here (Work's snapshot and history, Dictation's
+  history, the Files tab's search
   results, the Files tree's listings), so a remount draws at once and re-reads underneath.
   Mutable caches carry a bound (`boundCache`).
 - **Persisted** values are also written onto the tab in the layout store
@@ -832,7 +813,7 @@ the component drawing it: `state/tabState.js`.
 - `useTabScroll(ref, key)` keeps a scrolling element's offset as persisted
   tab state, reapplying it as content settles and ignoring the scroll events
   its own restore causes. A `version` names what's being scrolled (a peek's
-  session, the Changes pane's repository), so an offset never applies to the
+  session, a file tab's path), so an offset never applies to the
   wrong thing.
 - **Lifecycle.** Closing a tab flushes its pending persisted values onto the
   tab object ⇧⌘T keeps, then drops its live state. Writes for a tab that is
@@ -906,7 +887,7 @@ Right-clicking a tab opens a menu owned by its `PaneLeaf`. The bulk closes
 (Others, to the Left, to the Right, All) are one `CLOSE_TABS` store action
 rather than repeated `CLOSE_TAB`s: `CLOSE_TAB` refuses to empty the only
 pane, while Close All asked for exactly that, so `CLOSE_TABS` lets it and
-falls back to the Sessions tab. If the active tab closes, the tab the menu
+falls back to the Work tab. If the active tab closes, the tab the menu
 was opened on takes over. Terminals are destroyed first, as the ✕ does.
 
 Move to Pane lists every other pane by its active tab's name and appends the
@@ -914,8 +895,8 @@ tab there.
 
 - **Close and Stop Session** is one item because closing a session tab only
   detaches it — the background agent keeps running — so "done with this"
-  needs both. It stops by the agent id in the tab's `attach` args, as the
-  Sessions tab's Stop does.
+  needs both. It stops by the agent id in the tab's `attach` args, as
+  Work's Stop does.
 - **Copy Session ID** asks main (`sessions:id-for-args`, `resolveSessionId`)
   since a tab only knows its agent id.
 - A file tab's path is `repoRoot/path`; Copy Relative Path is `path` and is
@@ -992,19 +973,215 @@ and splits (`{ direction, sizes, children }`, always two children).
   400 ms, and restored on launch. Restored agent tabs re-attach with their
   saved args.
 
-### Changes pane
+### Work
 
-`sections/ChangesSection.js` over `src/main/git.ts`. A monitor, not a reader:
-it says what is moving in a repository right now, and hands the reading to a
-file tab. By default it opens in a small pane on the right (see "Where tabs
-open").
+`sections/WorkSection.js` (the Work tab), `sections/ChangesSection.js` (the
+Changes pane) and `sections/DiffSection.js` (diff tabs), over
+`src/main/work.ts` and `src/main/git.ts`. Together they answer "what are my
+agents doing to my code?" once several sessions run in parallel, on several
+branches, in worktrees and in more than one repository — which a session list
+beside a changes pane over one checkout of one repository couldn't. The unit
+isn't a branch or a folder but a piece of work.
 
-Because reading moved out, the pane fits a narrow column honestly: a bar with
-the repository, branch and a live dot when a session is working there; one
-mono line of counts; the file list; and a commit box that appears only when
-there is something to commit. An earlier version put a full-width diff and a
-permanent commit slab in the same surface, and the result was a file picker
-pretending to be a review tool.
+They are built from the app's existing surfaces rather than as a new kind of
+page. An earlier version was one tab with a list on the left and a dashboard
+on the right — cards, a grid of facts, three-line rows, diffs drawn inline —
+and it read as a different application. So the Work tab is the Sessions
+table, the Changes pane is the Changes pane, and a diff is a tab like a file.
+
+**The Work tab** is the home tab: the Sessions page's search row, view
+dropdown, keyboard hints and one-line table (session · where · state ·
+changes · updated, with hover actions), in the padded content column. Its
+views:
+
+- **In flight** (the default): work grouped by what the user has to do —
+  *needs you* (a session blocked on the user, or failed), *ready to review*
+  (uncommitted changes, unpushed commits, or commits not on the base),
+  *working*, *open, nothing changed*, *branches with no session*, and
+  *merged, ready to clean up* — each group a quiet mono label row in the
+  table. Anything with nothing to do is left to Repos, so it stays short.
+- **Repos**: every repository (a label row with its path and, on hover,
+  Fetch) and under it each checkout — its own folder and each linked
+  worktree — and each local branch, with where it's checked out, ahead and
+  behind the base, and its state.
+- **Past sessions**, **Archived**, **Automated**: the session history, as the
+  Sessions page had it — pinned first, archive with Undo, resume, the widget,
+  Resume in Terminal.
+
+A row is titled by its session when the session works only there (one
+editing two checkouts would otherwise be two rows with one name), else by its
+branch, or for a repository's own folder by the repository. Clicking a row
+shows it in the Changes pane, opening the pane on the right if it isn't open
+and keeping the Work tab the active pane so the arrows keep moving through
+the list; ↩ or a double-click opens its session. The selection only moves
+when the person moves it — a snapshot that regroups items never moves it —
+and the row the pane is showing reads as selected. ⌘K, Space (peek), ⌥↩ (the
+widget), ⌘⌫ (stop, or archive in the history) and ⌘N work as they did.
+
+**The Changes pane** is the old pane, pointed by Work. What it shows is a
+focus kept in `state/workStore.js` (and `localStorage`, so it survives a
+relaunch): a checkout, a branch checked out nowhere, or a past session. Its
+header keeps the repository button (now every repository Work knows) and
+turns the branch label into a switcher of every checkout and every branch of
+the repository — picking one shows it, and moves nothing on disk. Under the
+header, the sessions working there (Open, Reply), then a quiet line of what
+applies — *Open as worktree*, *Check out…*, *Merge…*, *Delete…* for a branch;
+*Clean up…* for a merged worktree; *Terminal*, *New session* — with the
+branch's standing against the base. A question before anything that removes
+or rewrites is asked in the pane, under that line, with what was checked
+(✓/!), and is refused when a check fails.
+
+Below that, the scope: *Uncommitted* (the old list: staging per file, "new
+since you looked", the commit box, discard from the row's menu) and, when the
+branch has commits of its own, *Whole branch* (or *Unpushed* on the base) —
+everything against the base, untracked files included. The commit strip under
+the files lists the commits the work is made of (not on the base, or not
+pushed), else the recent ones, and picking one narrows the files to it;
+picking it again goes back. The strip keeps room for about three commits, so a
+long file list scrolls instead of squeezing them out. A past session shows the
+files it edited, per checkout (open ones still uncommitted are marked), and
+the commits it made.
+
+**Diff tabs.** Clicking a file opens its diff in a tab in the main pane: the
+file across the scope's range, read-only, in the same CodeMirror merge view a
+file tab's Diff mode uses, with change jumps and Open file. A single click
+reuses one *preview* tab (its label in italics), so reading through a change
+doesn't leave a tab per file; a double-click, the tab's Keep open, or a
+double-click on the tab keeps it. A diff of the working tree re-reads when the
+repository changes, and keeps its scroll; a re-read that finds the same text
+changes nothing. The two sides come from `rangeFileVersions`, gated like
+every other read on the path being one the range reports.
+
+**The model.** `work.ts` builds a snapshot — repositories, running sessions,
+and the items joining them, each already in its group — so the renderer never
+asks git a question per row. An item is a checkout (`co:<path>`), a branch
+checked out nowhere (`br:<root>:<name>`), or a running session in no
+repository (`s:<id>`). Titles come from the item's sessions when they work
+only there; a session editing two checkouts is two items, each titled by its
+branch with the session named underneath, since two rows with one name read
+as a duplicate.
+
+There's no list of repositories to maintain. They are wherever the user
+works: the default session folder, the repositories pointed at before
+(`recentRepos`), recently used folders, wherever running sessions are and
+whatever files they have edited, and the folders of non-automated sessions
+from the last 7 days. A linked worktree resolves to its repository's own
+folder. Each repository's state — `worktree list --porcelain -z`, the base
+branch, branch states, each checkout's uncommitted totals, and each item's
+range and totals — is cached and rebuilt only when its watcher fires or after
+60 s; a change that lands during a rebuild marks it stale again. A branch last
+committed to more than 14 days ago is current for nothing: it stays out of
+Active and isn't diffed until it's looked at, or a repository with years of
+branches would cost seconds per refresh and bury what's happening now. A
+linked worktree is current however old, since it sits on disk until it's
+cleaned up.
+
+**The base** is the branch work is measured against: the one `origin/HEAD`
+names, else `main`, else `master`, else whatever the repository's folder has
+checked out. Each local branch carries its upstream track (`%(upstream:track)`,
+including `[gone]` for an upstream deleted after a merge) and its ahead/behind
+against the base (`rev-list --left-right --count base...branch`, capped at
+40 branches). Nothing ahead of the base is "merged"; nothing ahead *and*
+nothing behind is a branch with no commits of its own yet, and says so.
+
+**Ranges.** Every view is a directory and a range `{ from, to }` — `to` null
+meaning the files as they are now, untracked ones included — so the file list
+and diffs never care which kind of view they're showing. `rangeFiles` is
+`diff -M --name-status -z` and `--numstat -z` over the range plus, for the
+working tree, `ls-files --others --exclude-standard` (a path ending in `/` is
+a folder holding a repository of its own — a nested worktree — and isn't a
+change). For a branch, *All changes* is merge-base(base, tip) → tip, or →
+working tree when it's checked out; for the base with an upstream it's
+merge-base(upstream, HEAD) → working tree, i.e. unpushed plus uncommitted; a
+commit is its first parent → it, and a first commit is the empty tree (asked
+of `hash-object`, since it differs between sha-1 and sha-256) → it. With
+nothing committed on top of where it started, *All changes* would only repeat
+*Uncommitted* and isn't listed.
+
+Revisions come from the renderer, so each is verified as a commit —
+`rev-parse --verify --end-of-options <rev>^{commit}`, refused if it starts
+with `-` — and a file's diff is only read for a path the range's own listing
+reports, the same gate `getFileDiff` has.
+
+**Who changed what, without hooks.** Git is the record of what changed: it
+looks at the files on disk, so it's right however they were edited — an edit
+tool, `sed`, a script. Who is matched separately. A running session belongs to
+the checkout its working folder is in, and to every checkout holding a file
+its transcript says it edited (Edit, Write, MultiEdit, NotebookEdit). The
+transcript is the one the CLI already writes; Clance reads it from where it
+last stopped, so a running session costs only what it wrote since, and keeps
+the edited paths, its `git commit` calls, where it ran and its last message.
+An edit made through a shell command isn't in that list, which is why it's
+only ever a label on git's answer, never the answer. A past session's History
+detail reads its whole transcript once: edited files by checkout (a file in a
+worktree is a path in that worktree), and the commits it made — a
+`[branch sha] subject` line in a command's output names one exactly, and
+since an agent often commits quietly and prints something else, any commit
+the repository's log has from within 10 minutes of a `git commit` the session
+ran counts too.
+
+**Actions**, all in `git.ts`, re-derive everything they act on from git (the
+checkout from `findRepoRoot`, a branch from the repository's own list, a
+worktree from `worktree list`), and none forces anything, so the worst a
+click can do is be refused, with git's reason:
+
+- **Open as worktree** checks a branch out under the repository's
+  `.claude/worktrees/<branch>`, where Claude Code puts its own, and adds
+  `/.claude/worktrees/` to the repository's `info/exclude` (never a committed
+  `.gitignore`). Without that, every worktree there shows as an untracked
+  folder in the main checkout, and `git add -A` there commits it as an
+  embedded repository. Looking at a branch this way moves nothing.
+- **Check out in main folder** is `git switch`, refused while the checkout
+  has changes rather than carrying them across. Its confirmation names any
+  session working there, since the switch moves that session's files too.
+- **Merge into base** runs `merge --no-ff` in whichever checkout has the base
+  checked out, which must be clean; a merge that conflicts is aborted —
+  resolving it is a session's job, not a button's.
+- **Clean up** (a merged worktree, clean, nothing unpushed, no session) is
+  `worktree remove` without `--force` then `branch -d`. **Delete branch** is
+  `branch -d` alone, which refuses anything unmerged.
+- **Revert** a commit in a clean checkout; aborted if it conflicts.
+- **Commit** takes everything in the checkout: `add -A` with an
+  `:(exclude,literal)` pathspec for every worktree nested inside it, then
+  `commit -m`. There's no per-file staging: agent work is usually
+  committed whole, and a partial commit is a terminal's or a session's job.
+- **Push** sets an upstream for a branch without one; **Pull** is
+  `--ff-only`; **Fetch** prunes; **Discard** (per file, in the Uncommitted
+  view, confirmed on the row) restores a tracked file and deletes an untracked
+  one.
+
+"Clean" means no changes and nothing half-finished, with untracked files
+listed one by one (`-uall`) so a nested worktree, reported as `dir/`, can be
+told apart from new files — collapsed, both read as one untracked folder. In
+a linked worktree `.git` is a file naming its git directory, which is where
+its in-progress merge or rebase markers live (`gitDirOf`).
+
+**Reply** pastes the text into the session's prompt as a bracketed paste,
+then sends Return. A session open in a tab gets it there; otherwise it's
+opened in one first and the text waits for its prompt (`pasteWhenReady`).
+Opening a session already attached in a tab under another id — one New
+Session opened is keyed by its terminal — goes to that tab instead of opening
+a second.
+
+**Live, without waiting or blinking.** One store (`state/workStore.js`)
+holds the snapshot for the Work tab, the Changes pane and diff tabs alike, so
+the window asks once, not once per surface. While any of them is mounted it
+asks every 5 s (sessions change state without touching a file; skipped while
+the window is hidden) and again when the main process sends `work:changed`,
+which comes from `watchRepo` on every repository folder and each worktree
+outside one. A snapshot identical to the last changes nothing, so a quiet poll
+re-renders nothing; with nobody looking the watches stop and every cached
+repository is treated as stale.
+
+The main process answers from its last snapshot at once and builds a fresh one
+behind it, telling the windows when it differs (stale-while-revalidate), so
+the tab never waits on git. Only the very first build waits — about 3 s cold
+across a dozen repositories — and it runs 3 s after launch (`prewarmWork`),
+before anyone opens the tab. Lists in the Changes pane keep showing what they
+had while the next one is read, rather than going back to "Reading…".
+
+**Layouts saved before Work** hold a Sessions tab, which becomes the Work tab
+where it was.
 
 **Running git.** `git.ts` shells out to the `git` binary through `execFile`
 rather than linking a library — git is already on any machine with a repo to
@@ -1027,146 +1204,61 @@ a quote in it can't become an argument. Same posture as `sessionActions.ts`.
 
 **A leading dash still can, though**, which is why every path handed to git is
 preceded by a `--` separator — including in the blob-versus-worktree form a
-rename uses (`diff HEAD:<old> -- <new>`), which is the one place that lacked
-it. argv keeps a path whole, but git reads an element beginning with `-` as an
-option wherever one is allowed, and a file really can be named
-`--output=pwned.txt`: git reports that name in `status`, so being in the
-listing is no guarantee at all — the listing is where such a name comes from.
-Without the separator, opening that file's diff ran
-`git diff HEAD:<old> --output=pwned.txt` and git wrote the diff to that path.
-Branch names are safe by git's own rule (it refuses to create one starting
-with `-`) and a commit message is safe because `-m` consumes its operand
-whatever it looks like, but neither is a reason to drop a separator.
+rename uses (`diff HEAD:<old> -- <new>`). argv keeps a path whole, but git
+reads an element beginning with `-` as an option wherever one is allowed, and
+a file really can be named `--output=pwned.txt`: git reports that name in
+`status`, so being in the listing is no guarantee at all — the listing is
+where such a name comes from. Without the separator, opening that file's diff
+ran `git diff HEAD:<old> --output=pwned.txt` and git wrote the diff to that
+path. Branch names are safe by git's own rule (it refuses to create one
+starting with `-`), and revisions pass through `--end-of-options`, but
+neither is a reason to drop a separator.
 
 **Status.** `status --porcelain=v2 --branch -z`: the only format with both a
 stable machine-readable shape and the branch/ahead/behind header, and
 NUL-separated because a filename can contain anything, newlines included —
 the line-based format quotes those instead, and unquoting is a second parser
 to get wrong. A rename's source arrives as its own NUL field and is consumed
-there rather than found by splitting the record. Line counts come from
-`diff --numstat` for both the staged and unstaged halves, summed. An untracked
-file is in neither diff, so its lines are counted by reading it (with a size
-cap, and a NUL byte in the first 8 kB meaning binary, which is git's own
-guess).
+there rather than found by splitting the record. An untracked file is in no
+diff, so its lines are counted by reading it (with a size cap, and a NUL byte
+in the first 8 kB meaning binary, which is git's own guess).
 
-**Diffs** are always HEAD → working tree. An untracked file has nothing in
-HEAD to compare with, so it goes through `diff --no-index` against
-`/dev/null`. A renamed file is diffed as `HEAD:<old> <new>` — rename detection
-switches off once a pathspec limits the diff, so asking for both names gives a
-delete and an add instead of one moved file. The unified-diff parser tracks
-file headers rather than assuming they only appear at the top: a patch can
-cover more than one file, and a header read as content shows up as garbled
-context lines.
+**Diffs.** A diff tab is given both sides of the file — `git show <rev>:<path>`
+for a commit, the file itself for the working tree, "" where it didn't exist
+— and lays them out with CodeMirror's merge view, so a diff reads like the
+code it is, highlighted, rather than as patch text. A renamed file's "before"
+is read from its old name, so the tab shows what changed on the way rather
+than a delete and an add. Binary files and anything over 4 MB are described
+rather than drawn.
 
-**Surviving a remount.** Moving the pane, splitting it, or switching away
-from its tab and back unmounts `ChangesSection`. What it knew is the
-tab's live state (see "Tab state"), per repository — status, history,
-branches, remote, the open row and its diff (the last 40 kept), the draft
-message, the seen baseline for "new" marks — and the list's scroll is its
-persisted state, so a remount draws from it at once and the usual refresh
-runs behind it, without the "Reading…" state.
-
-**Watching.** `watchRepo` is what makes the pane live rather than something to
-refresh by hand. One recursive `fs.watch` per repo — on macOS that's FSEvents,
+**Watching.** One recursive `fs.watch` per folder — on macOS that's FSEvents,
 so a whole worktree costs one watcher — debounced 300 ms, because a commit or
 an `npm install` emits thousands of events. Everything under `.git` is ignored
 except the few paths that mean the repo actually moved (`HEAD`, `index`,
-`refs/`, the in-progress heads), as are `node_modules` and `.DS_Store`. If a
-watch can't be established (a network mount, the descriptor limit) it falls
-back to a 4 s poll rather than leaving the pane silently frozen on a stale
-listing. Watchers are shared per root and reference-counted; the main process
-keys subscriptions by the renderer's id and drops them when it goes, since a
-reload sends no unwatch.
+`packed-refs`, `refs/`, the in-progress heads, and a linked worktree's own
+`worktrees/<name>/HEAD` and `index`), as are `node_modules` and `.DS_Store`.
+If a watch can't be established (a network mount, the descriptor limit) it
+falls back to a 4 s poll rather than freezing on a stale listing. Watchers are
+shared per folder and reference-counted.
 
-**What the pane does.**
+**The remote.** "Open on <host> ↗" opens the repository's origin in a
+browser, and is absent when there's nothing to open. Deriving that URL is the
+one place here that turns repository content into something handed to
+another program: `.git/config` travels with a clone, so a remote URL is
+untrusted input. Only `https`, `http`, `ssh` and `git` remotes convert — a
+local path, or a helper scheme like `ext::sh -c '…'`, gets no button. The URL
+is rebuilt from the parsed host and path rather than mutated, which drops any
+embedded credentials: an https remote can carry a token, and opening that in
+a browser would write the token into history. scp-like syntax
+(`git@host:path`) has no scheme to check, so its host must look like a host —
+without that test the shape swallows any `scheme:rest` string, and
+`javascript:alert(1)` parsed as host "javascript". The renderer asks to open
+*this repo's* remote and never passes a URL; the main process re-derives it
+and opens it with `shell.openExternal`.
 
-- **New since you looked.** Each file carries a signature (its porcelain codes
-  and line counts). The first listing after opening a repo is the baseline, so
-  opening the pane never lights every row up; after that, a file whose
-  signature moved gets a signal-orange dot, and the header offers to clear
-  them all. Opening or peeking at a file clears its own — looking at it is
-  what "seen" means.
-- **Claude is working here.** The running agents are polled every 5 s and the
-  bar carries a live dot when one is working in this repo, because the listing
-  underneath is then a moving target.
-- **Staging is file-level**, and its checkbox is a hairline box that fills in
-  only when it's on. A column of solid ink for a side errand was the loudest
-  thing in the pane. A file that is staged *and* changed again since stages
-  the rest rather than unstaging what's there — the commit box's count would
-  otherwise be a quiet lie.
-- **The inline peek** draws at most 120 lines. A peek is a glance; a 900-line
-  diff in a narrow pane is neither, and the file tab is one click away.
-- **Discard** is the only destructive action and confirms on the row itself,
-  where the thing being destroyed stays on screen while it's asked about. An
-  untracked file is deleted outright, which git can't undo.
-- **Failures are reported in git's own words.** `commit` passes `-m` and
-  nothing else — no `-a`, so what's committed is exactly what the list showed
-  as staged, and no `--amend`. `pull` is `--ff-only`: a pull needing a merge
-  is a decision, not a button.
-
-**History.** Recent commits sit under the commit box and take whatever height
-the file list doesn't want, which is what stops the pane being mostly
-empty — a clean tree with nothing staged is its most common state, and until
-this it showed a bar and the words "Working tree clean." The strip is status,
-not a history browser: it answers "did that land" and "what just happened
-here", the pane's own question asked about commits instead of the working
-tree. It re-reads on the same watcher tick as the status, since a tick may
-have been a commit. A repo with no commits exits non-zero from `git log`,
-which is an empty history rather than a failure, and says so.
-
-How many it shows is measured, not fixed: `HISTORY_FETCH` (60) commits are
-read and the strip renders `floor(height / COMMIT_ROW_HEIGHT)` of them, so it
-fills the gap between the commit box and the remote button exactly and never
-scrolls. A `ResizeObserver` re-measures when the pane is resized. Both the
-strip and its list use `flex-basis: 0` rather than `auto`: with a
-content-sized basis the number of rows fed back into the layout that decides
-how many rows fit, which is a `ResizeObserver` loop. With no room for even one
-row the heading goes too — a "recent" label over nothing is worse than no
-label — but the list element stays mounted, since it is what gets measured and
-unmounting it would leave nothing to re-measure when the pane grows again.
-
-**The remote button** opens the repo's origin in a browser, and is absent when
-there's nothing to open. Deriving that URL is the one place here that turns
-repository content into something handed to another program: `.git/config`
-travels with a clone, so a remote URL is untrusted input. Only `https`, `http`,
-`ssh` and `git` remotes convert — a local path, or a helper scheme like
-`ext::sh -c '…'`, gets no button. The URL is rebuilt from the parsed host and
-path rather than mutated, which drops any embedded credentials: an https
-remote can carry a token, and opening that in a browser would write the token
-into history. scp-like syntax (`git@host:path`) has no scheme to check, so its
-host must look like a host — without that test the shape swallows any
-`scheme:rest` string, and `javascript:alert(1)` parsed as host "javascript".
-The renderer asks to open *this repo's* remote and never passes a URL; the
-main process re-derives it from the repo and opens it with `shell.openExternal`.
-
-**Branches** are shown, never changed. `listBranches` is one `for-each-ref`
-over `refs/heads`, sorted by commit date, carrying each branch's upstream,
-ahead/behind (parsed out of `%(upstream:track)`'s `[ahead 2, behind 1]`),
-tip subject and whether it's the checked-out one. Newline-separated records
-are safe here in a way they never are for paths: git's own ref-name rules
-forbid control characters, so a branch name can't contain one.
-
-The picker is read-only because a checkout with a dirty tree either refuses or
-carries the changes across, and that is a decision rather than a button. What
-a row can usefully do instead is hand over the name to paste into a checkout,
-so clicking one copies it. The header's branch and repo are two controls over
-one menu slot (`menu` is `"repo"`, `"branch"` or null), so opening one closes
-the other without a second piece of state to keep in step.
-
-A **detached HEAD** is labelled `detached <sha>` in the warning colour rather
-than rendered as a bare short sha, which read exactly like a branch named that
-and quietly hid the fact that a commit there would be on no branch. Nothing is
-marked current in the picker while detached, which is the truth.
-
-**The repo switcher** offers the default session directory, the recent ones
-and wherever the running agents are working, deduped through `findRepoRoot` —
-no configuration of its own, because Clance already knows where the user
-works — plus a folder picker. The chosen repo is remembered in
-`config.json`'s `lastGitRepo`. Its menu is pinned to both edges of the repo
-button rather than sized by its contents — `.menu`'s own `min-width` plus the
-full paths inside pushed it past the pane's right edge, where it was clipped —
-and it closes on a click outside or Escape, since a menu that only closes by
-pressing the thing that opened it is a trap.
+A **detached HEAD** is labelled "detached" rather than shown as a bare short
+sha, which reads exactly like a branch named that and hides the fact that a
+commit there would be on no branch.
 
 ### Files explorer
 
@@ -1176,13 +1268,10 @@ right by default, but it's pointed at a *folder* rather than a repository:
 ⌘P is a recall tool that needs a filename already, and looking around a
 project is a different act from remembering a file in it.
 
-**Why it isn't part of the Changes pane.** It was going to be, swapped with
-the recent-commits strip. That strip is sized to whatever height the file
-list doesn't want and never scrolls, which works because commits there are
-status rather than content — showing three instead of eight loses nothing. A
-tree has real content height and must scroll, and at "whatever's left over"
-it gets two rows on a dirty repo. A pane of its own costs a launcher entry
-and gains a layout that doesn't fight itself.
+**Why it isn't part of the Changes pane.** That pane is about what changed
+and who changed it; looking around a folder is a different act, with real content height of
+its own that has to scroll. A pane of its own costs a launcher entry and
+gains a layout that doesn't fight itself.
 
 **Where tabs open.** A default, decided from the layout's shape alone —
 panes' sizes and positions, never what's in them — so dragging tabs around
@@ -1896,7 +1985,7 @@ built on lode's API, which is how lode is meant to be hosted.
   folder stops it and warms one in the new folder. Ask Claude claims it
   (`lode:claim-session`) and the next warms behind it; the folder's last
   lode tab closing, or quitting, stops it. A spare whose mint args changed
-  is replaced. The spare is hidden from the Sessions list; its id is kept
+  is replaced. The spare is hidden from the Work tab; its id is kept
   in `~/.clance/lode-pool.json` so one a crash left running is stopped on
   the next launch. In a folder Claude Code hasn't been trusted in, Ask
   Claude opens a plain `claude` there instead, which asks; the cards wait
@@ -2010,7 +2099,8 @@ built on lode's API, which is how lode is meant to be hosted.
   Copy context and Save as icons (Save red while unsaved), Open ▾, Export
   (an icon, by ?); Undo and Fit are left to their keys. Disabled toolbar
   buttons fade rather than showing a box, and lode tabs show no focus ring.
-- **Changes in lode.** The Changes panel's Open in lode opens a new lode
+- **Changes in lode.** The Changes pane's Open in lode (on a checkout's
+  uncommitted changes) opens a new lode
   tab of every changed function in the repository (lode's `changes`
   against HEAD: each changed symbol, or the file for top-level changes, at
   most 40) with the changes view on. This is the git view; following a
@@ -2371,9 +2461,9 @@ for anything no resolver claimed, so the assistant never dead-ends.
 - A session already working where the user is: write the prompt into its
   PTY, which Clance already owns.
 
-Matching a running session to the work in front of the user is the same
-unsolved problem the Changes pane has (see Open questions); until it is
-solved, escalation always mints.
+Matching a running session to the work in front of the user is unsolved
+for the assistant: Work matches sessions to checkouts, but not to what's on
+screen. Until it is, escalation always mints.
 
 ### What leaves the Mac
 
@@ -2674,19 +2764,17 @@ on errors.
 - **Large directories aren't costed.** A folder with ten thousand entries in
   one level renders ten thousand rows; the tree doesn't virtualise. Changes
   has the same shape and hasn't needed it.
-- **Sending a diff back into a session.** The Changes pane knows the repo and
-  the file; the pane next to it may hold a session working in that same
-  directory. Handing a selected file or hunk to that session as context is
-  the obvious next step, and the one interaction no other git UI can have,
-  but it needs a reliable way to match a terminal tab to the agent whose cwd
-  it is — a tab knows only its launch args. Not built.
-- **Attributing a change to the session that made it.** Transcripts record
-  every `Edit`/`Write` with a path and a timestamp, so the file list could
-  group by which session touched what. Cost on a large transcript is
-  unmeasured.
-- **A dirty-file count on a Sessions row.** `chatHistory.ts` already reads
-  each session's `gitBranch`; a count of uncommitted files per project would
-  be the same data the Changes pane reads, but polling it for every row in
-  the list has not been costed.
+- **Sending a diff back into a session.** The Changes pane's Reply sends text into a
+  session; handing it a selected file or hunk as context, from the diff
+  itself, isn't built.
+- **One session, one repository, two folders.** A session is matched to the
+  checkouts its folder and its edits are in. Edits made by a shell command
+  aren't in the transcript's edit list, so a session that only uses `sed` or
+  a script shows its changes under the checkout without being named on them.
+- **Repositories Work doesn't know.** Work finds repositories from where
+  sessions ran in the last week and the folders Clance has been pointed at; a
+  repository nobody has touched since needs "Add a repository…". Scanning a
+  projects folder would find them all, and fill Repos with ones that don't
+  matter.
 - **Dead code.** The `chatHistory:get-session` handler is left over from the
   old chat UI and has no callers.

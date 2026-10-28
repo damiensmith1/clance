@@ -124,6 +124,8 @@ export type SessionSummary = {
   // a person — e.g. the security-guidance plugin reviews every commit this
   // way. Hidden from the Sessions list unless its Automated filter is on.
   automated: boolean;
+  /** Where it ran, from its first message; null for an empty transcript. */
+  cwd: string | null;
 };
 
 function projectLabelFor(dirName: string): string {
@@ -214,9 +216,10 @@ async function firstUserTitle(filePath: string): Promise<string | null> {
 
 async function readSessionHead(
   filePath: string
-): Promise<{ title: string | null; automated: boolean; fork: boolean }> {
+): Promise<{ title: string | null; automated: boolean; fork: boolean; cwd: string | null }> {
   let automated = false;
   let fork = false;
+  let cwd: string | null = null;
   const rl = createInterface({
     input: createReadStream(filePath, "utf8"),
     crlfDelay: Infinity,
@@ -233,6 +236,7 @@ async function readSessionHead(
       fork ||= isForkNotice(entry);
       if (entry.type !== "user") continue;
       automated ||= isAutomatedEntrypoint(entry.entrypoint);
+      if (!cwd && typeof entry.cwd === "string" && entry.cwd) cwd = entry.cwd;
       const message = entry.message as Record<string, unknown> | undefined;
       const text = extractText(message?.content);
       if (!text || !text.trim() || isSyntheticLocalCommandText(text)) continue;
@@ -245,7 +249,7 @@ async function readSessionHead(
       // with nothing added — fall back to the raw text rather than
       // treating a real, submitted turn as if it didn't happen.
       const stripped = stripClanceContextPrefix(stripLeadingImagePlaceholder(text)).trim();
-      return { title: truncate(stripped || text, TITLE_MAX_LENGTH), automated, fork };
+      return { title: truncate(stripped || text, TITLE_MAX_LENGTH), automated, fork, cwd };
     }
   } finally {
     rl.close();
@@ -254,7 +258,7 @@ async function readSessionHead(
   // callers below decide what to show, and "does this session have
   // anything in it" stays a question about the data rather than a string
   // comparison a first message could answer wrongly by quoting it.
-  return { title: null, automated, fork };
+  return { title: null, automated, fork, cwd };
 }
 
 // Shared by titleForSessionId and cwdForSessionId below — a session can be
@@ -263,7 +267,7 @@ async function readSessionHead(
 // *original* conversation's project directory was), so both need to check
 // every project bucket for the id, the same way listSessions() does, just
 // stopping at the first match instead of reading every session's title.
-async function findSessionFilePath(sessionId: string): Promise<string | null> {
+export async function findSessionFilePath(sessionId: string): Promise<string | null> {
   let projectDirs: string[];
   try {
     projectDirs = await readdir(CLAUDE_PROJECTS_DIR);
@@ -436,7 +440,7 @@ export async function listSessions(): Promise<SessionSummary[]> {
         const fileStat = await stat(filePath);
         if (!fileStat.isFile()) continue;
         const id = basename(entry, ".jsonl");
-        const { title, automated, fork } = await readSessionHead(filePath);
+        const { title, automated, fork, cwd } = await readSessionHead(filePath);
         // Scoped to Clance's own default-directory bucket only — a real,
         // unrelated project's session with no messages yet is none of
         // Clance's business to hide, and there's no cheap directory-based
@@ -457,8 +461,11 @@ export async function listSessions(): Promise<SessionSummary[]> {
         summaries.push({
           id,
           filePath,
-          projectLabel: projectLabelFor(dirName),
+          // The folder's own name when it's known: the bucket name encodes
+          // "/" and "-" alike, so decoding it splits "my-app" into "app".
+          projectLabel: cwd && dirName !== CLANCE_PROJECT_DIR ? basename(cwd) : projectLabelFor(dirName),
           title: name ?? markFork(title, fork) ?? SESSION_PLACEHOLDER_TITLE,
+          cwd,
           lastModified: fileStat.mtime.toISOString(),
           archived: archivedIds.has(id),
           pinned: pinnedIds.has(id),

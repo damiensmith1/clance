@@ -48,12 +48,22 @@ tool open: sessions, terminals and the code they write, in one window.
   code, the work left for the person is reading it — and reading a change
   means reading the code around it, not just the diff. Clance already has the
   terminal the code is run from and the sessions that wrote it, so the next
-  reason to leave the window was to go and look at the files: hence a
-  Changes pane that says what is moving, and file tabs that show the whole
-  file with its changes marked in place. Committing and pushing are the exits
-  from the reading loop rather than the point of it, and branching, rebasing
-  and history surgery stay where they already work, in a terminal or in the
-  session next door.
+  reason to leave the window was to go and look at the files: hence a view
+  of what is moving, and file tabs that show the whole file with its changes
+  marked in place. Committing and pushing are the exits from the reading loop
+  rather than the point of it, and rebasing and history surgery stay where
+  they already work, in a terminal or in the session next door.
+- **Agents work in parallel, so the work is spread out.** With several
+  sessions running at once — on different branches, in worktrees, in more
+  than one repository — a changes pane over one checkout of one repository
+  stops answering "what are my agents doing to my code?", and switching its
+  branch moves files out from under whichever session is working there. So
+  Clance shows the work itself, wherever it is: every checkout and branch,
+  with the sessions working in each and what they changed, found from git
+  and from the transcripts the CLI already writes rather than from anything
+  listening inside a session. Branches become something to look at (as
+  worktrees, which move nothing) and clean up, not just something to copy the
+  name of.
 - **…and so is touching it up.** Clance was first a *read-only* IDE, on the
   grounds that the session writes the code. In use, the one reason left to
   open another editor was the small edits that aren't worth a prompt: an

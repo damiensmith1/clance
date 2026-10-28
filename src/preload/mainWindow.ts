@@ -117,9 +117,34 @@ contextBridge.exposeInMainWorld("clanceApp", {
   checkLocalToolsServerHealth: () =>
     ipcRenderer.invoke("extensibility:check-local-tools-server-health"),
 
+  // ---- the Work tab (see docs/design.md's "Work") ----
+  workSnapshot: () => ipcRenderer.invoke("work:snapshot"),
+  workSubscribe: () => ipcRenderer.invoke("work:subscribe"),
+  workUnsubscribe: () => ipcRenderer.invoke("work:unsubscribe"),
+  onWorkChanged: (callback: (root: string) => void) => {
+    const listener = (_event: unknown, root: string) => callback(root);
+    ipcRenderer.on("work:changed", listener);
+    return () => ipcRenderer.removeListener("work:changed", listener);
+  },
+  workFiles: (dir: string, range: unknown) => ipcRenderer.invoke("work:files", dir, range),
+  workCommits: (dir: string, from: string | null, to: string, limit?: number) =>
+    ipcRenderer.invoke("work:commits", dir, from, to, limit),
+  workSession: (sessionId: string) => ipcRenderer.invoke("work:session", sessionId),
+  workFileVersions: (dir: string, range: unknown, path: string) => ipcRenderer.invoke("work:file-versions", dir, range, path),
+  workAddWorktree: (dir: string, branch: string) => ipcRenderer.invoke("work:add-worktree", dir, branch),
+  workRemoveWorktree: (dir: string, path: string) => ipcRenderer.invoke("work:remove-worktree", dir, path),
+  workSwitch: (dir: string, branch: string) => ipcRenderer.invoke("work:switch", dir, branch),
+  workDeleteBranch: (dir: string, branch: string) => ipcRenderer.invoke("work:delete-branch", dir, branch),
+  workMerge: (dir: string, branch: string) => ipcRenderer.invoke("work:merge", dir, branch),
+  workRevert: (dir: string, sha: string) => ipcRenderer.invoke("work:revert", dir, sha),
+  workCommitAll: (dir: string, message: string) => ipcRenderer.invoke("work:commit-all", dir, message),
+  workPush: (dir: string) => ipcRenderer.invoke("work:push", dir),
+  workPull: (dir: string) => ipcRenderer.invoke("work:pull", dir),
+  workFetch: (dir: string) => ipcRenderer.invoke("work:fetch", dir),
+  workDiscard: (dir: string, paths: string[]) => ipcRenderer.invoke("work:discard", dir, paths),
+
   // ---- git (see docs/design.md's "Changes pane") ----
   gitStatus: (dir: string) => ipcRenderer.invoke("git:status", dir),
-  gitFileDiff: (dir: string, path: string) => ipcRenderer.invoke("git:file-diff", dir, path),
   revealFile: (path: string) => ipcRenderer.invoke("file:reveal", path),
 
   // ---- editor (see docs/design.md's "Editor") ----

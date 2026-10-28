@@ -322,11 +322,10 @@ export async function sessionMcpArgs(): Promise<{ args: string[]; localToolsAvai
 }
 
 // Every popup conversation used to be minted with the exact same literal
-// name ("Clance popup") — harmless for the CLI itself, but the Chats tab's
-// Active list falls back to this name (ChatsSection.js) whenever a
-// session's real transcript-derived title hasn't loaded yet, so two
-// recently-opened widget conversations were indistinguishable in that
-// window. A cheap time-qualified name fixes that without needing to wait
+// name ("Clance popup") — harmless for the CLI itself, but the main window
+// falls back to this name whenever a session's real transcript-derived
+// title hasn't loaded yet, so two recently-opened widget conversations were
+// indistinguishable there. A cheap time-qualified name fixes that without needing to wait
 // on the real title.
 export function popupSessionName(): string {
   return `${POPUP_SESSION_NAME_PREFIX} ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;

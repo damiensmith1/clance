@@ -139,7 +139,7 @@ export async function sendToMainWindow(channel: string, payload?: unknown): Prom
 
 // Brings the main window forward on one of its sections (e.g. Settings, from
 // the dictation HUD's "not set up" action).
-export async function openMainWindowSection(section: "chats" | "dictation" | "settings"): Promise<void> {
+export async function openMainWindowSection(section: "work" | "dictation" | "settings"): Promise<void> {
   openMainWindow();
   await mainWindowReady;
   mainWindow!.webContents.send("open-section", section);

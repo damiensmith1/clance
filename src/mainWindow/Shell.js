@@ -1,7 +1,9 @@
 import { html, useEffect, useMemo, useRef, useState } from "../shared/vendor/preact-htm-standalone.module.js";
 import { Icon } from "../shared/icons.js";
-import { ChatsListSection, MenuItem, focusSessionSearch } from "./sections/ChatsSection.js";
+import { WorkSection, focusWorkSearch } from "./sections/WorkSection.js";
 import { ChangesSection } from "./sections/ChangesSection.js";
+import { DiffSection } from "./sections/DiffSection.js";
+import { MenuItem } from "./components/MenuItem.js";
 import { FilesSection, openFolderSearch } from "./sections/FilesSection.js";
 import {
   TabContext,
@@ -40,6 +42,7 @@ import {
   openTab,
   activateTab,
   activatePane,
+  replaceTab,
   closeTab,
   closeTabs,
   renameTab,
@@ -57,7 +60,7 @@ import {
 } from "./state/layoutStore.js";
 
 const LAUNCHER_ITEMS = [
-  { id: "chats", label: "Sessions", icon: "chat" },
+  { id: "work", label: "Work", icon: "chat" },
   { id: "changes", label: "Changes", icon: "gitBranch" },
   { id: "files", label: "Files", icon: "folder" },
   { id: "dictation", label: "Dictation", icon: "mic" },
@@ -94,9 +97,9 @@ function findSplitContainingTab(node, tabId) {
 }
 
 // Tab types that fill their pane themselves rather than sitting in the
-// padded, 880px-wide content column — a terminal, a file and the Changes
-// Files and Changes panes all want every pixel.
-const FLUSH_TAB_TYPES = new Set(["terminal", "file", "changes", "files", "flow"]);
+// padded, 880px-wide content column — a terminal, a file or a diff, the
+// Changes and Files panes and a lode canvas all want every pixel.
+const FLUSH_TAB_TYPES = new Set(["terminal", "file", "diff", "changes", "files", "flow"]);
 
 // Below this much room per tab, a label can only be shown as a few clipped
 // letters, which says less than the icon does on its own. Measured against
@@ -327,6 +330,7 @@ function tabLabel(tab) {
 // otherwise indistinguishable.
 function tabTitle(tab) {
   if (tab.type === "flow") return `${tab.label} · lode in ${tab.root.replace(/^\/Users\/[^/]+/, "~")}`;
+  if (tab.type === "diff") return `${tab.path} · ${tab.rangeLabel}`;
   if (tab.type === "file") {
     const full = tab.repoRoot ? `${tab.repoRoot}/${tab.path}` : tab.path;
     return full.replace(/^\/Users\/[^/]+/, "~");
@@ -456,10 +460,26 @@ function FilePalette({ onPick, onClose }) {
 
 function renderTabContent(tab, openChatTab, openNewChatTab, onPopOut, openSection, openFileTab, launcher) {
   switch (tab.type) {
-    case "chats":
-      return html`<${ChatsListSection} onOpenChat=${openChatTab} onNewChat=${openNewChatTab} />`;
+    case "work":
+      return html`<${WorkSection}
+        onOpenSession=${openChatTab}
+        onNewSession=${openNewChatTab}
+        onShowChanges=${launcher.showChanges}
+        onOpenTerminal=${launcher.openShellTab}
+      />`;
     case "changes":
-      return html`<${ChangesSection} onOpenFile=${openFileTab} onOpenInLode=${launcher.openChangesInLode} />`;
+      return html`<${ChangesSection}
+        onOpenDiff=${launcher.openDiffTab}
+        onOpenFile=${openFileTab}
+        onOpenInLode=${launcher.openChangesInLode}
+        onOpenSession=${openChatTab}
+        onNewSession=${openNewChatTab}
+        onOpenTerminal=${launcher.openShellTab}
+        onReply=${launcher.replyToSession}
+      />`;
+    case "diff":
+      // Keyed by tab, like a file tab: each diff tab has its own editor.
+      return html`<${DiffSection} key=${tab.id} tab=${tab} onOpenFile=${openFileTab} onKeep=${() => launcher.keepDiffTab(tab.id)} />`;
     case "files":
       return html`<${FilesSection}
         onOpenFile=${openFileTab}
@@ -766,7 +786,7 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
         <${MenuItem} title="Close Other Tabs" disabled=${others.length === 0} onSelect=${act(() => closeMany(others, tab))} />
         <${MenuItem} title="Close Tabs to the Left" disabled=${left.length === 0} onSelect=${act(() => closeMany(left, tab))} />
         <${MenuItem} title="Close Tabs to the Right" disabled=${right.length === 0} onSelect=${act(() => closeMany(right, tab))} />
-        <${MenuItem} title="Close All" disabled=${onlyTabOfOnlyPane && tab.type === "chats"} onSelect=${act(() => closeMany(node.tabs))} />
+        <${MenuItem} title="Close All" disabled=${onlyTabOfOnlyPane && tab.type === "work"} onSelect=${act(() => closeMany(node.tabs))} />
         ${isAgent &&
         html`<${MenuItem} title="Close and Stop Session" onSelect=${act(() => closeAndStop(tab))} />`}
         ${isSession &&
@@ -808,8 +828,9 @@ function PaneLeaf({ node, openChatTab, openNewChatTab, dragTab, startDrag, root,
                 key=${tab.id}
                 class="tab ${tab.id === node.activeTabId ? "tab-active" : ""} ${compact ? "tab-compact" : ""} ${
                   (tab.type === "file" && isDirty(tab.repoRoot, tab.path)) || isCanvasDirty(tab) ? "tab-dirty" : ""
-                } ${tab.type === "flow" ? "tab-canvas" : ""
+                } ${tab.type === "flow" ? "tab-canvas" : ""} ${tab.preview ? "tab-preview" : ""
                 }"
+                onDblClick=${() => tab.preview && launcher.keepDiffTab(tab.id)}
                 onPointerDown=${(e) => {
                   hideTip();
                   startDrag(e, tab, node.id);
@@ -1122,7 +1143,9 @@ export function Shell() {
   // is opened to receive its output.
   useEffect(() => {
     return window.clanceApp.onOpenSection((section) => {
-      if (LAUNCHER_ITEMS.some((item) => item.id === section)) openSection(section);
+      // Sessions and Changes became Work; an older caller may still ask for either.
+      const id = section === "chats" || section === "changes" ? "work" : section;
+      if (LAUNCHER_ITEMS.some((item) => item.id === id)) openSection(id);
     });
   }, [state.activePaneId]);
 
@@ -1201,8 +1224,8 @@ export function Shell() {
       if (key === "k") {
         e.preventDefault();
         e.stopPropagation();
-        openSection("chats");
-        focusSessionSearch();
+        openSection("work");
+        focusWorkSearch();
       } else if (key === "p") {
         e.preventDefault();
         e.stopPropagation();
@@ -1461,9 +1484,16 @@ export function Shell() {
     window.clanceApp.writeTerminal(terminalId, `\x1b[200~${text}\x1b[201~`);
   }
 
+  // A paste, then Return: the text is sent, as if typed and entered. The
+  // short wait lets the CLI finish taking the paste before the key arrives.
+  function pasteAndSend(terminalId, text) {
+    bracketedPaste(terminalId, text);
+    setTimeout(() => window.clanceApp.writeTerminal(terminalId, "\r"), 120);
+  }
+
   // A new session's CLI takes a moment to draw its prompt, and text written
   // before then is lost — so the paste waits for its output to go quiet.
-  function pasteWhenReady(terminalId, text) {
+  function pasteWhenReady(terminalId, text, { send = false } = {}) {
     let done = false;
     let quiet = null;
     const finish = () => {
@@ -1472,7 +1502,8 @@ export function Shell() {
       stop();
       clearTimeout(quiet);
       clearTimeout(giveUp);
-      bracketedPaste(terminalId, text);
+      if (send) pasteAndSend(terminalId, text);
+      else bracketedPaste(terminalId, text);
     };
     const stop = window.clanceApp.onTerminalData(({ terminalId: id }) => {
       if (id !== terminalId) return;
@@ -1480,6 +1511,24 @@ export function Shell() {
       quiet = setTimeout(finish, 1200);
     });
     const giveUp = setTimeout(finish, 10000);
+  }
+
+  // Work's Reply: the text goes into the session's prompt and is sent. A
+  // session already open in a tab gets it there; otherwise it's opened in
+  // one first, and the text waits for its prompt.
+  async function replyToSession(session, text) {
+    const open = listTabs(getState().root).find(
+      ({ tab }) =>
+        tab.id === `chat:${session.id}` ||
+        (session.agentId && tab.type === "terminal" && tab.args?.[0] === "attach" && tab.args[1] === session.agentId)
+    );
+    if (open) {
+      activateTab(open.paneId, open.tab.id);
+      pasteAndSend(open.tab.terminalId, text);
+      return;
+    }
+    const terminalId = await openChatTab(session);
+    if (terminalId) pasteWhenReady(terminalId, text, { send: true });
   }
 
   async function askClaude(text, dir) {
@@ -1801,6 +1850,56 @@ export function Shell() {
     await openFlowTab(real, { id: symbol?.id ?? path });
   }
 
+  // ---- the Changes pane and diff tabs (see docs/design.md's "Work") ----
+
+  // Work shows what's selected in the Changes pane: opened on the right if it
+  // isn't anywhere, brought to the front of its pane if it's behind another
+  // tab — without taking the active pane away from Work, so the arrow keys
+  // keep moving through the list.
+  function showChanges() {
+    const entry = listTabs(getState().root).find(({ tab }) => tab.id === "changes");
+    if (!entry) {
+      const from = getState().activePaneId;
+      openSection("changes");
+      activatePane(from);
+      return;
+    }
+    const pane = findPane(getState().root, entry.paneId);
+    if (pane?.activeTabId === "changes") return;
+    const from = getState().activePaneId;
+    activateTab(entry.paneId, "changes");
+    activatePane(from);
+  }
+
+  // A file's diff across a range, in the main pane. One preview tab is reused
+  // for each next file, so reading through a change doesn't leave a tab per
+  // file; `keep` (a double-click, or the tab's Keep open) gives the file a
+  // tab of its own.
+  function openDiffTab({ root, path, from, to, rangeLabel }, { keep = false } = {}) {
+    const key = `diff:${root}:${from ?? ""}:${to ?? "worktree"}:${path}`;
+    const tab = { id: keep ? key : "diff:preview", type: "diff", label: path.split("/").pop(), icon: "diff", root, path, from, to, rangeLabel, preview: !keep, key };
+    const tabs = listTabs(getState().root);
+    const kept = tabs.find((entry) => entry.tab.id === key);
+    if (kept) return activateTab(kept.paneId, key);
+    const preview = tabs.find((entry) => entry.tab.id === "diff:preview");
+    // A double-click's first click already put this file in the preview:
+    // keeping it keeps that tab rather than opening a second.
+    if (keep && preview?.tab.key === key) return replaceTab("diff:preview", tab);
+    if (!keep && preview) return replaceTab("diff:preview", tab);
+    openTab(tab, { paneId: mainPaneId() });
+  }
+
+  function keepDiffTab(tabId) {
+    const entry = listTabs(getState().root).find((candidate) => candidate.tab.id === tabId);
+    if (!entry || !entry.tab.preview) return;
+    const kept = listTabs(getState().root).find((candidate) => candidate.tab.id === entry.tab.key);
+    if (kept) {
+      closeTab(entry.paneId, tabId);
+      return activateTab(kept.paneId, kept.tab.id);
+    }
+    replaceTab(tabId, { ...entry.tab, id: entry.tab.key, preview: false });
+  }
+
   function renameTabById(tabId, label) {
     const entry = listTabs(getState().root).find((candidate) => candidate.tab.id === tabId);
     if (entry) renameTab(entry.paneId, tabId, label);
@@ -1828,18 +1927,21 @@ export function Shell() {
       // `claude agents --json` since that's the source of truth for what's
       // running.
       const args = await window.clanceApp.resolveOpenArgs(session.id, session.title);
-      // Keyed by session.id, not session.filePath: an Active row
-      // (ChatsSection.js's handleOpenAgent) only has the bare session id to
-      // pass as filePath (there's no transcript file path in a live
-      // `claude agents --json` entry), while a Closed row passes the real
-      // one — same underlying session, two different id shapes, so
-      // OPEN_TAB's dedup (findTabAnywhere) never matched across them and
-      // the same conversation could end up open in two tabs at once.
-      // session.id is the actual session UUID either way.
+      // Already attached in a tab under another id (one New Session opened
+      // is keyed by its terminal, not its session): go to that one.
+      const attached = args[0] === "attach" && listTabs(getState().root).find(({ tab }) => tab.type === "terminal" && tab.args?.[0] === "attach" && tab.args[1] === args[1]);
+      if (attached) {
+        activateTab(attached.paneId, attached.tab.id);
+        return attached.tab.terminalId;
+      }
+      // Keyed by session.id, the session's UUID, which a running session and
+      // a past one both have — so opening the same conversation twice
+      // focuses its tab (OPEN_TAB's dedup) rather than making a second.
       openTab(
         { id: `chat:${session.id}`, type: "terminal", label: session.title, icon: "terminal", terminalId, args },
         { paneId: mainPaneId() }
       );
+      return terminalId;
     } finally {
       openingRef.current.delete(session.id);
     }
@@ -1884,6 +1986,10 @@ export function Shell() {
     openInFlow,
     openChangesInLode,
     openSavedCanvas,
+    replyToSession,
+    showChanges,
+    openDiffTab,
+    keepDiffTab,
     // A flow of the folder Files last showed; without one, Files, to pick it.
     newFlow: async () => {
       const folder = await window.clanceApp.filesGetLastFolder();
