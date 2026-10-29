@@ -98,7 +98,7 @@
     "@electron/rebuild": "^4.2.0",
     "@lezer/highlight": "1.2.4",
     "@types/node": "^22.0.0",
-    "electron": "^44.2.0",
+    "electron": "^44.9.1",
     "electron-builder": "^26.15.3",
     "esbuild": "0.28.2",
     "material-icon-theme": "5.38.1",
