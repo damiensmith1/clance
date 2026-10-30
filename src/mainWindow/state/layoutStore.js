@@ -22,7 +22,7 @@ function genId(prefix) {
   return `${prefix}-${Date.now()}-${idCounter}`;
 }
 
-export const HOME_TAB = { id: "chats", type: "chats", label: "Sessions", icon: "chat" };
+export const HOME_TAB = { id: "work", type: "work", label: "Work", icon: "gitBranch" };
 
 function makeLeaf(tabs, activeTabId) {
   return { id: genId("pane"), type: "leaf", tabs, activeTabId };
@@ -255,6 +255,19 @@ function reduce(state, action) {
       return { ...state, root, activePaneId: paneId };
     }
 
+    // A tab swapped for another in the same place: the diff preview tab
+    // showing the next file, or becoming a kept tab. Becomes the active one.
+    case "REPLACE_TAB": {
+      const existing = findTabAnywhere(state.root, action.tabId);
+      if (!existing) return state;
+      const root = updateLeaf(state.root, existing.paneId, (leaf) => ({
+        ...leaf,
+        tabs: leaf.tabs.map((tab) => (tab.id === action.tabId ? action.tab : tab)),
+        activeTabId: action.tab.id,
+      }));
+      return { ...state, root, activePaneId: existing.paneId };
+    }
+
     case "ACTIVATE_TAB": {
       const root = updateLeaf(state.root, action.paneId, (leaf) => ({ ...leaf, activeTabId: action.tabId }));
       return { ...state, root, activePaneId: action.paneId };
@@ -479,11 +492,15 @@ export function dispatch(action, { quiet = false } = {}) {
 // a renderer-only refresh rather than a full app restart — so keep its id
 // stable and let createPtySession's own "already exists" check (main
 // process) sort out whether there's really something to reattach to.
-const KNOWN_TAB_TYPES = new Set(["chats", "changes", "files", "file", "dictation", "settings", "terminal", "flow"]);
+const KNOWN_TAB_TYPES = new Set(["work", "changes", "files", "file", "diff", "dictation", "settings", "terminal", "flow"]);
+
+// The Sessions tab became the Work tab. A layout saved before that gets Work
+// where Sessions was.
+const MERGED_INTO_WORK = new Set(["chats"]);
 
 // Drops anything that doesn't look like a well-formed node, falling back
 // to `initialState()`.
-function rehydrateNode(node) {
+function rehydrateNode(node, seen = new Set()) {
   if (!node || typeof node !== "object") return null;
   if (node.type === "leaf") {
     if (!Array.isArray(node.tabs)) return null;
@@ -491,7 +508,14 @@ function rehydrateNode(node) {
     // longer exists (the Tools page, "skills"); drop it rather than show an
     // empty tab.
     const tabs = node.tabs
+      .map((tab) => (MERGED_INTO_WORK.has(tab?.type) ? { ...HOME_TAB } : tab))
       .filter((tab) => KNOWN_TAB_TYPES.has(tab?.type))
+      .filter((tab) => {
+        if (tab.type !== "work") return true;
+        if (seen.has("work")) return false;
+        seen.add("work");
+        return true;
+      })
       // A first session in an untrusted folder (a plain `claude`, not a
       // background agent) ended with the app; bringing the tab back would
       // start another, empty one.
@@ -500,17 +524,26 @@ function rehydrateNode(node) {
       // A file tab's view state used to be saved as `view`; it's `state.view` now.
       .map(({ view, ...tab }) => (view && !tab.state?.view ? { ...tab, state: { ...tab.state, view } } : tab));
     if (tabs.length === 0) return null;
-    const activeTabId = tabs.some((t) => t.id === node.activeTabId) ? node.activeTabId : tabs[0].id;
+    const wasMerged = node.tabs.some((t) => t?.id === node.activeTabId && MERGED_INTO_WORK.has(t.type));
+    const activeTabId = wasMerged && tabs.some((t) => t.id === "work") ? "work" : tabs.some((t) => t.id === node.activeTabId) ? node.activeTabId : tabs[0].id;
     return { ...node, tabs, activeTabId };
   }
   if (node.type === "split" && Array.isArray(node.children) && node.children.length >= 2) {
-    const children = node.children.map(rehydrateNode);
+    const children = node.children.map((child) => rehydrateNode(child, seen));
     // A pane emptied by dropping removed tab types collapses into its
     // sibling instead of discarding the whole layout.
     const kept = children.filter((c) => c !== null);
     if (kept.length === 0) return null;
     if (kept.length === 1) return kept[0];
-    return { ...node, children };
+    if (kept.length === children.length) return { ...node, children };
+    // The panes left share the dropped one's room, in their old proportions.
+    const sizes = Array.isArray(node.sizes) ? node.sizes.filter((_, i) => children[i] !== null) : [];
+    const total = sizes.reduce((sum, size) => sum + size, 0);
+    return {
+      ...node,
+      children: kept,
+      sizes: sizes.length === kept.length && total > 0 ? sizes.map((size) => (size / total) * 100) : kept.map(() => 100 / kept.length),
+    };
   }
   return null;
 }
@@ -532,6 +565,10 @@ export async function hydrateFromDisk() {
 
 export function openTab(tab, { paneId, reuseTabs = true } = {}) {
   dispatch({ type: "OPEN_TAB", tab, paneId, reuseTabs });
+}
+
+export function replaceTab(tabId, tab) {
+  dispatch({ type: "REPLACE_TAB", tabId, tab });
 }
 
 export function activateTab(paneId, tabId) {

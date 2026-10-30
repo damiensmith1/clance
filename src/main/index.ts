@@ -63,7 +63,6 @@ import { createCanvas, deleteCanvas, exportCanvas, listCanvases, readCanvas, sav
 import { claimLodeSession, discardLeftoverLodeSessions, isLodeSpareId, releaseAllLodeSessions, releaseLodeSession, warmLodeSession } from "./lodePool";
 import {
   getStatus as getGitStatus,
-  getFileDiff,
   listFiles,
   listCommits,
   listBranches,
@@ -79,7 +78,18 @@ import {
   listRepos,
   watchRepo,
   isDirectory,
+  rangeFiles,
+  rangeCommits,
+  addWorktree,
+  removeWorktree,
+  switchBranch,
+  deleteBranch,
+  mergeIntoBase,
+  revertCommit,
+  commitAll,
+  rangeFileVersions,
 } from "./git";
+import { workSnapshot, prewarmWork, sessionDetail, subscribeWork, unsubscribeWork, invalidateRepo, setShownAgentTest } from "./work";
 import { createEntry, renameEntry, moveEntry, duplicateEntry, trashEntry, copyIn } from "./fileOps";
 import { listFolders, resolveFolder, listDirectory, resolveFile, folderRepo, watchFolder } from "./files";
 import { readWindowLayout, writeWindowLayout } from "./windowLayout";
@@ -222,6 +232,11 @@ app.whenReady().then(async () => {
   if (process.env.CLANCE_FORCE_MAIN_WINDOW) openMainWindow();
   // Anything opened from Finder or `clance` while launching.
   flushOpenedPaths();
+
+  // The Work tab's first snapshot reads every repository the user works in,
+  // which takes seconds cold. Built a moment after launch, off the critical
+  // path, so the tab is ready by the time anyone opens it.
+  setTimeout(prewarmWork, 3000);
 });
 
 // Only reopens the main window for a "no windows at all" activation — a
@@ -470,8 +485,8 @@ ipcMain.handle("agents:spawn-new", async (_event, claudeArgs: string[], cwd?: st
 // Guards against shelling out `claude stop` with no real id (seen live:
 // the renderer invoked this with `undefined`, which the CLI happily
 // stringifies into "No job matching 'undefined'" rather than failing
-// cleanly) — belt-and-suspenders alongside ChatsSection.js's own
-// same-shaped guard, since this handler has no other caller to trust.
+// cleanly) — so the handler checks for itself rather than trusting its
+// callers.
 ipcMain.handle("agents:stop", (_event, id: string) => (id ? stopAgent(id) : undefined));
 
 // Filters out pool spares (see agentPool.ts) — they're real running
@@ -489,12 +504,16 @@ ipcMain.handle("agents:stop", (_event, id: string) => (id ? stopAgent(id) : unde
 // out-of-sync with what's actually running) was invisible to both checks
 // at once; the name check has no such gap, and isPoolSpareId stays as the
 // more specific, unambiguous signal for the common case.
+async function isShownAgent(agent: { id: string; name?: string; sessionId: string }): Promise<boolean> {
+  if (isPoolSpareId(agent.id) || isLodeSpareId(agent.id)) return false;
+  return !(isPopupSessionName(agent.name) && !(await hasRealUserMessage(agent.sessionId)));
+}
+
 ipcMain.handle("agents:list", async (_event, opts: { all?: boolean }) => {
   const agents = await listAgents(opts);
   const kept = await Promise.all(
     agents.map(async (agent) => {
-      if (isPoolSpareId(agent.id) || isLodeSpareId(agent.id)) return null;
-      if (isPopupSessionName(agent.name) && !(await hasRealUserMessage(agent.sessionId))) return null;
+      if (!(await isShownAgent(agent))) return null;
       // A running session's row is titled by the same rule as everywhere
       // else (chatHistory.ts's sessionTitle), so a `/rename` shows within a
       // poll. Only running ones: `--all` lists every stopped agent too.
@@ -512,7 +531,6 @@ ipcMain.handle("agents:list", async (_event, opts: { all?: boolean }) => {
 
 ipcMain.handle("git:status", (_event, dir: unknown) => getGitStatus(dir));
 
-ipcMain.handle("git:file-diff", (_event, dir: unknown, path: unknown) => getFileDiff(dir, path));
 
 
 ipcMain.handle("git:list-files", (_event, dir: unknown) => listFiles(dir));
@@ -574,6 +592,51 @@ ipcMain.handle("git:set-last-repo", async (_event, dir: unknown) => {
   if (root) setLastGitRepo(root);
   return root;
 });
+
+// ---- the Work tab (see docs/design.md's "Work") ----------------------------
+//
+// Reads go through work.ts and git.ts, which re-derive every repository,
+// checkout, branch and commit from git itself, as the Changes handlers do.
+// After an action the repository is marked changed, so the next snapshot
+// reads it again whether or not its watcher has caught up.
+
+setShownAgentTest(isShownAgent);
+
+ipcMain.handle("work:snapshot", () => workSnapshot());
+
+ipcMain.handle("work:subscribe", (event) => subscribeWork(event.sender));
+
+ipcMain.handle("work:unsubscribe", (event) => unsubscribeWork(event.sender));
+
+ipcMain.handle("work:files", (_event, dir: unknown, range: unknown) => rangeFiles(dir, range));
+
+ipcMain.handle("work:commits", (_event, dir: unknown, from: unknown, to: unknown, limit?: unknown) =>
+  rangeCommits(dir, from, to, typeof limit === "number" ? limit : 50)
+);
+
+ipcMain.handle("work:session", (_event, sessionId: unknown) => sessionDetail(sessionId));
+
+ipcMain.handle("work:file-versions", (_event, dir: unknown, range: unknown, path: unknown) => rangeFileVersions(dir, range, path));
+
+function workAction<A extends unknown[], R>(fn: (dir: unknown, ...args: A) => Promise<R>) {
+  return async (_event: unknown, dir: unknown, ...args: A): Promise<R> => {
+    const result = await fn(dir, ...args);
+    await invalidateRepo(dir);
+    return result;
+  };
+}
+
+ipcMain.handle("work:add-worktree", workAction((dir, branch: unknown) => addWorktree(dir, branch)));
+ipcMain.handle("work:remove-worktree", workAction((dir, path: unknown) => removeWorktree(dir, path)));
+ipcMain.handle("work:switch", workAction((dir, branch: unknown) => switchBranch(dir, branch)));
+ipcMain.handle("work:delete-branch", workAction((dir, branch: unknown) => deleteBranch(dir, branch)));
+ipcMain.handle("work:merge", workAction((dir, branch: unknown) => mergeIntoBase(dir, branch)));
+ipcMain.handle("work:revert", workAction((dir, sha: unknown) => revertCommit(dir, sha)));
+ipcMain.handle("work:commit-all", workAction((dir, message: unknown) => commitAll(dir, message)));
+ipcMain.handle("work:push", workAction((dir) => gitPush(dir)));
+ipcMain.handle("work:pull", workAction((dir) => gitPull(dir)));
+ipcMain.handle("work:fetch", workAction((dir) => gitFetch(dir)));
+ipcMain.handle("work:discard", workAction((dir, paths: unknown) => discardFiles(dir, paths)));
 
 // ---- files explorer --------------------------------------------------------
 // The same candidate folders the repo switcher offers, without the repository

@@ -4008,6 +4008,255 @@
         color: var(--text-tertiary);
       }
 
+
+      /* ---- Work (sections/WorkSection.js) ----
+         The Sessions table with two more columns, where and changes. Group
+         and repository labels sit in the table as rows of their own, mono and
+         quiet, so a long list still reads as one table. */
+      .work-row {
+        grid-template-columns: 16px minmax(0, 1fr) 160px 104px 92px 44px 60px;
+      }
+      .work-changes {
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        text-align: right;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .work-label {
+        display: flex;
+        align-items: flex-end;
+        gap: var(--space-2);
+        height: 34px;
+        box-sizing: border-box;
+        padding: 0 var(--space-2) var(--space-1);
+        border-bottom: 1px solid var(--surface-border);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .work-label-attention {
+        color: var(--warning);
+      }
+      .work-label-detail {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .work-label-count {
+        margin-left: auto;
+      }
+      .work-label-action {
+        margin-left: auto;
+        height: 22px;
+        font-size: var(--text-xs);
+        visibility: hidden;
+      }
+      .work-label:hover .work-label-action {
+        visibility: visible;
+      }
+
+      /* A diff tab opened by a single click is reused for the next file
+         until it's kept, the way an editor's preview tab is. */
+      .tab-preview .tab-label {
+        font-style: italic;
+      }
+      .diff-range {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      /* ---- Changes: the parts that came with Work ---- */
+      .changes-where {
+        flex-shrink: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .changes-repo-static {
+        cursor: default;
+      }
+      .changes-repo-static:hover {
+        background: transparent;
+      }
+      .changes-sessions {
+        display: flex;
+        flex-direction: column;
+        flex-shrink: 0;
+        padding: 0 var(--space-2) var(--space-1) var(--space-3);
+      }
+      .changes-session {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        min-height: 26px;
+      }
+      .changes-session-title {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+      .changes-session-state {
+        flex-shrink: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .changes-session-state-attention {
+        color: var(--warning);
+      }
+      .changes-reply {
+        padding: 0 0 var(--space-2);
+      }
+      .changes-reply .text-field {
+        padding: var(--space-1) var(--space-2);
+        font-size: var(--text-sm);
+      }
+      .changes-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 2px var(--space-1);
+        flex-shrink: 0;
+        padding: 0 var(--space-2) var(--space-2) var(--space-3);
+      }
+      .changes-actions-note {
+        margin-right: var(--space-1);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .changes-confirm {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        flex-shrink: 0;
+        padding: var(--space-2) var(--space-3);
+        background: var(--warning-bg);
+        font-size: var(--text-sm);
+      }
+      .changes-confirm-title {
+        font-weight: var(--weight-medium);
+        color: var(--text-primary);
+      }
+      .changes-check {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+      }
+      .changes-check-ok {
+        color: var(--success);
+      }
+      .changes-check-warn {
+        color: var(--warning);
+      }
+      .changes-confirm-body {
+        line-height: 1.5;
+        color: var(--text-secondary);
+      }
+      .changes-confirm-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: var(--space-1);
+      }
+      .changes-scope {
+        padding: 2px;
+        border-radius: var(--radius-md);
+      }
+      .changes-scope .segmented-item {
+        height: 20px;
+        padding: 0 var(--space-2);
+        border-radius: var(--radius-sm);
+        font-size: var(--text-xs);
+      }
+      .changes-commit-back {
+        height: 22px;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+      }
+      .changes-group {
+        padding: var(--space-2) var(--space-3) var(--space-1);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .change-row-range {
+        cursor: pointer;
+      }
+      /* Commits are picked now, so a row is a button. */
+      button.commit-row {
+        width: 100%;
+        border: none;
+        background: transparent;
+        text-align: left;
+        cursor: pointer;
+        font-family: var(--font-sans);
+      }
+      button.commit-row:hover {
+        background: var(--surface-hover);
+      }
+      .commit-row-on,
+      .commit-row-on:hover {
+        background: var(--surface-bg);
+      }
+
+      /* Both header menus span the whole bar, not just the repository
+         button's share of it, so a long branch name has room. */
+      .changes-bar {
+        position: relative;
+      }
+      .changes-bar .changes-repo {
+        position: static;
+      }
+      .changes-bar .changes-branches,
+      .changes-bar .changes-switcher {
+        left: var(--space-2);
+        right: var(--space-2);
+      }
+      .changes-scope-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        flex-shrink: 0;
+        min-width: 0;
+        padding: 0 var(--space-2) var(--space-2) var(--space-3);
+      }
+      .changes-scope .segmented-item {
+        white-space: nowrap;
+      }
+      .changes-commit-subject {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+      }
+
+      /* A work row's dot is its state, so unlike a session row's it stays
+         when the row is hovered or selected. */
+      .work-indicator {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      /* The commits a branch is made of matter as much as its files, so a
+         long file list scrolls rather than squeezing them out. */
+      .changes-pane .changes-history {
+        min-height: 160px;
+      }
+      .changes-branches .branch-when {
+        width: auto;
+        white-space: nowrap;
+      }
     </style>
     <link rel="stylesheet" href="../shared/vendor/xterm/xterm.css" />
   </head>

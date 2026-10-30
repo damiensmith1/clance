@@ -1,6 +1,6 @@
 import { execFile, spawn } from "child_process";
 import { promisify } from "util";
-import { watch, statSync, readFileSync, realpathSync, FSWatcher } from "fs";
+import { watch, statSync, readFileSync, realpathSync, appendFileSync, mkdirSync, FSWatcher } from "fs";
 import { isAbsolute, join, sep } from "path";
 import { getLoginShellPath } from "./ptyManager";
 
@@ -27,8 +27,6 @@ const execFileAsync = promisify(execFile);
 
 /** Diffs bigger than this are described rather than rendered. */
 const MAX_DIFF_BYTES = 2 * 1024 * 1024;
-/** Lines shown for one file before the view says the rest is hidden. */
-const MAX_DIFF_LINES = 4000;
 /** An untracked file larger than this isn't line-counted for the list. */
 const MAX_UNTRACKED_COUNT_BYTES = 2 * 1024 * 1024;
 /** How long the watcher waits for a burst of writes to settle. */
@@ -65,22 +63,6 @@ export type GitStatus = {
   files: GitFile[];
   /** A merge/rebase/cherry-pick is in progress — commit isn't a plain commit. */
   operation: string | null;
-};
-
-export type DiffLine = {
-  kind: "add" | "del" | "context" | "hunk";
-  text: string;
-  oldLine: number | null;
-  newLine: number | null;
-};
-
-export type FileDiff = {
-  path: string;
-  lines: DiffLine[];
-  binary: boolean;
-  /** Set when the file was too big to render, with the reason to show. */
-  omitted: string | null;
-  truncated: boolean;
 };
 
 async function gitEnv(): Promise<NodeJS.ProcessEnv> {
@@ -250,14 +232,18 @@ function parsePorcelain(raw: string): Omit<GitStatus, "root" | "operation"> {
   return { branch, head, upstream, ahead, behind, files };
 }
 
+type LineCounts = { insertions: number; deletions: number; binary: boolean };
+
 /** `--numstat -z` for one side of the diff, as path → counts. */
-async function numstat(root: string, cached: boolean): Promise<Map<string, { insertions: number; deletions: number; binary: boolean }>> {
-  const counts = new Map<string, { insertions: number; deletions: number; binary: boolean }>();
+async function numstat(root: string, cached: boolean): Promise<Map<string, LineCounts>> {
   const args = ["--no-optional-locks", "diff", "--numstat", "-z"];
   if (cached) args.push("--cached");
   const { stdout, code } = await git(root, args);
-  if (code !== 0) return counts;
+  return code === 0 ? parseNumstat(stdout) : new Map();
+}
 
+function parseNumstat(stdout: string): Map<string, LineCounts> {
+  const counts = new Map<string, LineCounts>();
   // -z output is "ins\tdel\tpath\0", except for a rename, which is
   // "ins\tdel\t\0old\0new\0" — the tab-terminated empty path signals that the
   // two names follow as their own fields.
@@ -300,8 +286,28 @@ function untrackedInsertions(root: string, path: string): { insertions: number; 
   }
 }
 
+/**
+ * The checkout's own git directory. In the repository's main folder that's
+ * `.git`; in a linked worktree `.git` is a file naming a directory under the
+ * main one's `.git/worktrees/`, which is where its HEAD and in-progress
+ * operations live.
+ */
+function gitDirOf(root: string): string {
+  const dotGit = join(root, ".git");
+  try {
+    if (statSync(dotGit).isFile()) {
+      const pointer = readFileSync(dotGit, "utf8").match(/^gitdir:\s*(.+)\s*$/m)?.[1];
+      if (pointer) return isAbsolute(pointer) ? pointer : join(root, pointer);
+    }
+  } catch {
+    // No .git at all: the caller finds nothing there either.
+  }
+  return dotGit;
+}
+
 /** Whether a merge, rebase or cherry-pick is half-finished. */
-function inProgressOperation(root: string): string | null {
+export function inProgressOperation(root: string): string | null {
+  const gitDir = gitDirOf(root);
   const marks: [string, string][] = [
     ["MERGE_HEAD", "merging"],
     ["rebase-merge", "rebasing"],
@@ -312,7 +318,7 @@ function inProgressOperation(root: string): string | null {
   ];
   for (const [file, label] of marks) {
     try {
-      statSync(join(root, ".git", file));
+      statSync(join(gitDir, file));
       return label;
     } catch {
       // Not this one.
@@ -357,117 +363,6 @@ export async function getStatus(dir: unknown): Promise<GitStatus | null> {
 
   parsed.files.sort((a, b) => a.path.localeCompare(b.path));
   return { root, ...parsed, operation: inProgressOperation(root) };
-}
-
-// ---- diffs -----------------------------------------------------------------
-
-function parseUnifiedDiff(patch: string, maxLines = MAX_DIFF_LINES): { lines: DiffLine[]; truncated: boolean } {
-  const lines: DiffLine[] = [];
-  let oldLine = 0;
-  let newLine = 0;
-  let truncated = false;
-  let inHeader = true;
-
-  for (const raw of patch.split("\n")) {
-    if (lines.length >= maxLines) {
-      truncated = true;
-      break;
-    }
-    // A patch ends with a newline, so splitting it leaves one empty field
-    // that is not a line of the file. A real empty context line is " ",
-    // which survives this check and becomes "" only after the slice below.
-    if (raw === "") continue;
-    if (raw.startsWith("@@")) {
-      const match = raw.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      if (match) {
-        oldLine = Number(match[1]);
-        newLine = Number(match[2]);
-      }
-      inHeader = false;
-      lines.push({ kind: "hunk", text: raw, oldLine: null, newLine: null });
-      continue;
-    }
-    // A file header. Everything up to the next hunk belongs to it, and the
-    // pane shows that from the status row instead. Tracked rather than
-    // assumed to be only at the top: a patch can cover more than one file,
-    // and a header parsed as content shows up as garbled context lines.
-    if (raw.startsWith("diff --git ")) {
-      inHeader = true;
-      continue;
-    }
-    if (inHeader) continue;
-    if (raw.startsWith("+")) {
-      lines.push({ kind: "add", text: raw.slice(1), oldLine: null, newLine: newLine++ });
-    } else if (raw.startsWith("-")) {
-      lines.push({ kind: "del", text: raw.slice(1), oldLine: oldLine++, newLine: null });
-    } else if (raw.startsWith("\\")) {
-      // "\ No newline at end of file" — real, but not a line of the file.
-      continue;
-    } else {
-      lines.push({ kind: "context", text: raw.slice(1), oldLine: oldLine++, newLine: newLine++ });
-    }
-  }
-  return { lines, truncated };
-}
-
-/**
- * One file's diff, always HEAD → working tree — "what has changed since the
- * last commit", which is the question the pane exists to answer. Staging is a
- * separate, file-level decision about what the next commit takes, so the view
- * doesn't split into staged and unstaged halves.
- */
-export async function getFileDiff(dir: unknown, path: unknown): Promise<FileDiff | null> {
-  const root = await findRepoRoot(dir);
-  if (!root || typeof path !== "string" || !path) return null;
-
-  // The path must be one git itself is currently reporting — not merely
-  // inside the repo — so this can't be pointed at an arbitrary file.
-  const status = await getStatus(root);
-  const file = status?.files.find((f) => f.path === path);
-  if (!file) return null;
-
-  const empty = { path, binary: false, truncated: false };
-  if (file.binary) return { ...empty, lines: [], omitted: "Binary file", binary: true };
-
-  let run: GitRun;
-  if (file.status === "untracked") {
-    const full = join(root, path);
-    try {
-      if (statSync(full).size > MAX_DIFF_BYTES) {
-        return { ...empty, lines: [], omitted: "File is too large to show" };
-      }
-    } catch {
-      return { ...empty, lines: [], omitted: "File is gone" };
-    }
-    // An untracked file has nothing in HEAD to diff against, so it's compared
-    // with an empty one. This exits 1 by design when they differ.
-    run = await git(root, ["diff", "--no-index", "--", "/dev/null", full]);
-    if (run.code > 1) return { ...empty, lines: [], omitted: run.stderr.trim() || "Could not read the file" };
-  } else {
-    if (file.from && status?.head) {
-      // Rename detection is off once a pathspec limits the diff, so asking
-      // for both names gives a delete and an add rather than one moved file.
-      // Comparing the old blob with the file where it now lives says the
-      // thing a reader wants: what changed in it on the way.
-      run = await git(root, ["--no-optional-locks", "diff", `HEAD:${file.from}`, "--", path]);
-    } else {
-      const against = status?.head ? ["HEAD"] : [];
-      run = await git(root, ["--no-optional-locks", "diff", ...against, "--", path]);
-    }
-    if (run.code !== 0) {
-      const reason = run.stderr.includes("maxBuffer") ? "Diff is too large to show" : run.stderr.trim();
-      return { ...empty, lines: [], omitted: reason || "Could not read the diff" };
-    }
-  }
-
-  if (run.stdout.length > MAX_DIFF_BYTES) {
-    return { ...empty, lines: [], omitted: "Diff is too large to show" };
-  }
-  const { lines, truncated } = parseUnifiedDiff(run.stdout);
-  if (lines.length === 0) {
-    return { ...empty, lines: [], omitted: "No textual changes" };
-  }
-  return { path, lines, binary: false, omitted: null, truncated };
 }
 
 // ---- actions ---------------------------------------------------------------
@@ -594,7 +489,8 @@ export async function fetch(dir: unknown): Promise<GitActionResult> {
 // Paths inside .git that mean the repo actually moved. Everything else in
 // there is churn — lock files, loose objects, packs — and a commit writes
 // hundreds of them.
-const GIT_DIR_SIGNALS = /^(HEAD|ORIG_HEAD|MERGE_HEAD|CHERRY_PICK_HEAD|REVERT_HEAD|index|refs[\\/])/;
+const GIT_DIR_SIGNALS =
+  /^(HEAD|ORIG_HEAD|MERGE_HEAD|CHERRY_PICK_HEAD|REVERT_HEAD|index|packed-refs|refs[\\/]|worktrees[\\/][^\\/]+[\\/](HEAD|index)$)/;
 
 function isNoise(relPath: string): boolean {
   if (!relPath) return false;
@@ -1024,4 +920,525 @@ export async function knownToHistory(root: string, path: string): Promise<boolea
     64 * 1024
   );
   return run.code === 0 && run.stdout.trim().length > 0;
+}
+
+// ---- worktrees, branches and ranges (the Work tab; see docs/design.md's "Work") ----
+
+export type Worktree = {
+  path: string;
+  /** Full sha, or null before the first commit. */
+  head: string | null;
+  /** null when detached. */
+  branch: string | null;
+  /** The repository's own folder, as opposed to a linked worktree. */
+  main: boolean;
+  locked: boolean;
+};
+
+/**
+ * Every checkout of the repository: its own folder first, then each linked
+ * worktree. `--porcelain -z` records are fields separated by NUL and ended by
+ * an empty one. A worktree whose folder has gone (prunable) or a bare entry
+ * isn't a checkout anyone can look at, so neither is listed.
+ */
+export async function listWorktrees(root: string): Promise<Worktree[]> {
+  const run = await git(root, ["--no-optional-locks", "worktree", "list", "--porcelain", "-z"]);
+  if (run.code !== 0) return [];
+  const trees: (Worktree & { skip: boolean })[] = [];
+  let current: (Worktree & { skip: boolean }) | null = null;
+  for (const field of run.stdout.split("\0")) {
+    if (field === "") {
+      if (current) trees.push(current);
+      current = null;
+    } else if (field.startsWith("worktree ")) {
+      current = { path: field.slice("worktree ".length), head: null, branch: null, main: trees.length === 0, locked: false, skip: false };
+    } else if (!current) {
+      continue;
+    } else if (field.startsWith("HEAD ")) {
+      const sha = field.slice("HEAD ".length);
+      current.head = /^0+$/.test(sha) ? null : sha;
+    } else if (field.startsWith("branch ")) {
+      current.branch = field.slice("branch ".length).replace(/^refs\/heads\//, "");
+    } else if (field.startsWith("locked")) {
+      current.locked = true;
+    } else if (field === "bare" || field.startsWith("prunable")) {
+      current.skip = true;
+    }
+  }
+  if (current) trees.push(current);
+  return trees.filter((tree) => !tree.skip && isDirectory(tree.path)).map(({ skip: _skip, ...tree }) => tree);
+}
+
+/**
+ * The branch work is measured against: the one origin/HEAD names, else main,
+ * else master, else whatever the repository's folder has checked out.
+ */
+export async function baseBranch(root: string): Promise<string | null> {
+  const remote = await git(root, ["--no-optional-locks", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], 64 * 1024);
+  const fromRemote = remote.code === 0 ? remote.stdout.trim().replace(/^origin\//, "") : "";
+  for (const name of [fromRemote, "main", "master"].filter(Boolean)) {
+    const run = await git(root, ["--no-optional-locks", "rev-parse", "--verify", "--quiet", `refs/heads/${name}`], 64 * 1024);
+    if (run.code === 0) return name;
+  }
+  const head = await git(root, ["--no-optional-locks", "symbolic-ref", "--quiet", "--short", "HEAD"], 64 * 1024);
+  return head.code === 0 ? head.stdout.trim() || null : null;
+}
+
+export type BranchState = {
+  name: string;
+  /** Short sha of the tip. */
+  sha: string;
+  subject: string;
+  /** ISO 8601 of the tip's commit. */
+  date: string;
+  upstream: string | null;
+  /** It had an upstream that's been deleted — usually after a merge. */
+  upstreamGone: boolean;
+  /** Commits here and not on the upstream, and the other way round. */
+  unpushed: number;
+  unpulled: number;
+  /** Against the base branch: commits only here, and commits it's missing. 0 for the base itself. */
+  ahead: number;
+  behind: number;
+  isBase: boolean;
+};
+
+/** Branches compared against the base, newest first; past this a repo has a search problem. */
+const MAX_COMPARED_BRANCHES = 40;
+
+/**
+ * Local branches with where each stands: against its upstream (what
+ * `%(upstream:track)` says) and against the base branch (one `rev-list
+ * --left-right --count` each, so capped). A branch with nothing ahead of the
+ * base is merged into it: every commit on it is already there.
+ */
+export async function listBranchStates(root: string, base: string | null): Promise<BranchState[]> {
+  const run = await git(root, [
+    "--no-optional-locks",
+    "for-each-ref",
+    "refs/heads",
+    "--sort=-committerdate",
+    `--count=${MAX_COMPARED_BRANCHES}`,
+    "--format=%(refname:short)%1f%(objectname:short)%1f%(upstream:short)%1f%(upstream:track)%1f%(committerdate:iso8601-strict)%1f%(contents:subject)",
+  ]);
+  if (run.code !== 0) return [];
+  const branches = run.stdout
+    .split("\n")
+    .filter(Boolean)
+    .map((line): BranchState => {
+      const [name = "", sha = "", upstream = "", track = "", date = "", subject = ""] = line.split("\x1f");
+      return {
+        name,
+        sha,
+        subject,
+        date,
+        upstream: upstream || null,
+        upstreamGone: track.includes("gone"),
+        unpushed: Number(track.match(/ahead (\d+)/)?.[1] ?? 0),
+        unpulled: Number(track.match(/behind (\d+)/)?.[1] ?? 0),
+        ahead: 0,
+        behind: 0,
+        isBase: name === base,
+      };
+    })
+    .filter((branch) => branch.name);
+
+  if (base) {
+    await Promise.all(
+      branches
+        .filter((branch) => !branch.isBase)
+        .map(async (branch) => {
+          const counts = await git(root, [
+            "--no-optional-locks",
+            "rev-list",
+            "--left-right",
+            "--count",
+            `refs/heads/${base}...refs/heads/${branch.name}`,
+          ], 64 * 1024);
+          const [behind, ahead] = counts.stdout.trim().split(/\s+/).map(Number);
+          branch.behind = behind || 0;
+          branch.ahead = ahead || 0;
+        })
+    );
+  }
+  return branches;
+}
+
+/**
+ * A commit named by the renderer, as its full sha — or null if it isn't one.
+ * `--end-of-options` and the leading-dash check keep a "revision" from being
+ * read as an option; `^{commit}` keeps it from being a tree or a blob.
+ */
+async function verifyCommit(root: string, rev: unknown): Promise<string | null> {
+  if (typeof rev !== "string" || !rev || rev.startsWith("-") || rev.length > 200) return null;
+  const run = await git(root, ["--no-optional-locks", "rev-parse", "--verify", "--quiet", "--end-of-options", `${rev}^{commit}`], 64 * 1024);
+  return run.code === 0 ? run.stdout.trim() || null : null;
+}
+
+export async function mergeBase(root: string, a: string, b: string): Promise<string | null> {
+  const run = await git(root, ["--no-optional-locks", "merge-base", "--end-of-options", a, b], 64 * 1024);
+  return run.code === 0 ? run.stdout.trim() || null : null;
+}
+
+/** The empty tree's id, the "before" of a repository's first commit. Asked for, since it differs between sha-1 and sha-256 repos. */
+async function emptyTree(root: string): Promise<string | null> {
+  const run = await git(root, ["hash-object", "-t", "tree", "/dev/null"], 64 * 1024);
+  return run.code === 0 ? run.stdout.trim() || null : null;
+}
+
+/**
+ * What a diff compares. `from` is a commit, or null for nothing at all (a
+ * repository's first commit); `to` is a commit, or null for the checkout's
+ * files as they are now, untracked ones included.
+ */
+export type DiffRange = { from: string | null; to: string | null };
+
+type ResolvedRange = { from: string; to: string | null };
+
+async function resolveRange(root: string, range: unknown): Promise<ResolvedRange | null> {
+  if (!range || typeof range !== "object") return null;
+  const { from, to } = range as { from?: unknown; to?: unknown };
+  const fromSha = from === null ? await emptyTree(root) : await verifyCommit(root, from);
+  if (!fromSha) return null;
+  if (to === null || to === undefined) return { from: fromSha, to: null };
+  const toSha = await verifyCommit(root, to);
+  return toSha ? { from: fromSha, to: toSha } : null;
+}
+
+export type RangeFile = {
+  path: string;
+  /** The old name, for a rename. */
+  from: string | null;
+  status: "added" | "modified" | "deleted" | "renamed" | "untracked";
+  insertions: number;
+  deletions: number;
+  binary: boolean;
+};
+
+function rangeStatus(code: string): RangeFile["status"] {
+  if (code.startsWith("A")) return "added";
+  if (code.startsWith("D")) return "deleted";
+  if (code.startsWith("R") || code.startsWith("C")) return "renamed";
+  return "modified";
+}
+
+async function filesInRange(root: string, range: ResolvedRange): Promise<RangeFile[]> {
+  const revs = range.to ? [range.from, range.to] : [range.from];
+  const [names, counts, untracked] = await Promise.all([
+    git(root, ["--no-optional-locks", "diff", "-M", "--name-status", "-z", "--end-of-options", ...revs]),
+    git(root, ["--no-optional-locks", "diff", "-M", "--numstat", "-z", "--end-of-options", ...revs]),
+    range.to
+      ? Promise.resolve(null)
+      : git(root, ["--no-optional-locks", "ls-files", "--others", "--exclude-standard", "-z"]),
+  ]);
+  if (names.code !== 0) return [];
+  const lines = parseNumstat(counts.stdout);
+  const files: RangeFile[] = [];
+  const fields = names.stdout.split("\0");
+  for (let i = 0; i < fields.length; ) {
+    const code = fields[i];
+    if (!code) {
+      i += 1;
+      continue;
+    }
+    const moved = code.startsWith("R") || code.startsWith("C");
+    const from = moved ? fields[i + 1] ?? null : null;
+    const path = moved ? fields[i + 2] ?? "" : fields[i + 1] ?? "";
+    i += moved ? 3 : 2;
+    if (!path) continue;
+    const count = lines.get(path);
+    files.push({
+      path,
+      from,
+      status: rangeStatus(code),
+      insertions: count?.insertions ?? 0,
+      deletions: count?.deletions ?? 0,
+      binary: count?.binary ?? false,
+    });
+  }
+  // A path ending in "/" is a folder git won't look inside because it holds
+  // a repository of its own — typically a worktree under .claude/worktrees,
+  // which is a checkout, not a change.
+  const newFiles = untracked?.code === 0 ? untracked.stdout.split("\0").filter((p) => p && !p.endsWith("/")) : [];
+  for (const path of newFiles) {
+    const { insertions, binary } = untrackedInsertions(root, path);
+    files.push({ path, from: null, status: "untracked", insertions, deletions: 0, binary });
+  }
+  return files.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/** The files a range changes, with line counts. Null when `dir` isn't a repository or the range doesn't resolve. */
+export async function rangeFiles(dir: unknown, range: unknown): Promise<RangeFile[] | null> {
+  const root = await findRepoRoot(dir);
+  if (!root) return null;
+  const resolved = await resolveRange(root, range);
+  return resolved ? filesInRange(root, resolved) : null;
+}
+
+export type RangeCommit = {
+  sha: string;
+  short: string;
+  subject: string;
+  /** ISO 8601. */
+  date: string;
+  author: string;
+  /** The first parent, which a commit's own diff is taken against; null for a first commit. */
+  parent: string | null;
+};
+
+/**
+ * Commits in `to` and not in `from` (`from..to`), newest first, or the last
+ * few of `to` when `from` is null.
+ */
+export async function rangeCommits(dir: unknown, from: unknown, to: unknown, limit = 50): Promise<RangeCommit[]> {
+  const root = await findRepoRoot(dir);
+  if (!root) return [];
+  const toSha = await verifyCommit(root, to);
+  if (!toSha) return [];
+  const fromSha = from === null || from === undefined ? null : await verifyCommit(root, from);
+  if (from && !fromSha) return [];
+  const count = Number.isInteger(limit) && limit > 0 && limit <= 200 ? limit : 50;
+  const run = await git(root, [
+    "--no-optional-locks",
+    "log",
+    `-n${count}`,
+    "-z",
+    "--format=%H%x1f%h%x1f%s%x1f%aI%x1f%an%x1f%P",
+    "--end-of-options",
+    fromSha ? `${fromSha}..${toSha}` : toSha,
+  ]);
+  if (run.code !== 0) return [];
+  return run.stdout
+    .split("\0")
+    .filter(Boolean)
+    .map((record) => {
+      const [sha = "", short = "", subject = "", date = "", author = "", parents = ""] = record.split("\x1f");
+      return { sha, short, subject, date, author, parent: parents.split(" ").filter(Boolean)[0] ?? null };
+    })
+    .filter((commit) => commit.sha);
+}
+
+// ---- actions on branches and worktrees ----------------------------------------
+//
+// Each one re-derives everything it acts on from git itself: the checkout
+// from findRepoRoot, a branch from the repository's own list, a worktree from
+// `worktree list`. None of them forces anything — a worktree with changes in
+// it isn't removed, an unmerged branch isn't deleted, a checkout with changes
+// isn't switched — so the worst a click can do is be refused, with git's own
+// reason.
+
+async function localBranchNames(root: string): Promise<Set<string>> {
+  const run = await git(root, ["--no-optional-locks", "for-each-ref", "refs/heads", "--format=%(refname:short)"]);
+  return new Set(run.code === 0 ? run.stdout.split("\n").filter(Boolean) : []);
+}
+
+async function knownBranch(root: string, branch: unknown): Promise<string | null> {
+  if (typeof branch !== "string" || !branch || branch.startsWith("-")) return null;
+  return (await localBranchNames(root)).has(branch) ? branch : null;
+}
+
+/**
+ * No uncommitted changes and nothing half-finished. Untracked files are
+ * listed one by one (`-uall`) so a worktree nested inside the checkout — a
+ * folder holding a repository of its own, reported as "dir/" — can be told
+ * apart from real new files; collapsed, both read as one untracked folder.
+ */
+async function isClean(root: string): Promise<boolean> {
+  if (inProgressOperation(root)) return false;
+  const run = await git(root, ["--no-optional-locks", "status", "--porcelain", "-z", "--untracked-files=all"]);
+  if (run.code !== 0) return false;
+  return run.stdout.split("\0").every((entry) => !entry || (entry.startsWith("?? ") && entry.endsWith("/")));
+}
+
+/** Linked worktrees that sit inside `root`, relative to it — folders a commit there must never take. */
+async function nestedWorktrees(root: string): Promise<string[]> {
+  return (await listWorktrees(root))
+    .filter((tree) => tree.path !== root && tree.path.startsWith(root + sep))
+    .map((tree) => tree.path.slice(root.length + 1));
+}
+
+/**
+ * Keeps `.claude/worktrees/` out of the repository's untracked files, in its
+ * own `info/exclude` (never a committed .gitignore). Without it, every
+ * worktree there shows as an untracked folder in the main checkout, and
+ * `git add -A` there would commit it as an embedded repository.
+ */
+async function excludeWorktreeFolder(root: string): Promise<void> {
+  const run = await git(root, ["rev-parse", "--git-common-dir"], 64 * 1024);
+  if (run.code !== 0) return;
+  const common = run.stdout.trim();
+  const exclude = join(isAbsolute(common) ? common : join(root, common), "info", "exclude");
+  try {
+    const current = (() => {
+      try {
+        return readFileSync(exclude, "utf8");
+      } catch {
+        return "";
+      }
+    })();
+    if (current.split("\n").some((line) => line.trim() === "/.claude/worktrees/")) return;
+    mkdirSync(join(exclude, ".."), { recursive: true });
+    appendFileSync(exclude, `${current && !current.endsWith("\n") ? "\n" : ""}/.claude/worktrees/\n`);
+  } catch {
+    // Not fatal: the worktree works either way; commits still skip it.
+  }
+}
+
+/**
+ * Checks `branch` out in a new worktree, under the repository's
+ * `.claude/worktrees/` — where Claude Code puts its own — so looking at a
+ * branch never moves the folder a session is working in.
+ */
+export async function addWorktree(dir: unknown, branch: unknown): Promise<GitActionResult & { path: string | null }> {
+  const root = await findRepoRoot(dir);
+  if (!root) return { ok: false, error: "Not a git repository", path: null };
+  const trees = await listWorktrees(root);
+  const home = trees.find((tree) => tree.main)?.path ?? root;
+  const name = await knownBranch(home, branch);
+  if (!name) return { ok: false, error: "No such branch", path: null };
+  const already = trees.find((tree) => tree.branch === name);
+  if (already) return { ok: true, error: null, path: already.path };
+  const folder = name.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[.-]+/, "") || "branch";
+  let path = join(home, ".claude", "worktrees", folder);
+  for (let n = 2; isDirectory(path); n++) path = join(home, ".claude", "worktrees", `${folder}-${n}`);
+  await excludeWorktreeFolder(home);
+  const run = await git(home, ["worktree", "add", "--", path, name]);
+  return run.code === 0 ? { ok: true, error: null, path } : { ...failed(run, "Could not add the worktree"), path: null };
+}
+
+/** Removes a linked worktree. Never the repository's own folder, and never one with changes in it (no --force). */
+export async function removeWorktree(dir: unknown, path: unknown): Promise<GitActionResult> {
+  const root = await findRepoRoot(dir);
+  if (!root) return { ok: false, error: "Not a git repository" };
+  const target = (await listWorktrees(root)).find((tree) => tree.path === path);
+  if (!target) return { ok: false, error: "No such worktree" };
+  if (target.main) return { ok: false, error: "That's the repository's own folder" };
+  const run = await git(root, ["worktree", "remove", "--", target.path]);
+  return run.code === 0 ? { ok: true, error: null } : failed(run, "Could not remove the worktree");
+}
+
+/** `git switch` in a checkout, refused while it has uncommitted changes rather than carrying them across. */
+export async function switchBranch(dir: unknown, branch: unknown): Promise<GitActionResult> {
+  const root = await findRepoRoot(dir);
+  if (!root) return { ok: false, error: "Not a git repository" };
+  const name = await knownBranch(root, branch);
+  if (!name) return { ok: false, error: "No such branch" };
+  if (!(await isClean(root))) return { ok: false, error: "This checkout has uncommitted changes. Commit or discard them first." };
+  const run = await git(root, ["switch", name]);
+  return run.code === 0 ? { ok: true, error: null } : failed(run, "Could not switch branches");
+}
+
+/** `git branch -d`: refuses a branch that isn't merged, and one checked out anywhere. */
+export async function deleteBranch(dir: unknown, branch: unknown): Promise<GitActionResult> {
+  const root = await findRepoRoot(dir);
+  if (!root) return { ok: false, error: "Not a git repository" };
+  const name = await knownBranch(root, branch);
+  if (!name) return { ok: false, error: "No such branch" };
+  if ((await listWorktrees(root)).some((tree) => tree.branch === name)) {
+    return { ok: false, error: "That branch is checked out. Remove its worktree first." };
+  }
+  const run = await git(root, ["branch", "-d", name]);
+  return run.code === 0 ? { ok: true, error: null } : failed(run, "Could not delete the branch");
+}
+
+/**
+ * Merges `branch` into the base branch, in whichever checkout has the base
+ * checked out, which must be clean. A merge that stops on conflicts is
+ * aborted and reported: resolving them is a session's job, not a button's.
+ */
+export async function mergeIntoBase(dir: unknown, branch: unknown): Promise<GitActionResult> {
+  const root = await findRepoRoot(dir);
+  if (!root) return { ok: false, error: "Not a git repository" };
+  const base = await baseBranch(root);
+  const name = await knownBranch(root, branch);
+  if (!base || !name || name === base) return { ok: false, error: "Nothing to merge" };
+  const target = (await listWorktrees(root)).find((tree) => tree.branch === base);
+  if (!target) return { ok: false, error: `${base} isn't checked out anywhere to merge into` };
+  if (!(await isClean(target.path))) return { ok: false, error: `${base}'s checkout has uncommitted changes` };
+  const run = await git(target.path, ["merge", "--no-ff", "--no-edit", name]);
+  if (run.code === 0) return { ok: true, error: null };
+  await git(target.path, ["merge", "--abort"]);
+  return failed(run, "The merge stopped, and was undone");
+}
+
+/** `git revert` of one commit in a clean checkout; aborted again if it conflicts. */
+export async function revertCommit(dir: unknown, sha: unknown): Promise<GitActionResult> {
+  const root = await findRepoRoot(dir);
+  if (!root) return { ok: false, error: "Not a git repository" };
+  const commitSha = await verifyCommit(root, sha);
+  if (!commitSha) return { ok: false, error: "No such commit" };
+  if (!(await isClean(root))) return { ok: false, error: "This checkout has uncommitted changes. Commit or discard them first." };
+  const run = await git(root, ["revert", "--no-edit", commitSha]);
+  if (run.code === 0) return { ok: true, error: null };
+  await git(root, ["revert", "--abort"]);
+  return failed(run, "The revert stopped, and was undone");
+}
+
+/** Everything in the checkout, staged and committed in one go — what an agent's finished work usually wants. */
+export async function commitAll(dir: unknown, message: unknown): Promise<GitActionResult> {
+  const root = await findRepoRoot(dir);
+  if (!root) return { ok: false, error: "Not a git repository" };
+  if (typeof message !== "string" || !message.trim()) return { ok: false, error: "A commit needs a message" };
+  const skip = (await nestedWorktrees(root)).map((rel) => `:(exclude,literal)${rel}`);
+  const add = await git(root, ["add", "-A", "--", ".", ...skip]);
+  if (add.code !== 0) return failed(add, "Could not stage the changes");
+  const run = await git(root, ["commit", "-m", message.trim()]);
+  return run.code === 0 ? { ok: true, error: null } : failed(run, "Could not commit");
+}
+
+/** Text larger than this isn't shown in a diff tab. */
+const MAX_VERSION_BYTES = 4 * 1024 * 1024;
+
+export type FileVersions = {
+  path: string;
+  /** The old name, for a rename. */
+  from: string | null;
+  status: RangeFile["status"];
+  /** The file before and after the range; "" where it didn't exist. Null when it can't be shown. */
+  before: string | null;
+  after: string | null;
+  /** Why it isn't shown, when it isn't. */
+  omitted: string | null;
+  insertions: number;
+  deletions: number;
+};
+
+async function blobText(root: string, rev: string, path: string): Promise<string | null> {
+  const run = await git(root, ["--no-optional-locks", "show", `${rev}:${path}`], MAX_VERSION_BYTES);
+  return run.code === 0 ? run.stdout : null;
+}
+
+/**
+ * Both sides of one file across a range, for a diff tab to lay out itself.
+ * The path must be one the range itself reports, so this can't be aimed at
+ * any other file.
+ */
+export async function rangeFileVersions(dir: unknown, range: unknown, path: unknown): Promise<FileVersions | null> {
+  const root = await findRepoRoot(dir);
+  if (!root || typeof path !== "string" || !path) return null;
+  const resolved = await resolveRange(root, range);
+  if (!resolved) return null;
+  const file = (await filesInRange(root, resolved)).find((candidate) => candidate.path === path);
+  if (!file) return null;
+  const base = { path, from: file.from, status: file.status, insertions: file.insertions, deletions: file.deletions };
+  if (file.binary) return { ...base, before: null, after: null, omitted: "Binary file" };
+
+  const beforePath = file.from ?? path;
+  const before = file.status === "added" || file.status === "untracked" ? "" : await blobText(root, resolved.from, beforePath);
+  let after: string | null;
+  if (file.status === "deleted") after = "";
+  else if (resolved.to) after = await blobText(root, resolved.to, path);
+  else {
+    const full = join(root, path);
+    try {
+      if (statSync(full).size > MAX_VERSION_BYTES) return { ...base, before: null, after: null, omitted: "File is too large to show" };
+      const buffer = readFileSync(full);
+      if (looksBinary(buffer)) return { ...base, before: null, after: null, omitted: "Binary file" };
+      after = buffer.toString("utf8");
+    } catch {
+      after = "";
+    }
+  }
+  if (before === null || after === null) return { ...base, before: null, after: null, omitted: "Too large to show, or unreadable" };
+  return { ...base, before, after, omitted: null };
 }

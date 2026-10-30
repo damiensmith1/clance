@@ -108,104 +108,102 @@ Sessions Clance starts get these tools when Accessibility is granted:
   it isn't brought back on relaunch. Sessions in the folder after that are
   background agents as usual. Clance never accepts the prompt on anyone's
   behalf.
-- The Sessions tab lists, in one searchable table with project, state and
-  last-updated columns:
-  - every running background agent on the machine first, marked when it's
-    working or waiting on the user, with a Stop action (it stays resumable);
-  - then every Claude Code transcript on the machine, from any project,
-    newest first.
+- Every session is reachable from the Work tab (see Work): running ones as
+  part of the work they're doing, past ones in its History, newest first —
+  every Claude Code transcript on the machine, from any project.
 - Opening a session attaches to it if it's running, or resumes it in its own
-  recorded working directory.
+  recorded working directory. Opening one already open in a tab goes to that
+  tab.
 - Sessions a program started (a plugin's commit reviews, an SDK script) are
-  hidden from the list and the widget, and viewable under an Automated filter.
-- The table can be filtered (all, running, closed, archived, automated) and driven from
-  the keyboard: ⌘K (from anywhere in the main window) to search, which also
-  offers a new session in the default,
-  a recent or a chosen folder; arrows to select; ↩ to open; ⌥↩ to open in the
-  widget; Space to peek; ⌘⌫ to archive or stop; ⌘N for a new session.
-- Right-clicking a session offers peeking at it, opening it in a tab or the
-  widget, resuming it in Terminal, copying its folder path, revealing the
-  folder in Finder, pin or unpin, and archive, stop or restore.
-- Sessions can be pinned, from that menu or a pin at the head of the row.
-  Pinned ones sit above every other session whatever their date or state, and
-  don't appear again among the rest. They are still subject to the filter and
-  the search — pinning changes where a session sits, not whether it shows.
-- A session can be peeked at without opening it — Space or the row menu shows
+  hidden from History and the widget, and viewable under an Automated filter.
+- A past session can be resumed in a tab, the widget or Terminal, peeked at,
+  pinned (pinned ones sit above the rest, still subject to the search and
+  filter) and archived or restored.
+- A session can be peeked at without opening it — Space or the menu shows
   what was said, read straight from the transcript: messages in full, tool
   calls as one line each, their output behind a toggle. It opens at the end
   of the conversation, is scrollable from the keyboard, and on a session too
-  long to show whole it keeps the most recent messages. A peek never changes a session, and stays responsive
-  on transcripts of any size.
-- Sessions can be archived (with Undo) and restored. Clance never deletes a transcript
-  that has user messages — the list includes other projects' Claude Code
-  history.
+  long to show whole it keeps the most recent messages. A peek never changes
+  a session, and stays responsive on transcripts of any size.
+- Clance never deletes a transcript that has user messages — History
+  includes other projects' Claude Code history.
 - New sessions open in a default directory set in Settings (`~/.clance` if
-  unset). "New session" and "Open in…" can choose another; recent choices are
+  unset). "New session here" in Work and "Open in…" can choose another; recent choices are
   remembered.
 - Any session started in Clance can be resumed with `claude --resume` in a
   terminal, and vice versa.
 
-## Changes
+## Work
 
-- A Changes pane shows what has changed in a git repository since its last
-  commit — which, while a session is writing code, is what Claude has just
-  done. It is a monitor, not a reader: files are read in file tabs.
-- It opens beside the work rather than over it — in a pane of its own on the
-  right, a quarter of the window wide, when the window has room for one. It
-  keeps whatever width it is given afterwards.
-- One repository at a time, chosen from a switcher that offers the default
-  session directory, the repositories it has been pointed at before
-  (including ones chosen with "Choose folder…"), recently used directories,
-  wherever the running agents are working, and any other folder. It reopens
-  on the repository it was last pointed at.
-- Moving the pane, splitting it, or switching away from its tab and back
-  never makes it start over: it redraws at once as it was — the files, the
-  history, the open row, a half-written commit message, where the list was
-  scrolled — and refreshes quietly underneath.
-- The header gives the repository and its branch, marks when a session is
-  working there, and carries Fetch, with Pull and Push only when there is
-  something to pull or push. A merge, rebase or cherry-pick in progress is
-  named. A detached HEAD is named as such rather than shown as a bare commit
-  id, so it can't be mistaken for a branch.
-- The branch opens a read-only list of the repository's branches, most
-  recently committed to first: which one is checked out, how far each is
-  ahead of or behind its upstream, which have no upstream, and when each was
-  last committed to. Clicking one copies its name. Nothing there checks a
-  branch out — switching is done in a terminal or by a session.
-- Each changed file gives its path, what happened to it (added, modified,
-  deleted, renamed, untracked, conflicted) and its line counts, with the
-  repository's totals above them. Clicking one opens it as a file tab; a
-  chevron expands a short diff in place, for when a glance is all that's
-  wanted.
-- The list updates by itself as files change on disk, so a session working in
-  the repository is watched rather than polled by hand.
-- Files that changed while the user was looking elsewhere are marked, and the
-  count of them can be cleared in one action. Opening or peeking at a file
-  clears its own mark. The first listing after opening a repository is the
-  baseline and marks nothing.
-- Files are staged and unstaged individually or all at once, and a commit
-  takes exactly what is staged. Staging is per file; there is no hunk-level
-  staging.
-- A commit needs a message, and can be followed straight away by a push. ⌘↩
-  in the message box commits. A push from a branch with no upstream sets one.
-  A pull is fast-forward only.
-- A file's uncommitted changes can be discarded, behind a confirmation. This
-  is the only destructive action, and for an untracked file it deletes the
-  file.
-- Under the commit box, recent commits — subject, how long ago, short hash —
-  so a commit can be seen to land and the pane still says something when the
-  working tree is clean. As many are shown as fit the space between the
-  commit box and the remote button, re-measured when the pane is resized;
-  the strip never scrolls, and disappears entirely when there is no room for
-  even one. A repository with no commits yet says so.
-- If the repository has a remote that can be browsed, a button opens it in
-  the default browser. A repository with no remote, or one that isn't a web
-  address, doesn't show the button.
-- Every git failure is reported in git's own words rather than as a generic
-  error, and nothing is reported as done that didn't happen.
-- Not included: a commit graph, browsing history beyond what that strip
-  shows, branch switching, merges, rebases, stashes and anything that
-  rewrites history. Those stay in a terminal or in the session next door.
+- One tab, the home tab, shows every change the user's sessions are making,
+  in every repository, branch and worktree they work in, and every session,
+  running or past. A narrow Changes pane beside it shows whatever is picked,
+  and a file's diff opens in a tab. All three look and behave like the rest
+  of the app: one-line rows, the Sessions page's search and keyboard, the
+  Changes pane's bar and lists.
+- **In flight** lists what needs a look now, grouped by what the user has to
+  do: needs you (a session waiting on the user or failed), ready to review,
+  working, open with nothing changed, branches with no session, and merged,
+  ready to clean up. Work with nothing to do isn't listed there.
+- Every running session is listed in In flight under its own name, with the
+  checkout where most of its changes are, and is found by searching for that
+  name.
+- **Repos** lists every repository with every checkout (its folder and its
+  worktrees) and local branch: where each is checked out, how far ahead of
+  and behind the base branch it is, and its state. A repository can be
+  fetched from its row.
+- **Past sessions**, **Archived** and **Automated** are the session history,
+  searchable, with pinning, archiving (with Undo) and restoring.
+- Repositories are found without configuration: wherever sessions run or
+  have edited files, the folders sessions were started in, and the
+  repositories Clance has been pointed at.
+- Picking a row shows it in the Changes pane, opening the pane if it isn't
+  open, without taking the keyboard away from the list. ↩ opens its session.
+  The selection only moves when the user moves it.
+- The Changes pane shows a checkout, a branch checked out nowhere, or a past
+  session. Its branch menu lists every checkout and branch of the repository,
+  and picking one shows it there without moving anything on disk.
+- For a checkout it shows what's uncommitted (staged per file, with a commit
+  box), and when its branch has commits of its own, everything the branch
+  changed against the base, or for the base branch what isn't pushed. For a
+  branch, everything it changed against the base. For a past session, the
+  files it edited, per checkout, and the commits it made.
+- Under the files, the commits the work is made of (not on the base, or not
+  pushed), else the recent ones. Picking one shows that commit's files.
+- Clicking a file opens its diff across what's shown — uncommitted, the
+  branch, or a commit — in a read-only tab, reused for the next file until
+  it's kept (double-click, or Keep open). The tab can open the file itself to
+  edit it, and follows the disk when it shows the working tree.
+- The sessions working in a checkout are shown with it, and can be opened or
+  replied to: the reply is typed into the session's prompt and sent. A
+  running session can also be stopped, peeked at, or opened in the widget.
+- A session's changes are attributed to it by where it runs and which files
+  it edited, read from its transcript, never by listening inside it. What
+  changed always comes from git, so it's right however files were edited.
+- Actions, each refused with git's own reason rather than forced:
+  - open a branch as a worktree, under the repository's `.claude/worktrees/`,
+    without moving any checkout;
+  - check a branch out in the repository's folder, refused while that folder
+    has changes and warned when a session is working there;
+  - merge a branch into the base, in the base's clean checkout, undone if it
+    conflicts;
+  - clean up a merged worktree (remove it and delete its branch) when nothing
+    there could be lost, and delete a merged branch;
+  - stage, commit (with an optional push), push (publishing a new branch),
+    pull (fast-forward only), fetch, revert a commit, and discard a file's
+    uncommitted changes;
+  - open a terminal or a new session in a checkout, open its changes in
+    lode, and open the repository's web remote.
+- Anything that removes or rewrites asks first, in the pane, saying what will
+  happen and what was checked.
+- Opening the tab never waits on git after the first few seconds of a
+  launch, and nothing on screen blinks when it refreshes: lists keep what
+  they show until the next one is read, and an unchanged refresh changes
+  nothing.
+- Every git failure is reported in git's own words, and nothing is reported
+  as done that didn't happen.
+- Not included: hunk staging, rebases, stashes, and anything that rewrites
+  history. Those stay in a terminal or in a session.
 
 ## Files
 
@@ -476,7 +474,7 @@ Sessions Clance starts get these tools when Accessibility is granted:
   changes asks to save them first, like a file. A lode tab shows a red dot while it has
   unsaved changes: a saved canvas changed since, or one never saved that
   has cards (moving around the canvas isn't a change).
-- The Changes panel opens every uncommitted change in a repository as a
+- The Changes pane opens every uncommitted change in a checkout as a
   lode tab of the changed functions, with the changes marked.
 - Reading a project never freezes the window, and a canvas comes back as it
   was after switching tabs, ⇧⌘T or a relaunch.
@@ -520,7 +518,7 @@ Sessions Clance starts get these tools when Accessibility is granted:
   called `index.ts` are otherwise the same tab twice.
 - Right-clicking a tab offers Close Tab, Close Other Tabs, Close Tabs to the
   Left / Right and Close All (all within that tab's pane), and Move to Pane
-  for each other pane. Closing every tab of the only pane leaves the Sessions
+  for each other pane. Closing every tab of the only pane leaves the Work
   tab. A session tab adds Close and Stop Session, Open in Floating Window and
   Copy Session ID; a file tab adds Copy Path, Copy Relative Path and Reveal in
   Finder. Splitting stays a drag, not a menu item.

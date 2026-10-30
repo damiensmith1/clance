@@ -72,6 +72,8 @@ export type AgentSession = {
   // existed (or at a since-changed default) can be sitting on the wrong
   // one forever, and attaching to it can't fix that.
   cwd?: string;
+  /** When the process started, in ms. */
+  startedAt?: number;
 };
 
 // Unscoped by cwd on purpose (no `--cwd`) — a live session is a live
