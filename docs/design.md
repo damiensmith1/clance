@@ -1008,9 +1008,14 @@ views:
   Sessions page had it — pinned first, archive with Undo, resume, the widget,
   Resume in Terminal.
 
-A row is titled by its session when the session works only there (one
-editing two checkouts would otherwise be two rows with one name), else by its
-branch, or for a repository's own folder by the repository. Clicking a row
+In In flight, every running session is a row of its own, by name — the
+name the user knows it by, and what they look for. It sits at the checkout
+holding most of its changes (`clance ⎇ work-tab +1` for one that has edited
+two), and the checkouts it works in aren't listed again: they're reached
+through it, and through the Changes pane's branch menu. The other rows are
+checkouts and branches no session is on, titled by branch, or for a
+repository's own folder by the repository. Search matches a row's sessions'
+names as well as its repository and branch. Clicking a row
 shows it in the Changes pane, opening the pane on the right if it isn't open
 and keeping the Work tab the active pane so the arrows keep moving through
 the list; ↩ or a double-click opens its session. The selection only moves

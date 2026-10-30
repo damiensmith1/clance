@@ -145,6 +145,9 @@ Sessions Clance starts get these tools when Accessibility is granted:
   do: needs you (a session waiting on the user or failed), ready to review,
   working, open with nothing changed, branches with no session, and merged,
   ready to clean up. Work with nothing to do isn't listed there.
+- Every running session is listed in In flight under its own name, with the
+  checkout where most of its changes are, and is found by searching for that
+  name.
 - **Repos** lists every repository with every checkout (its folder and its
   worktrees) and local branch: where each is checked out, how far ahead of
   and behind the base branch it is, and its state. A repository can be

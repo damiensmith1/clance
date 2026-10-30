@@ -151,6 +151,37 @@ function describe(item, sessions, view) {
   return { title, where, state, tone, changes, when, live, lead };
 }
 
+/**
+ * A running session's row in In flight: called by its name, placed at the
+ * checkout where most of its changes are (with "+n" for the others it has
+ * edited), so a session is found by the name it goes by.
+ */
+function describeSession(session, primary) {
+  const t = primary?.total;
+  return {
+    title: session.title,
+    where: primary
+      ? `${primary.repo} ⎇ ${primary.branch ?? "detached"}${session.checkouts.length > 1 ? ` +${session.checkouts.length - 1}` : ""}`
+      : tildePath(session.cwd) || "no folder",
+    state: sessionWord(session.state),
+    tone: sessionTone(session.state),
+    changes: t && t.files ? `+${t.insertions} −${t.deletions}` : "",
+    when: session.startedAt,
+    live: session.state === "working" || session.state === "needs" || session.state === "failed",
+    lead: session,
+  };
+}
+
+/** How much a checkout has changed: where a session's row points first. */
+function weight(item) {
+  return (item.uncommitted?.files ?? 0) * 1000 + (item.total?.files ?? 0);
+}
+
+function hasChanges(item) {
+  const b = item.branchState;
+  return Boolean(item.uncommitted?.files || (b && (b.isBase ? b.unpushed : b.ahead)));
+}
+
 // Enough placeholder rows to fill the window (rows are 42px tall), so the
 // loading table reaches the bottom like a real list does.
 const SKELETON_WIDTHS = [320, 250, 380, 210, 290];
@@ -329,10 +360,38 @@ export function WorkSection({ onOpenSession, onNewSession, onShowChanges, onOpen
         const sessions = sessionsOf(item);
         return { key: item.id, kind: "item", item, sessions, d: describe(item, sessions, view) };
       };
-      const matches = (row) => !q || [row.d.title, row.d.where, row.item.repo, row.item.branch].some((text) => text?.toLowerCase().includes(q));
+      const matches = (row) =>
+        !q || [row.d.title, row.d.where, row.item.repo, row.item.branch, ...row.sessions.map((s) => s.title)].some((text) => text?.toLowerCase().includes(q));
       if (view === "flight") {
+        // Running sessions are rows of their own, by name; a checkout one of
+        // them is working in is reached through it (and the Changes pane's
+        // branch menu) rather than listed again. What's left are checkouts
+        // and branches no session is on.
+        const byId = new Map(items.map((item) => [item.id, item]));
+        const covered = new Set();
+        const byGroup = new Map(GROUPS.map((group) => [group.id, []]));
+        for (const session of snapshot?.sessions ?? []) {
+          const touched = session.checkouts.map((path) => byId.get(`co:${path}`)).filter(Boolean);
+          const primary = [...touched].sort((a, b) => weight(b) - weight(a))[0] ?? null;
+          for (const item of touched) covered.add(item.id);
+          const group =
+            session.state === "needs" || session.state === "failed"
+              ? "needs"
+              : session.state === "working"
+                ? "working"
+                : touched.some(hasChanges)
+                  ? "review"
+                  : "open";
+          const item = primary ?? byId.get(`s:${session.sessionId}`) ?? { id: `s:${session.sessionId}`, kind: "conversation", sessionIds: [session.sessionId] };
+          byGroup.get(group).push({ key: `live:${session.sessionId}`, kind: "item", item, sessions: [session], d: describeSession(session, primary) });
+        }
+        for (const item of items) {
+          if (item.kind === "conversation" || covered.has(item.id)) continue;
+          const group = item.sessionIds.length ? (hasChanges(item) ? "review" : null) : item.group;
+          if (group && byGroup.has(group)) byGroup.get(group).push(toRow(item));
+        }
         for (const group of GROUPS) {
-          const groupRows = items.filter((item) => item.group === group.id).map(toRow).filter(matches);
+          const groupRows = byGroup.get(group.id).filter(matches);
           if (!groupRows.length) continue;
           out.push({ key: `group:${group.id}`, kind: "label", label: group.label, tone: group.tone, count: groupRows.length });
           out.push(...groupRows);
@@ -622,14 +681,14 @@ export function WorkSection({ onOpenSession, onNewSession, onShowChanges, onOpen
 
   // The row the Changes pane is showing reads as selected, even after a
   // relaunch or when the pane was pointed elsewhere and back.
+  // A checkout a session is working in is listed as that session's row.
+  const shownId = !focus ? null : focus.kind === "checkout" ? `co:${focus.dir}` : focus.kind === "branch" ? `br:${focus.root}:${focus.branch}` : null;
   const shownKey = !focus
     ? null
-    : focus.kind === "checkout"
-      ? `co:${focus.dir}`
-      : focus.kind === "branch"
-        ? `br:${focus.root}:${focus.branch}`
-        : selectable.find((row) => sessionIdOf(row) === focus.sessionId)?.key ?? null;
-  const activeKey = shownKey && selectable.some((row) => row.key === shownKey) ? shownKey : selectedKey;
+    : shownId
+      ? (selectable.find((row) => row.key === shownId) ?? selectable.find((row) => row.item?.id === shownId))?.key ?? null
+      : selectable.find((row) => sessionIdOf(row) === focus.sessionId)?.key ?? null;
+  const activeKey = selectable.some((row) => row.key === selectedKey) && selectable.find((row) => row.key === selectedKey)?.item?.id === shownId ? selectedKey : shownKey ?? selectedKey;
 
   const viewLabel = VIEWS.find((v) => v.id === view)?.label ?? "In flight";
   const nothingAtAll = !loading && view === "sessions" && (history ?? []).length === 0 && !(snapshot?.sessions ?? []).length;
