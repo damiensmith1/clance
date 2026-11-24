@@ -82,6 +82,9 @@ export type DictationConfig = {
   // input. Stored with its name as well as its id: the HUD matches by id, then
   // by name, since an id can change when a Bluetooth device is re-paired.
   inputDevice: { id: string; label: string } | null;
+  // The release of the bundled engine already run once on this Mac, so its
+  // shaders are compiled (see whisperModels.ts's warmNewEngine).
+  warmedEngine?: string;
 };
 
 const CONFIG_PATH = join(SESSION_CWD, "config.json");

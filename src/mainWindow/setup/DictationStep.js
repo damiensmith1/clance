@@ -301,15 +301,14 @@ export function DictationStep({ onComplete, onBack, onReady } = {}) {
   const { models, recommendation, binaryAvailable } = data;
   const anyInstalled = models.some((m) => m.installed);
 
-  // Written for someone who installed Clance from the command line, not a
-  // developer running a dev build — it previously said "In a dev build, …".
+  // The engine ships inside Clance.app, so missing means a damaged install.
   // "Check again" re-resolves the binary, which isn't cached until it's
-  // found, so installing it and pressing the button is enough.
+  // found, so reinstalling and pressing the button is enough.
   const engineCard = !binaryAvailable
     ? html`
         <${StatusCard}
           title="Speech engine"
-          description="Dictation runs on whisper.cpp. Install it with brew install whisper.cpp, then check again."
+          description="Clance's speech engine is missing from the app. Reinstall it with brew reinstall --cask clance, then check again."
           status="not installed"
           tone="attention"
           actionLabel="Check again"

@@ -18,6 +18,7 @@ import {
   modelPath,
   recommendModel,
   resolveWhisperBinary,
+  warmNewEngine,
 } from "./whisperModels";
 
 const AUDIO_DIR = join(SESSION_CWD, "dictation");
@@ -72,6 +73,9 @@ export function warmDictation(): void {
   // thread count at transcription time.
   void resolveWhisperBinary();
   void detectMachine();
+  // An upgrade that brought a new engine compiles its shaders now, not on
+  // the next dictation.
+  void warmNewEngine();
 }
 
 /**
@@ -116,7 +120,7 @@ export async function checkAvailability(): Promise<DictationAvailability> {
     return {
       ready: false,
       reason: "no-binary",
-      message: "Speech engine not found — install it with: brew install whisper.cpp",
+      message: "Speech engine not found — reinstall Clance: brew reinstall --cask clance",
     };
   }
   if (!dictation.activeModel || !isModelInstalled(dictation.activeModel)) {

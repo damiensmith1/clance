@@ -12,8 +12,9 @@ What Clance does. Why is in `background.md`; how is in `design.md`.
 - macOS 13 (Ventura) or later, Apple Silicon only.
 - Requires the Claude Code CLI, installed separately and signed in. Clance
   never handles Claude credentials; sign-in goes through `claude auth login`.
-- Distributed as a Homebrew cask (`brew install --cask damiensmith1/tap/clance`),
-  which also installs `whisper.cpp` for dictation.
+- Distributed as a Homebrew cask (`brew install --cask damiensmith1/tap/clance`)
+  that downloads only the app: the dictation engine ships inside it, so
+  installing never builds anything, on any supported macOS.
 - Not notarized. Releases are signed with a stable self-signed certificate
   so macOS keeps permission grants across upgrades.
 - Lives in the menu bar and the Dock. Closing every window leaves it running;

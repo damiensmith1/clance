@@ -109,8 +109,8 @@ work in Clance unchanged.
 brew install --cask damiensmith1/tap/clance
 ```
 
-This also installs `whisper.cpp` for dictation. To upgrade later, run
-`brew upgrade --cask clance`. Settings → Check for Updates tells you when a
+It downloads only the app; the dictation engine is built in. To upgrade
+later, run `brew upgrade --cask clance`. Settings → Check for Updates tells you when a
 new release is out.
 
 Clance isn't notarized by Apple. Releases are signed with the project's own
@@ -207,7 +207,9 @@ npm run dev:packaged                # build, install to /Applications, relaunch
 ```
 
 Without the certificate, builds are signed ad hoc and macOS forgets their
-permissions on every rebuild. Dictation also needs `brew install whisper.cpp`.
+permissions on every rebuild. Packaging builds the bundled dictation engine
+from source, which needs `brew install cmake`; `npm run dev` doesn't, and uses
+a Homebrew `whisper-cli` for dictation if there is one.
 
 There's no test suite yet; `npm run build` type-checks the main process.
 

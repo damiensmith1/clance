@@ -1,10 +1,12 @@
 import { execFile } from "child_process";
+import { app } from "electron";
 import { createHash } from "crypto";
 import {
   createReadStream,
   createWriteStream,
   existsSync,
   mkdirSync,
+  readFileSync,
   renameSync,
   rmSync,
   statSync,
@@ -16,6 +18,7 @@ import { join } from "path";
 import { promisify } from "util";
 import { SESSION_CWD } from "./paths";
 import { getLoginShellPath } from "./ptyManager";
+import { readConfig, writeConfig } from "./config";
 
 const execFileAsync = promisify(execFile);
 
@@ -225,18 +228,50 @@ export async function recommendModel(): Promise<Recommendation> {
 let cachedBinary: string | undefined;
 
 /**
- * The `whisper-cli` binary, provided by Homebrew's `whisper.cpp`.
+ * The `whisper-cli` that ships inside Clance.app, built by
+ * scripts/build-whisper.mjs, with the whisper.cpp version it was built from.
+ * In a dev build (`electron .`) the same script's output in the repo stands
+ * in for it, when it has been built. Null when neither is there.
+ */
+export function bundledEngine(): { binary: string; version: string } | null {
+  const dirs = [
+    join(process.resourcesPath ?? "", "whisper"),
+    join(__dirname, "..", "..", "native", "whisper", "build"),
+  ];
+  for (const dir of dirs) {
+    const binary = join(dir, "whisper-cli");
+    if (!existsSync(binary)) continue;
+    let version = "unknown";
+    try {
+      version = readFileSync(join(dir, "version"), "utf8").trim();
+    } catch {
+      // A binary without its stamp still runs.
+    }
+    return { binary, version };
+  }
+  return null;
+}
+
+/**
+ * The `whisper-cli` binary: the one bundled in the app, else a Homebrew
+ * `whisper.cpp` (a dev build that hasn't run scripts/build-whisper.mjs).
  *
- * Not bundled into the app. Clance is distributed from the command line, so
- * the engine is a Homebrew dependency rather than a static binary built
- * with cmake and shipped inside the bundle (decided 2026-09-16 — see
- * docs/design.md's "Dictation"). Returns undefined when it isn't installed, so callers
- * can surface that instead of a spawn error.
+ * Bundled since installing Clance stopped depending on Homebrew's
+ * whisper.cpp, which Homebrew only publishes prebuilt for recent macOS
+ * releases and otherwise compiles, with its dependencies, for hours — see
+ * docs/design.md's "Dictation" → "Engine". Returns undefined when there's
+ * none, so callers can surface that instead of a spawn error.
  */
 export async function resolveWhisperBinary(): Promise<string | undefined> {
   if (cachedBinary) return cachedBinary;
 
-  // Standard Homebrew locations first. Found here, there's no need to wait
+  const bundled = bundledEngine();
+  if (bundled) {
+    cachedBinary = bundled.binary;
+    return cachedBinary;
+  }
+
+  // Standard Homebrew locations next. Found here, there's no need to wait
   // on the login-shell PATH below — which runs an interactive shell and can
   // take many seconds on a first launch — just to locate a binary that lives
   // somewhere entirely predictable.
@@ -474,11 +509,47 @@ export async function warmUpModel(modelId: string): Promise<void> {
     await execFileAsync(binary, ["-m", modelPath(modelId), "-f", silence, "-nt", "-np", "-t", "2"], {
       timeout: 120_000,
     });
+    // Remembered, so a launch doesn't warm the same engine again.
+    const engine = bundledEngine();
+    if (engine && engine.binary === binary) {
+      const config = readConfig();
+      config.dictation.warmedEngine = engineKey(engine);
+      writeConfig(config);
+    }
   } catch {
     // Best effort, by design.
   } finally {
     rmSync(silence, { force: true });
   }
+}
+
+/** How long after launch a new engine is warmed, out of the way of startup. */
+const ENGINE_WARM_DELAY_MS = 30_000;
+
+/**
+ * Which copy of the engine was warmed: the app's version as well as
+ * whisper.cpp's, since every Clance release ships its own copy of the binary,
+ * and a new binary pays the first-run costs again even when it's the same
+ * whisper.cpp.
+ */
+function engineKey(engine: { version: string }): string {
+  return `${app.getVersion()} ${engine.version}`;
+}
+
+/**
+ * Warms the bundled engine once per release, for someone whose model was
+ * installed before it. A new binary's first run compiles its Metal shaders
+ * (macOS caches them afterwards) and goes through macOS's first-launch
+ * checks: measured at 5–9 s on an M2 under load, against ~1 s after. Without
+ * this, that lands on the first dictation after an upgrade. A model
+ * installed with this release was already warmed by its install.
+ */
+export async function warmNewEngine(): Promise<void> {
+  const engine = bundledEngine();
+  const { activeModel, warmedEngine } = readConfig().dictation;
+  if (!engine || !activeModel || !isModelInstalled(activeModel) || warmedEngine === engineKey(engine)) return;
+  await new Promise((resolve) => setTimeout(resolve, ENGINE_WARM_DELAY_MS));
+  await warmUpModel(activeModel);
 }
 
 /**

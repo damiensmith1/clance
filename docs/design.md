@@ -50,7 +50,7 @@ anything open-ended is handed to a Claude Code session. See "Assistant".
 | Keyboard/mouse/window access | `@nut-tree-fork/nut-js` | Needs Accessibility |
 | Screenshots | Electron `desktopCapturer` | Needs Screen Recording |
 | Local tools transport | `@modelcontextprotocol/sdk`, Streamable HTTP | See "Local tools server" |
-| Speech-to-text | Homebrew `whisper.cpp` (`whisper-cli`), ggml models, Metal | Spawned per utterance |
+| Speech-to-text | `whisper-cli` from whisper.cpp, built into the app; ggml models, Metal | Spawned per utterance |
 | Dictation history | `node:sqlite` + FTS5 | Built into Electron's Node — no second native addon to rebuild |
 | Git | The `git` binary, via `execFile` | See "Work" |
 | Syntax highlighting | Hand-rolled (`src/shared/syntax.js`) | See "Syntax highlighting" |
@@ -2194,10 +2194,45 @@ frontmost, and refocusing would move the text somewhere else.
 
 ### Engine
 
-Homebrew's `whisper.cpp` is a cask dependency, not bundled.
-`resolveWhisperBinary` checks Homebrew's prefixes, then the login-shell
-`PATH`. Bundling needed a static build before every release and a second
-signed binary.
+`whisper-cli` ships inside the app, at `Contents/Resources/whisper/`, with
+whisper.cpp's licence and a stamp of the build. `resolveWhisperBinary` uses
+that copy, then (for a dev build) `native/whisper/build/`, then Homebrew's
+prefixes and the login-shell `PATH`.
+
+It used to be the cask's `depends_on formula: "whisper.cpp"`. Homebrew only
+publishes prebuilt whisper.cpp for recent macOS releases (Sequoia and later
+when this changed), and pulls in `llama.cpp`, `ggml`, OpenSSL and SDL with
+it; on any other macOS Clance supports, installing compiled all of them from
+source, which took hours, and a managed work Mac couldn't install it at all.
+That outweighed what bundling costs: a build step before each release and a
+second binary to sign.
+
+`scripts/build-whisper.mjs` builds it, from a pinned release whose source is
+checked against the same sha256 as Homebrew's formula, into one
+self-contained arm64 binary (~8 MB):
+
+- ggml linked in statically, and OpenMP off, which would link Homebrew's
+  `libomp`. The script refuses a binary that links anything outside
+  `/usr/lib` and `/System/Library`.
+- The Metal shaders embedded as source (`GGML_METAL_EMBED_LIBRARY`):
+  compiling a `.metallib` needs full Xcode. macOS compiles them on a new
+  binary's first run and caches them.
+- CPU code for every Apple Silicon chip (`armv8.4-a+fp16+dotprod`, not
+  `-march=native`), with a macOS 13.0 floor.
+- No BLAS. The Accelerate routine ggml calls only exists from macOS 13.3, and
+  with Metal doing the work it was no faster: 869–1,065 ms against
+  882–1,170 ms on the same clip, and Homebrew's build 1,382–1,726 ms.
+
+It runs from `npm run package`, `npm run dist` and `release.sh`, needs
+`cmake`, and is skipped when the stamp matches. `npm run build` doesn't run
+it, so the dev loop doesn't need `cmake`.
+
+A new binary's first run costs 5–9 s on an M2 under load (the shader compile
+plus macOS's first-launch checks), against ~1 s after. Every release ships a
+new copy, so it's paid off the critical path: by a model's install (the
+"warming" step), and otherwise 30 s after the first launch of each release
+(`warmNewEngine`, remembered as `dictation.warmedEngine`, the app and engine
+versions).
 
 Alternatives rejected: WhisperKit (Swift/CoreML, its own model format and
 signing; whisper.cpp already clears the latency bar), Apple's Speech framework
@@ -2628,8 +2663,9 @@ copied to `github.com/damiensmith1/homebrew-tap` as `Casks/clance.rb` — not as
 a formula, whose versioned `Cellar` path would change the app's location
 every upgrade.
 
-- `depends_on arch: :arm64`, `macos: :ventura` (Electron's floor) and
-  `formula: "whisper.cpp"`.
+- `depends_on arch: :arm64` and `macos: :ventura` (Electron's floor), and no
+  formulae: the dictation engine is in the app (see "Engine"), so installing
+  downloads one zip and builds nothing.
 - **Quarantine.** Homebrew quarantines every cask download, and an
   unnotarized app would be blocked by Gatekeeper on first launch. The cask
   removes the attribute in `postflight_steps`, so installing from the tap is
@@ -2641,8 +2677,9 @@ every upgrade.
 
 ### Releasing
 
-`sh scripts/release.sh` builds `release/Clance-<version>-arm64.zip`, signed
-with the certificate, and rewrites the cask's `version` and `sha256`. It
+`sh scripts/release.sh` builds `release/Clance-<version>-arm64.zip`, with
+the bundled `whisper-cli` (which needs `cmake`), signed with the certificate,
+and rewrites the cask's `version` and `sha256`. It
 refuses to sign ad hoc unless `CLANCE_SIGN_IDENTITY=-` is set explicitly,
 since that would reset every user's permissions. It stops there and prints
 the two public steps: creating the GitHub release and pushing the cask to the

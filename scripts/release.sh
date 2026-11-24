@@ -49,6 +49,8 @@ HARDENED="false"
 
 rm -f "$ZIP"
 npm run build
+# The speech engine that ships inside the app (needs cmake; see the script).
+node scripts/build-whisper.mjs
 # Zip only: the cask installs from a zip, and skipping the dmg keeps release
 # builds fast. artifactName is pinned so the cask's URL is predictable.
 npx electron-builder --mac zip --arm64 \
